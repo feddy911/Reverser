@@ -1,0 +1,118 @@
+=== STAGE 3: LLM RESTORATION ===
+[1/13] FUN_14001fc00 @ 0x14001fc00 (ghidra 811 chars) ...
+    -> user_code | process_mpz | confidence 95
+[2/13] FUN_14001cd00 @ 0x14001cd00 (ghidra 1596 chars) ...
+    -> user_code | process_steps | confidence 95
+[3/13] FUN_14001ed00 @ 0x14001ed00 (ghidra 3189 chars) ...
+    -> user_code | DisplayResults | confidence 95
+[4/13] FUN_14001ea40 @ 0x14001ea40 (ghidra 2789 chars) ...
+    -> user_code | printNumberDetails | confidence 95
+[5/13] FUN_14001dfe0 @ 0x14001dfe0 (ghidra 1023 chars) ...
+    -> user_code | ConvertGMPToCString | confidence 95
+[6/13] FUN_14001f1c0 @ 0x14001f1c0 (ghidra 3550 chars) ...
+    -> user_code | SaveHistoryToFile | confidence 95
+[7/13] FUN_140018480 @ 0x140018480 (ghidra 485 chars) ...
+    -> user_code | initialize_structure | confidence 95
+[8/13] FUN_140020c50 @ 0x140020c50 (ghidra 2025 chars) ...
+    -> user_code | process_data | confidence 95
+[9/13] FUN_140019370 @ 0x140019370 (ghidra 190 chars) ...
+    -> user_code | clear_mpz_and_thunk | confidence 100
+[10/13] FUN_14001f930 @ 0x14001f930 (ghidra 339 chars) ...
+    -> user_code | SetAndInitialize | confidence 95
+[11/13] FUN_14001d630 @ 0x14001d630 (ghidra 1600 chars) ...
+    -> user_code | find_parameters | confidence 100
+[12/13] FUN_14001f520 @ 0x14001f520 (ghidra 565 chars) ...
+    -> user_code | - | confidence 100
+[13/13] FUN_14001da10 @ 0x14001da10 (ghidra 185 chars) ...
+    -> user_code | - | confidence 100
+OK: restored.cpp: 13 user-функций
+OK: restored_v2.cpp: 13 user-функций
+
+// restored_v2.cpp: auto-assembled (thunk resolution + debug-noise removal)
+#include <cstdio>
+#include <cstring>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <chrono>
+#include <fstream>
+#include <gmp.h>
+
+// ============================================================
+// process_mpz @ 0x14001fc00 (confidence 95)
+// ============================================================
+struct mpz_t {
+    longlong _mp_alloc;
+    longlong _mp_size;
+    longlong *_mp_d;
+    longlong _mp_exp;
+    longlong _mp_d_size;
+    longlong _mp_d_alloc;
+    longlong _mp_d_sign;
+    longlong _mp_d_pad;
+    longlong _mp_d_flags;
+    longlong _mp_d_reserved;
+};
+
+ulonglong process_mpz(mpz_t* param_1) {
+    ulonglong uVar1;
+    undefined8 uVar2;
+    uint local_28;
+
+    uVar1 = __gmpz_cmp_ui(param_1, 1);
+    if ((int)uVar1 == 0) {
+        uVar1 = uVar1 & 0xffffffffffffff00;
+    }
+    else {
+        local_28 = (uint)(*(int *)(param_1 + 4) != 0);
+        if ((local_28 & **(uint **)(param_1 + 8)) == 0) {
+            __gmpz_tdiv_q_2exp(param_1, param_1, 1);
+        }
+        else {
+            __gmpz_mul_ui(param_1, param_1, 3);
+            __gmpz_add_ui(param_1, param_1, 1);
+        }
+        *(longlong *)(param_1 + 0x10) = *(longlong *)(param_1 + 0x10) + 1;
+        uVar2 = 0;
+        if (*(char *)(param_1 + 0x48) != '\0') {
+            uVar2 = thunk_FUN_14001f520(param_1);
+        }
+        uVar1 = CONCAT71((int7)((ulonglong)uVar2 >> 8), 1);
+    }
+    return uVar1;
+}
+
+// ============================================================
+// process_steps @ 0x14001cd00 (confidence 95)
+// ============================================================
+struct mpz_t {
+    // Предполагаемая структура на основе смещений
+    // Добавьте необходимые поля по мере необходимости
+};
+
+void process_steps(mpz_t* param_1) {
+    int iVar1;
+    mpz_t local_50[4];
+    mpz_t local_30[2];
+    unsigned long long local_20;
+
+    thunk_FUN_14001e1b0(local_50);
+    *(mpz_t*)(param_1 + 0x18) = *local_50;
+    while (iVar1 = __gmpz_cmp_ui(param_1), iVar1 != 0) {
+        process_mpz(param_1);
+        if (*(long long*)(param_1 + 0x10) == 10000000) {
+            __gmpz_set(param_1 + 0x50);
+        }
+        if ((*(char*)(param_1 + 0x49) != '\0') && (*(unsigned long long*)(param_1 + 0x10) % 100000 == 0)) {
+            local_20 = *(unsigned long long*)(param_1 + 0x10) / 100000;
+            basic_ostream<char, std::char_traits<char>>* pbVar3 = thunk_FUN_140014360((basic_ostream<char, std::char_traits<char>>*)std::cout, "\rSteps: ");
+            basic_ostream<char, std::char_traits<char>>* pbVar4 = std::basic_ostream<char, std::char_traits<char>>::operator<< (pbVar3, *(__uint64*)(param_1 + 0x10));
+            pbVar3 = thunk_FUN_140014360((basic_ostream<char, std::char_traits<char>>*)pbVar4, " (");
+            pbVar4 = std::basic_ostream<char, std::char_traits<char>>::operator<<(pbVar3, local_20);
+            pbVar3 = thunk_FUN_140014360((basic_ostream<char, std::char_traits<char>>*)pbVar4, "0%)");
+            std::basic_ostream<char, std::char_traits<char>>::operator<<(pbVar3, thunk_FUN_1400170b0);
+        }
+    }
+    thunk_FUN_14001e1b0(local_30);
+    *(mpz_t*)(param_1 + 0x20) = *local_30;
+}

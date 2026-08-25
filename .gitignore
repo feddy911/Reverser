@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Outputs
+output/
+
+# IDE
+.idea/
+.vscode/
+
+# Local binaries
+*.exe
+*.bin
+*.elf
