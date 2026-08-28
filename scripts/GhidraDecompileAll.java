@@ -1,4 +1,4 @@
-// Ghidra headless: full dump (functions + decompile + imports + thunks + strings + callees).
+// Ghidra headless: full dump (functions + decompile + imports + thunks + strings + callees + dlls).
 // Usage: -postScript GhidraDecompileAll.java <output.json>
 // @category Reverser
 import ghidra.app.script.GhidraScript;
@@ -8,6 +8,7 @@ import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
 import ghidra.program.model.listing.Data;
+import ghidra.program.model.symbol.SourceType;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
@@ -39,25 +40,34 @@ public class GhidraDecompileAll extends GhidraScript {
             Function func = funcs.next();
             total++;
             String name = func.getName();
-            // адрес считаем ОДИН раз и ДО проверок — никаких повторных объявлений
             long funcAddr = func.getEntryPoint().getOffset();
 
-            // внешние функции -> imports
             if (func.isExternal()) {
                 importEntries.add(escapeJson(name));
                 continue;
             }
 
-            // thunk'и -> отдельная секция с разрешённой целью
             if (func.isThunk()) {
                 Function target = func.getThunkedFunction(true);
-                String t = (target != null && !target.isExternal())
-                        ? "\"0x" + Long.toHexString(target.getEntryPoint().getOffset()) + "\""
-                        : "null";
+                String t = "null";
+                if (target != null && !target.isExternal()) {
+                    t = "\"0x" + Long.toHexString(target.getEntryPoint().getOffset()) + "\"";
+                }
                 thunkEntries.add("  {\"address\": \"0x" + Long.toHexString(funcAddr) + "\", " +
                         "\"name\": " + escapeJson(name) + ", " +
                         "\"target\": " + t + "}");
                 continue;
+            }
+
+            boolean libMatched = false;
+            try {
+                String cmt = func.getComment();
+                libMatched = (cmt != null && cmt.contains("Library Function"));
+                if (!libMatched) {
+                    libMatched = (func.getSymbol().getSource() == SourceType.ANALYSIS);
+                }
+            } catch (Exception e) {
+                // ignore
             }
 
             long size;
@@ -69,11 +79,21 @@ public class GhidraDecompileAll extends GhidraScript {
 
             List<String> calleeAddrs = new ArrayList<>();
             List<String> calleeExts = new ArrayList<>();
+            List<String> calleeDlls = new ArrayList<>();
             try {
                 Set<Function> called = func.getCalledFunctions(monitor);
                 for (Function c : called) {
                     if (c.isExternal()) {
                         calleeExts.add(escapeJson(c.getName()));
+                        String dll = "";
+                        try {
+                            if (c.getParentNamespace() != null) {
+                                dll = c.getParentNamespace().getName();
+                            }
+                        } catch (Exception e) {
+                            // ignore
+                        }
+                        calleeDlls.add(escapeJson(dll));
                     } else {
                         calleeAddrs.add("\"0x" + Long.toHexString(c.getEntryPoint().getOffset()) + "\"");
                     }
@@ -102,6 +122,8 @@ public class GhidraDecompileAll extends GhidraScript {
                 "\"size\": " + size + ", " +
                 "\"callees\": [" + String.join(",", calleeAddrs) + "], " +
                 "\"ext_calls\": [" + String.join(",", calleeExts) + "], " +
+                "\"ext_dlls\": [" + String.join(",", calleeDlls) + "], " +
+                "\"lib_matched\": " + (libMatched ? "true" : "false") + ", " +
                 "\"ghidra_code\": " + escapeJson(code) + "}"
             );
         }

@@ -9,7 +9,7 @@ from src.pipeline.runner import run
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Reverse engineering multi-agent system: Stage 0 runner"
+        description="Reverse engineering pipeline: Ghidra → score → LLM restore"
     )
 
     parser.add_argument(
@@ -29,15 +29,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "--radare2-path",
-        dest="radare2_path",
-        help="Override Radare2 directory from config",
-    )
-
-    parser.add_argument(
         "--log-level",
         dest="log_level",
         help="Override log level: DEBUG, INFO, WARNING, ERROR",
+    )
+
+    parser.add_argument(
+        "--domain-pack",
+        dest="domain_pack",
+        help="Override domain pack: none | mycollatz",
     )
 
     return parser
@@ -55,11 +55,11 @@ def main() -> int:
     if args.output:
         config.output_dir = args.output
 
-    if args.radare2_path:
-        config.radare2_path = args.radare2_path
-
     if args.log_level:
         config.log_level = args.log_level
+
+    if args.domain_pack:
+        config.domain_pack = args.domain_pack
 
     return run(config)
 

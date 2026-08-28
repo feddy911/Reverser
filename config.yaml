@@ -4,37 +4,32 @@ binary_path: samples/MyCollatz.exe
 # Куда сохранять логи, артефакты, JSON-отчеты
 output_dir: output
 
-# Путь к папке с Radare2
-radare2_path: D:/Hryusha/Tools/radare2/bin
-
-# Команда первичного анализа
-analysis_cmd: aaa
-
 # Уровень логирования: DEBUG, INFO, WARNING, ERROR
 log_level: INFO
 
 # Кэшировать результаты анализа
 use_cache: true
 
-# r2: какие функции декомпилировать (pdc/pdf)
+# Кандидаты: минимальный размер функции (байты)
 min_function_size: 20
-max_decompile: 30
 
 # Ghidra headless
 ghidra_path: D:/Hryusha/Tools/ghidra
-use_ghidra: true
 ghidra_timeout: 900
 
 # Этап 3: LLM
 hot_seed_score: 60
-use_llm: True   # временно, для проверочного запуска без LLM
+use_llm: true
 ollama_url: http://127.0.0.1:11434
 model_name: qwen2.5-coder:14b-instruct-q5_K_M
 llm_num_ctx: 16384
-llm_timeout: 600
-llm_top: 13        # забираем и da10 (getCurrentNumberAsString)
+llm_timeout: 900
+llm_top: 13
 
 scoring_mode: ml
 ml_weights_path: output/ml_weights.json
 
 polish: true
+
+# Domain pack: none (произвольный бинарник) | mycollatz (эталон GMP/Collatz)
+domain_pack: mycollatz

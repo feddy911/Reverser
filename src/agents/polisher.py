@@ -3,34 +3,29 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+from src.domains.pack import NONE_PACK, DomainPack
 from src.llm.client import OllamaClient, extract_json
 
 logger = logging.getLogger("revllm.polisher")
 
 SYSTEM_PROMPT = (
-    "Ты финальный полировщик восстановленного C++ (MSVC x64 Debug, Ghidra). "
+    "Ты финальный полировщик восстановленного C++ (декомпил Ghidra). "
     "Переписывай код в читаемый C++17, НЕ меняя семантику и НЕ выдумывая логику. "
     "Отвечай ТОЛЬКО JSON."
 )
 
-OFFSET_MAP = (
-    "+0x00 -> mpz_t number; +0x10 -> unsigned long long steps; "
-    "+0x18 -> std::chrono::time_point startTime; +0x20 -> time_point endTime; "
-    "+0x28 -> std::vector<std::string> history; +0x48 -> bool saveHistory; "
-    "+0x49 -> bool verbose; +0x50 -> mpz_t milestone"
-)
+USER_PROMPT_GENERIC = """Черновой код функции:
+{code}
 
-IDIOM_MAP = (
-    "(*(int*)(p+4)!=0)&**(uint**)(p+8) -> mpz_odd_p(number); "
-    "CONCAT71(x,1) -> true/(bool); thunk_FUN_140021680 -> printf; "
-    "thunk_FUN_14001e1b0 -> std::chrono::high_resolution_clock::now(); "
-    "thunk_FUN_140014360/thunk_FUN_1400142e0 -> operator<< (cout/cerr); "
-    "thunk_FUN_1400170b0 -> std::flush; thunk_FUN_140019050 -> ~std::string(); "
-    "thunk_FUN_14001f100 -> history.push_back(...); "
-    "thunk_FUN_14001d470 -> history.empty(); thunk_FUN_14001fb30 -> history.size()"
-)
+ПРАВИЛА:
+1. Убери артефакты Ghidra (CONCAT*, undefined*, extraout_*, goto LAB_*, uVar/pbVar) — введи осмысленные имена.
+2. Если видишь this/смещения — опиши struct по наблюдаемым полям; не выдумывай поля без свидетельств в коде.
+3. Сохрани ВСЕ литералы и константы точно; не выдумывай логику.
+4. Свободные функции (find/main-подобные) оформляй как свободные.
+Ответь JSON: {{"cpp_code": "..."}}
+"""
 
-USER_PROMPT = """Карта полей (первый аргумент-указатель = this):
+USER_PROMPT_WITH_HINTS = """Карта полей (первый аргумент-указатель = this):
 {offset_map}
 
 Идиомы для замены:
@@ -40,7 +35,7 @@ USER_PROMPT = """Карта полей (первый аргумент-указа
 {code}
 
 ПРАВИЛА:
-1. Смещения -> поля из карты (this->steps, this->saveHistory и т.д.).
+1. Смещения -> поля из карты (если карта не пуста).
 2. Замени идиомы; убери артефакты Ghidra (CONCAT*, undefined*, extraout_*, goto LAB_*, uVar/pbVar) — введи осмысленные имена.
 3. Сохрани ВСЕ литералы и константы точно; не выдумывай логику.
 4. Свободные функции (find/main-подобные) оформляй как свободные.
@@ -49,11 +44,19 @@ USER_PROMPT = """Карта полей (первый аргумент-указа
 
 
 class CodePolisher:
-    def __init__(self, client: OllamaClient):
+    def __init__(self, client: OllamaClient, pack: Optional[DomainPack] = None):
         self.client = client
+        self.pack = pack or NONE_PACK
 
     def polish(self, code: str) -> Optional[Dict[str, Any]]:
-        prompt = USER_PROMPT.format(
-            offset_map=OFFSET_MAP, idiom_map=IDIOM_MAP, code=(code or "")[:7000])
+        snippet = (code or "")[:7000]
+        if self.pack.has_polish_hints:
+            prompt = USER_PROMPT_WITH_HINTS.format(
+                offset_map=self.pack.offset_map or "(нет карты)",
+                idiom_map=self.pack.idiom_map or "(нет идиом)",
+                code=snippet,
+            )
+        else:
+            prompt = USER_PROMPT_GENERIC.format(code=snippet)
         raw = self.client.generate(prompt, system=SYSTEM_PROMPT)
         return extract_json(raw)

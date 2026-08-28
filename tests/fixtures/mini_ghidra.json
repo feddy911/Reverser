@@ -1,0 +1,42 @@
+{
+  "functions": [
+    {
+      "address": "0x140001000",
+      "name": "FUN_140001000",
+      "size": 220,
+      "callees": ["0x140002000"],
+      "ext_calls": ["printf", "operator<<"],
+      "ext_dlls": ["msvcrt.dll", "gmp.dll"],
+      "lib_matched": false,
+      "ghidra_code": "void FUN_140001000(void)\n{\n  printf(\"hello\\n\");\n  std::cout << \"x\";\n}\n"
+    },
+    {
+      "address": "0x140002000",
+      "name": "thunk_FUN_140002000",
+      "size": 16,
+      "callees": [],
+      "ext_calls": [],
+      "ext_dlls": [],
+      "lib_matched": false,
+      "ghidra_code": "void thunk_FUN_140002000(void) {}\n"
+    },
+    {
+      "address": "0x140003000",
+      "name": "_RTC_CheckStackVars",
+      "size": 80,
+      "callees": [],
+      "ext_calls": ["_RTC_CheckStackVars"],
+      "ext_dlls": ["vcruntime140.dll"],
+      "lib_matched": true,
+      "ghidra_code": "void _RTC_CheckStackVars(void) {}\n"
+    }
+  ],
+  "imports": ["printf"],
+  "strings": [
+    {"string": "hello\n", "address": "0x140010000"},
+    {"string": "x", "address": "0x140010010"}
+  ],
+  "thunks": [
+    {"address": "0x140002000", "name": "thunk_FUN_140002000", "target": "0x140001000"}
+  ]
+}

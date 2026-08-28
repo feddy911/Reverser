@@ -1,0 +1,30 @@
+# Phase 1 eval manifest (scoring-only).
+# Добавляйте бинарники + их Ghidra JSON + опциональные labels.
+
+top_k: 15
+
+entries:
+  - name: mini_fixture
+    ghidra_json: tests/fixtures/mini_ghidra.json
+
+  - name: mycollatz
+    binary: samples/MyCollatz.exe
+    ghidra_json: output/cache/71a68905d387ebeb8b06d6b66b0bf0ca/ghidra_full_v6.json
+    labels: labels_MyCollatz.json
+
+  # После первого прогона пайплайна раскомментируйте и укажите cache/<md5>/ghidra_full_v6.json:
+  # - name: echofilter
+  #   binary: samples/EchoFilter.exe
+  #   ghidra_json: output/cache/<md5>/ghidra_full_v6.json
+  # - name: pointcloud
+  #   binary: samples/PointCloud.exe
+  #   ghidra_json: output/cache/<md5>/ghidra_full_v6.json
+  # - name: inimini
+  #   binary: samples/IniMini.exe
+  #   ghidra_json: output/cache/<md5>/ghidra_full_v6.json
+  # - name: xorcipher
+  #   binary: samples/XorCipher.exe
+  #   ghidra_json: output/cache/<md5>/ghidra_full_v6.json
+  # - name: fibtimer
+  #   binary: samples/FibTimer.exe
+  #   ghidra_json: output/cache/<md5>/ghidra_full_v6.json
