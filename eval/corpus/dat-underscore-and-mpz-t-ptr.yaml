@@ -1,0 +1,16 @@
+id: dat-underscore-and-mpz-t-ptr
+profile: msvc_x64_debug
+gcc_fingerprint: "mpz_t was not declared|_DAT_"
+recipe: sanitize
+ghidra_cpp: |
+  void f(mpz_t *x) { (void)_DAT_14002e018; }
+contains:
+  - "ghidra_word x"
+  - "DAT_14002e018"
+not_contains:
+  - "mpz_t *"
+  - "_DAT_14002e018"
+compile: false
+requires:
+  - gmp
+notes: Ghidra mpz_t* vs GMP mpz_ptr; DAT underscore prefix

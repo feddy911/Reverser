@@ -1,0 +1,18 @@
+id: struct-infer
+profile: generic
+gcc_fingerprint: "invalid use of incomplete type|has no member named"
+recipe: assemble
+guessed_name: init
+ghidra_cpp: |
+  void init(Widget* obj) {
+    obj->field2 = 0;
+    obj->field3 = 1;
+  }
+contains:
+  - "struct Widget"
+  - "field2"
+  - "field3"
+not_contains:
+  - "CollatzState"
+compile: true
+notes: unknown T* plus ->field infers a struct (no sample names)

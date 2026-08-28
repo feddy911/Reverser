@@ -1,0 +1,18 @@
+id: stdint-not-struct
+profile: gcc_pe_x64
+gcc_fingerprint: "conflicting declaration.*uint64_t"
+recipe: assemble
+guessed_name: report_n
+ghidra_cpp: |
+  int report_n(uint64_t n)
+  {
+    uint64_t local_8;
+    local_8 = n;
+    return (int)local_8;
+  }
+contains:
+  - "uint64_t"
+not_contains:
+  - "struct uint64_t"
+compile: true
+notes: "stdint types are not Ghidra-undeclared structs"

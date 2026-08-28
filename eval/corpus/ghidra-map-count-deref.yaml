@@ -1,0 +1,18 @@
+id: ghidra-map-count-deref
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*count"
+recipe: sanitize
+ghidra_cpp: |
+  int has_key(map<int,_long_long_unsigned_int,_std::less<int>,_std::allocator<std::pair<int_const,_long_long_unsigned_int>_>_> *m, int k)
+  {
+    key_type *key;
+    size_type sVar1;
+    sVar1 = std::map<int,_long_long_unsigned_int,_std::less<int>,_std::allocator<std::pair<int_const,_long_long_unsigned_int>_>_>::count(m, key);
+    return (int)(sVar1 != 0);
+  }
+contains:
+  - "->count(*(key))"
+not_contains:
+  - "::count"
+compile: true
+notes: "Ghidra map::count(this, key*) where count wants key const&"

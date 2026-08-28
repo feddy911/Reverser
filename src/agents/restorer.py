@@ -146,6 +146,7 @@ class CodeRestorerLLM:
         max_attempts: int = 2,
         guess_by_addr: Optional[Dict[str, str]] = None,
         thunk_target: Optional[Dict[str, str]] = None,
+        best_of: int = 1,
     ) -> Optional[Dict[str, Any]]:
         """Восстановление с итеративным улучшением на основе fidelity check."""
         from src.analysis.fidelity import build_call_tokens, check_function
@@ -236,6 +237,61 @@ class CodeRestorerLLM:
                 break
             attempt += 1
 
+        n_extra = max(1, int(best_of)) - 1
+        while n_extra > 0 and fidelity["fidelity"] < 0.85:
+            n_extra -= 1
+            alt = self.restore(entry, ghidra_code)
+            if not alt:
+                continue
+            alt_fid = check_function(entry, alt.get("cpp_code", ""), call_tokens)
+            if alt_fid["fidelity"] > fidelity["fidelity"]:
+                data = alt
+                fidelity = alt_fid
+                logger.info(
+                    "best-of: fidelity %.3f for %s",
+                    fidelity["fidelity"], entry.get("address"),
+                )
+
         return data
+
+    def fix_compile(
+        self,
+        source: str,
+        errors: List[Dict[str, str]],
+        compiler: str = "",
+    ) -> Optional[str]:
+        """One-shot LLM pass: keep semantics, fix compiler diagnostics."""
+        from src.analysis.compile_verify import extract_cpp, format_errors_for_prompt
+
+        src = (source or "").strip()
+        if not src:
+            return None
+        if len(src) > 80_000:
+            src = src[:80_000] + "\n// ... truncated ...\n"
+        prompt = (
+            "Ниже C++ (восстановленный из бинарника) и ошибки компилятора.\n"
+            "Исправь ТОЛЬКО то, что мешает компиляции: типы, скобки, лишние "
+            "идентификаторы Ghidra, отсутствующие include.\n"
+            "НЕ повторяй using/typedef, которые уже есть в начале файла.\n"
+            "НЕ объявляй заново DAT_* и thunk_FUN_* — они уже в начале файла.\n"
+            "НЕ выдумывай структуры, typedef и using, которых нет во входном исходнике.\n"
+            "Не пиши `using long ...` — это невалидный C++.\n"
+            "Если во входе уже есть struct — оставь одно объявление до функций.\n"
+            "НЕ меняй литералы, константы и смысл алгоритма.\n"
+            "НЕ добавляй новую логику. Верни ПОЛНЫЙ исправленный файл.\n\n"
+            f"Компилятор: {compiler or 'c++'}\n"
+            f"Ошибки:\n{format_errors_for_prompt(errors)}\n\n"
+            "Исходник:\n```cpp\n"
+            f"{src}\n"
+            "```\n\n"
+            "Ответь ТОЛЬКО C++ кодом (можно в ```cpp блоке)."
+        )
+        raw = self.client.generate(prompt, system=self.system_prompt)
+        self._dump("compilefix", prompt, raw)
+        parsed = extract_json(raw)
+        if parsed and (parsed.get("cpp_code") or "").strip():
+            return str(parsed["cpp_code"]).strip()
+        fixed = extract_cpp(raw)
+        return fixed if fixed and fixed != src else None
 
     # _build_call_tokens удалён: используйте src.analysis.fidelity.build_call_tokens

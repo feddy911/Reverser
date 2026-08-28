@@ -16,13 +16,12 @@ pip install -r requirements.txt
 ## Быстрый старт
 
 1. Отредактируйте `config.yaml`: `binary_path`, `ghidra_path`, `ollama_url`.
-2. Для эталона MyCollatz оставьте `domain_pack: mycollatz`.
-3. Для **произвольного** бинарника поставьте `domain_pack: none` (без GMP/Collatz-подсказок).
+2. Запустите пайплайн. Подсказок под конкретный сэмпл нет: бинарник считается неизвестным.
 
 ```bash
 py main.py --config config.yaml
 # или
-py main.py --binary path/to/app.exe --domain-pack none
+py main.py --binary path/to/app.exe
 ```
 
 Артефакты прогона: `output/logs/run_<timestamp>/`  
@@ -37,15 +36,11 @@ py main.py --binary path/to/app.exe --domain-pack none
 
 Restorer берёт system/user rules из `src/analysis/prompts.py` по этому профилю.
 
-## Domain packs и includes
+## Includes
 
-| Pack | Назначение |
-|------|------------|
-| `none` | Произвольный бинарник |
-| `mycollatz` | Эталон MyCollatz (GMP renames + polish maps) |
-
-`#include` собираются динамически из `ext_calls` / `ext_dlls` + pack
-(`src/analysis/includes.py`).
+`#include` собираются динамически из `ext_calls` / `ext_dlls` бинарника
+(`src/analysis/includes.py`). GMP появляется, если в дампе есть `mpz_*` или `gmp.dll` —
+не из заранее известного имени сэмпла.
 
 ## Скоринг
 
@@ -67,28 +62,103 @@ py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json
 
 Отчёт: `output/eval_report.json` (precision/recall@k при наличии labels).
 
+## Корпус диалекта Ghidra (compile-gate)
+
+Новые rewrite в `ghidra_cpp.py` / `assembler.py` не добавляются по итогам одного exe.
+Сначала фикстура в `eval/corpus/<id>.yaml` (сниппет + recipe + contains / not_contains), затем рецепт.
+Схема полей: `eval/corpus/_schema.yaml`. Сейчас **42** загружаемых фикстуры.
+
+```bash
+py -m src.analysis.eval_corpus
+py -m src.analysis.eval_corpus --dir eval/corpus --out output/corpus_report.json
+```
+
+Заморозка: не писать имена PointCloud / EchoFilter / MyCollatz / `starts_with` в sanitizer или assembler.
+Per-function compile-fix пишет `compile_fn/*_fix.cpp` и кэш `kind=compile_fn_fix`.
+Он **не** перезаписывает restore-кэш и не подменяет `cpp_code` для assemble.
+
+## Генератор, librarian, Compiler agent, Critic
+
+Наполнение базы — мини-программы (string/vector/iostream/chrono/GMP/main), не пользовательский exe:
+
+```bash
+py -m src.analysis.gen_corpus --out output/corpus_gen --compile --vary
+# Ghidra-дампы мини-программ (нужен ghidra_path в config.yaml):
+py -m src.analysis.gen_corpus --ghidra --config config.yaml
+```
+
+`--vary` переименовывает идентификаторы в фикстурах: рецепт не должен быть приклеен к `prefixPtr`.
+
+Librarian собирает черновик YAML из дампа и принимает его в `eval/corpus/` только после зелёного `eval_case`.
+Имена held-out / сэмплов (`heldout`, `pointcloud`, `echofilter`, `mycollatz`, …) отклоняются.
+
+```bash
+py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-dir output/librarian_draft
+py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-dir output/librarian_draft --accept-compiled
+```
+
+Целиком зелёные generator-дампы (assemble + gcc, без held-out): `hypot_sqrt`, `mingw_main`, `vector_reserve`, `iostream_shift`.
+
+Compiler agent классифицирует gcc-диагностики по `gcc_fingerprint` корпуса.
+Известный класс — без LLM. Неизвестный — один LLM-проход и YAML-черновик (не патч sanitizer).
+
+Critic (`critic.json`) принимает прогон только при compile ∧ fidelity ∧ identity:
+подмена `starts_with` на `std::sort` — reject, даже если TU зелёный.
+`compile_ok` считается по собранному TU, не по compile-fix.
+
+Классификатор gcc→recipe (P3) не включать, пока корпус заметно меньше ~100 классов.
+
+## Held-out (P2)
+
+PointCloud и сгенерированный `heldout_struct_math` **не** используются, чтобы писать regex.
+Eval только применяет корпус, Compiler agent и Critic.
+
+```bash
+py -m src.analysis.eval_heldout
+```
+
+Отчёт: `output/heldout_report.json`. Красный TU — очередь в корпус, не патч `ghidra_cpp.py`.
+`--accept` на дампы с `heldout` в id запрещён.
+
 ## Метрики прогона
 
-`RUN METRICS` + `metrics.json`: latency стадий, LLM ok/fail/fallback, polish, fidelity, triage profile.
+`RUN METRICS` + `metrics.json`: latency стадий, LLM ok/fail/fallback, polish, fidelity,
+compile-verify, triage profile.
+
+## Compile-verify (Фаза 2)
+
+После restore каждая **user_code** функция проходит syntax-check отдельно
+(`compile_fn/`). LLM compile-fix остаётся диагностикой (файл `*_fix.cpp`),
+тело restore для assemble не подменяется. Затем собирается TU и проверяется
+`restored_final.cpp`. `llm_best_of: 2` — второй restore при fidelity < 0.85.
+
+CRT/STL/MinGW internals (`__mingw_*`, `_M_*`, `_pei386_*`, `fprintf`, …) **не**
+попадают в LLM top.
+
+В `config.yaml`: `compile_verify`, `compile_fix`, `compile_per_function`,
+опционально `cxx_compiler` / `llm_best_of`.
 
 ## Тесты (без Ghidra/Ollama)
 
 ```bash
+py -m unittest tests.test_heldout tests.test_corpus tests.test_p1_agents tests.test_phase1 tests.test_smoke -q
 py -m unittest discover -s tests -v
 ```
+
+Ghidra нужна только для `--ghidra` / полного пайплайна / held-out PointCloud (дамп уже в `output/cache/`).
 
 ## Структура
 
 ```
 main.py
 config.yaml
-eval/                   # манифесты eval
+eval/                   # scoring-манифесты, corpus/*.yaml, heldout.yaml
 scripts/                # Ghidra Java
 src/
   pipeline/             # runner, metrics
-  agents/               # restorer, assembler, polisher
-  analysis/             # triage, prompts, includes, features, scorer, fidelity, eval_harness
-  domains/              # optional domain packs
+  agents/               # restorer, assembler, polisher, compiler, critic
+  analysis/             # triage, prompts, includes, features, scorer, fidelity, compile_verify, corpus, gen_corpus, eval_*
+  domains/              # generic C++ preamble / Ghidra typedefs
   ghidra/               # cross-platform headless launcher
   llm/
 legacy/                 # старый r2/LangGraph (не используется)
@@ -99,3 +169,10 @@ tests/
 
 - Не запускайте недоверенные бинарники без изоляции: Ghidra загружает файл целиком.
 - Полный multi-binary ML-датасет (5–10 labeled) — следующий шаг: наполните `eval/` и переобучите scorer.
+- Generator-дампы, которые ещё не собираются целиком (очередь корпуса, не PointCloud):
+  `string_assign` (`operator=` / `operator+=` с `string*`),
+  `string_find` (`basic_string(char*, allocator*)`),
+  `map_count` (разорванный ctor, `operator[](key*)`),
+  `init_list_vector` (`reference` как `T&`, не `T*`),
+  `chrono_cast` (лишние template-аргументы `duration_cast`, приватный `__r`),
+  `fstream_write` (`ios::good()` без объекта — без честного receiver не чинить).

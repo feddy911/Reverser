@@ -1,0 +1,11 @@
+id: duration-cast-not-rewritten
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  auto us = std::chrono::duration_cast<std::chrono::microseconds>(d);
+contains:
+  - "duration_cast"
+not_contains:
+  - "->duration_cast"
+compile: false
+notes: free function templates must not become member calls

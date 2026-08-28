@@ -1,0 +1,557 @@
+"""Normalize Ghidra-decompiler C++ so a real compiler can parse it.
+
+Freeze: do not add rewrite rules from a single binary run. New dialects go
+into eval/corpus/ as a fixture first; only then a recipe (see
+src/analysis/corpus.py).
+"""
+
+from __future__ import annotations
+
+import re
+
+# Ghidra prints `unsigned_char`, `_long_long_unsigned_int`, `int_const`.
+_UNDERSCORE_TYPE_BASE = (
+    ("unsigned_long_long", "unsigned long long"),
+    ("long_long_unsigned_int", "unsigned long long"),
+    ("long_long_int", "long long"),
+    ("unsigned_char_const", "unsigned char const"),
+    ("unsigned_char", "unsigned char"),
+    ("signed_char", "signed char"),
+    ("long_long", "long long"),
+    ("unsigned_int", "unsigned int"),
+    ("unsigned_long", "unsigned long"),
+    ("unsigned_short", "unsigned short"),
+    ("__int64", "long long"),
+    ("int_const", "int const"),
+    ("char_const", "char const"),
+    ("void_const", "void const"),
+)
+# Leading underscore leftover after `_std::` / template noise (`_long_long_unsigned_int`).
+_UNDERSCORE_TYPES = tuple(
+    item
+    for old, new in _UNDERSCORE_TYPE_BASE
+    for item in (("_" + old, new), (old, new))
+)
+
+_BARE_TEMPLATE = (
+    (re.compile(r"(?<![:\w])vector\s*<"), "std::vector<"),
+    (re.compile(r"(?<![:\w])basic_string\s*<"), "std::basic_string<"),
+    (re.compile(r"(?<![:\w])allocator\s*<"), "std::allocator<"),
+    (re.compile(r"(?<![:\w])char_traits\s*<"), "std::char_traits<"),
+    (re.compile(r"(?<![:\w])initializer_list\s*<"), "std::initializer_list<"),
+    (re.compile(r"(?<![:\w])unordered_map\s*<"), "std::unordered_map<"),
+    (re.compile(r"(?<![:\w])map\s*<"), "std::map<"),
+    (re.compile(r"(?<![:\w])set\s*<"), "std::set<"),
+    (re.compile(r"(?<![:\w])less\s*<"), "std::less<"),
+    (re.compile(r"(?<![:\w])pair\s*<"), "std::pair<"),
+    (re.compile(r"(?<![:\w])duration\s*<"), "std::chrono::duration<"),
+    (re.compile(r"(?<![:\w])_?ratio\s*<"), "std::ratio<"),
+)
+
+_BARE_IOS = re.compile(
+    r"(?<!~)(?<![:\w])\b(ostream|istream|ofstream|ifstream|iostream|ios_base|ios)\b"
+)
+_RE_IOS_OPENMODE = (
+    (re.compile(r"\b_S_out\b"), "std::ios::out"),
+    (re.compile(r"\b_S_in\b"), "std::ios::in"),
+    (re.compile(r"\b_S_app\b"), "std::ios::app"),
+)
+_RE_MINGW_STDIO_OBJ = re.compile(
+    r"__fu\d+__ZSt4(cout|cerr|cin|clog)\b"
+)
+# Ghidra NTTP: std::ratio<1,_1000000> → std::ratio<1, 1000000>
+_RE_GHIDRA_NTTP = re.compile(r"\b_(\d{3,})\b")
+
+# Type uses only: `string *`, `string&`, `string name` — applied outside string literals.
+_BARE_STRING = re.compile(r"(?<![:\w])\bstring\b(?=\s*[\*&]|\s+[A-Za-z_])")
+_USING_STD = re.compile(r"^[ \t]*using\s+namespace\s+std\s*;\s*\n?", re.MULTILINE)
+_QUOTED = re.compile(r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')')
+
+_KNOWN_CLASSES = frozenset({
+    "vector", "basic_string", "string", "allocator", "__new_allocator",
+    "unordered_map", "map", "set", "list", "deque", "array",
+    "__normal_iterator", "char_traits", "optional", "pair",
+    "initializer_list", "map", "less", "ostream", "ofstream",
+    "duration", "ratio",
+})
+_KNOWN_MEMBERS = frozenset({
+    "begin", "end", "cbegin", "cend", "rbegin", "rend",
+    "size", "empty", "clear", "data", "c_str", "reserve", "resize",
+    "push_back", "pop_back", "emplace_back", "emplace", "insert", "erase",
+    "swap", "assign", "append", "find", "substr", "compare", "at",
+    "back", "front", "length", "capacity", "max_size", "shrink_to_fit",
+    "get_allocator", "release", "get", "count", "operator",
+})
+
+
+def _outside_strings(text: str, transform) -> str:
+    parts = _QUOTED.split(text)
+    out = []
+    for i, p in enumerate(parts):
+        out.append(p if i % 2 else transform(p))
+    return "".join(out)
+
+
+def _match_forward(s: str, i: int, open_ch: str, close_ch: str) -> int:
+    depth = 0
+    n = len(s)
+    for j in range(i, n):
+        if s[j] == open_ch:
+            depth += 1
+        elif s[j] == close_ch:
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
+def _match_angle_back(s: str, i: int) -> int:
+    depth = 0
+    j = i
+    while j >= 0:
+        if s[j] == ">":
+            depth += 1
+        elif s[j] == "<":
+            depth -= 1
+            if depth == 0:
+                return j
+        j -= 1
+    return -1
+
+
+def _skip_ws_back(s: str, i: int) -> int:
+    while i > 0 and s[i - 1] in " \t\n\r":
+        i -= 1
+    return i
+
+
+def _type_start(s: str, colon_pos: int) -> int:
+    """Start index of the qualified type before `::method`."""
+    i = colon_pos
+    while True:
+        i = _skip_ws_back(s, i)
+        if i > 0 and s[i - 1] == ">":
+            a = _match_angle_back(s, i - 1)
+            if a < 0:
+                return i
+            i = _skip_ws_back(s, a)
+            j = i
+            while j > 0 and (s[j - 1].isalnum() or s[j - 1] == "_"):
+                j -= 1
+            if j == i:
+                return i
+            i = j
+        else:
+            j = i
+            while j > 0 and (s[j - 1].isalnum() or s[j - 1] == "_"):
+                j -= 1
+            if j == i:
+                return i
+            i = j
+        i = _skip_ws_back(s, i)
+        if i >= 2 and s[i - 2:i] == "::":
+            i -= 2
+            continue
+        return i
+
+
+def _last_type_ident(type_str: str) -> str:
+    s = (type_str or "").strip()
+    if not s:
+        return ""
+    if s.endswith(">"):
+        a = _match_angle_back(s, len(s) - 1)
+        if a >= 0:
+            s = s[:a].rstrip()
+    if "::" in s:
+        s = s.rsplit("::", 1)[-1]
+    return s.strip()
+
+
+def _split_top_args(inner: str) -> list[str]:
+    args: list[str] = []
+    depth_p = depth_a = 0
+    start = 0
+    for i, c in enumerate(inner):
+        if c == "(":
+            depth_p += 1
+        elif c == ")":
+            depth_p -= 1
+        elif c == "<":
+            depth_a += 1
+        elif c == ">":
+            depth_a -= 1
+        elif c == "," and depth_p == 0 and depth_a == 0:
+            args.append(inner[start:i].strip())
+            start = i + 1
+    tail = inner[start:].strip()
+    if tail:
+        args.append(tail)
+    return args
+
+
+def _rewrite_one_call(typ: str, meth: str, dtor: bool, args: list[str]) -> str | None:
+    last = _last_type_ident(typ)
+    if not last:
+        return None
+    if meth == "operator=" and len(args) >= 2:
+        recv, rhs = args[0], args[1].strip()
+        if rhs.startswith("&"):
+            rhs = rhs[1:].strip()
+        return f"(*({recv}) = ({rhs}))"
+    if meth == "operator[]" and len(args) >= 2:
+        return f"(*({args[0]}))[{args[1]}]"
+    if meth.startswith("operator"):
+        return None
+    if not args:
+        return None
+    recv = args[0]
+    extra = [a.strip() for a in args[1:]]
+    # Ghidra often passes T* where the real method takes T/T const&.
+    if extra and meth in {
+        "find", "compare", "append", "push_back", "push_front", "count",
+    }:
+        a0 = extra[0]
+        if re.fullmatch(r"[A-Za-z_]\w*", a0):
+            extra[0] = f"*({a0})"
+    rest = ", ".join(extra)
+    rest = re.sub(
+        r",\s*\(\s*(?:std::)?allocator\s*<[^>]*>\s*\*\s*\)[^,]*$",
+        "",
+        rest,
+    )
+    if dtor or meth == last:
+        if dtor:
+            return f"({recv})->~{last}()"
+        if rest:
+            return f"new ({recv}) {typ}({rest})"
+        return f"new ({recv}) {typ}()"
+    if last in _KNOWN_CLASSES and meth in _KNOWN_MEMBERS:
+        if rest:
+            return f"({recv})->{meth}({rest})"
+        return f"({recv})->{meth}()"
+    return None
+
+
+def rewrite_ghidra_member_calls(code: str) -> str:
+    """Type::method(this, args) → (this)->method(args); ctors → placement new."""
+    s = code or ""
+    n = len(s)
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while i < n:
+        if s[i:i + 2] != "::":
+            i += 1
+            continue
+        j = i + 2
+        dtor = False
+        if j < n and s[j] == "~":
+            dtor = True
+            j += 1
+        k = j
+        while k < n and (s[k].isalnum() or s[k] == "_"):
+            k += 1
+        if k == j:
+            i += 1
+            continue
+        meth = s[j:k]
+        if meth == "operator":
+            if k < n and s[k] == "=":
+                meth = "operator="
+                k += 1
+            elif k + 1 < n and s[k] == "[" and s[k + 1] == "]":
+                meth = "operator[]"
+                k += 2
+        t = k
+        if t < n and s[t] == "<":
+            close_a = _match_forward(s, t, "<", ">")
+            if close_a >= 0:
+                t = close_a + 1
+        while t < n and s[t] in " \t\n\r":
+            t += 1
+        if t >= n or s[t] != "(":
+            i += 1
+            continue
+        close_p = _match_forward(s, t, "(", ")")
+        if close_p < 0:
+            i += 1
+            continue
+        t0 = _type_start(s, i)
+        if not (0 <= t0 < i):
+            i += 1
+            continue
+        typ = s[t0:i].strip()
+        rewritten = _rewrite_one_call(typ, meth, dtor, _split_top_args(s[t + 1:close_p]))
+        if rewritten is None:
+            i += 1
+            continue
+        out.append(s[copied:t0])
+        out.append(rewritten)
+        copied = close_p + 1
+        i = copied
+    out.append(s[copied:])
+    return "".join(out)
+
+
+def extract_named_function(code: str, name: str) -> str:
+    """Keep the function named `name`, or the first definition renamed to `name`."""
+    if not name or not code:
+        return code or ""
+    pat = re.compile(
+        r"(?:^|\n)([^\n;{}]*?\b" + re.escape(name) + r"\s*\([^;{}]*\))\s*(?:const)?\s*\{",
+        re.DOTALL,
+    )
+    m = pat.search(code)
+    if m:
+        brace = m.end() - 1
+        end = _match_forward(code, brace, "{", "}")
+        if end < 0:
+            return code
+        start = m.start()
+        if start < len(code) and code[start] == "\n":
+            start += 1
+        return code[start:end + 1]
+    span = _first_function_span(code)
+    if not span:
+        return code
+    start, end, ident = span
+    body = code[start:end + 1]
+    if ident != name:
+        body = re.sub(rf"\b{re.escape(ident)}\s*\(", name + "(", body, count=1)
+    return body
+
+
+_NOT_FN_NAMES = frozenset({
+    "if", "for", "while", "switch", "catch", "return", "sizeof", "do",
+})
+
+
+def _first_function_span(code: str):
+    pat = re.compile(
+        r"(?:^|\n)([^\n;{}]*?\b([A-Za-z_]\w*)\s*\([^;{}]*\))\s*(?:const)?\s*\{",
+        re.DOTALL,
+    )
+    for m in pat.finditer(code or ""):
+        ident = m.group(2)
+        if ident in _NOT_FN_NAMES:
+            continue
+        brace = m.end() - 1
+        end = _match_forward(code, brace, "{", "}")
+        if end < 0:
+            continue
+        start = m.start()
+        if start < len(code) and code[start] == "\n":
+            start += 1
+        return start, end, ident
+    return None
+
+
+def _strip_invalid_using(text: str) -> str:
+    lines = []
+    for ln in text.splitlines(True):
+        raw = ln.lstrip()
+        if raw.startswith("using ") and not raw.startswith("using namespace "):
+            rest = raw[len("using "):]
+            if "=" not in rest:
+                continue
+            alias = rest.split("=", 1)[0].strip()
+            alias_id = alias.replace("::", "")
+            if " " in alias_id or not alias_id:
+                continue
+        lines.append(ln)
+    return "".join(lines)
+
+
+_RE_OSTREAM_OBJ_CAST = re.compile(
+    r"\(\s*(?:std::)?(?:basic_)?ostream(?:\s*<[^()]*>)?\s*\*\s*\)\s*"
+    r"(?:std::)?(cout|cerr|clog)\b"
+)
+_RE_DAT_UNDERSCORE = re.compile(r"\b_DAT_([0-9A-Fa-f]+)\b")
+_RE_MPZ_T_PTR = re.compile(r"\bmpz_t\s*\*")
+_RE_STL_PRIV_FIELD = re.compile(
+    r"^[ \t]*[A-Za-z_]\w*\s*\.\s*_M_(?:array|len)\s*=.*$",
+    re.MULTILINE,
+)
+_RE_STACK_ADDR_ASSIGN = re.compile(
+    r"\b(?:padding|auStack\w*|local_[0-9A-Fa-f]+)\s*\[[^\]]+\]\s*=\s*&"
+)
+_RE_STACK_PTR_ASSIGN = re.compile(
+    r"\b(padding|auStack\w*|local_[0-9A-Fa-f]+)\s*\[[^\]]+\]\s*=\s*(\1\s*\+[^;]+)"
+)
+
+
+def rewrite_ghidra_ostream(code: str) -> str:
+    """Ghidra prints `(ostream*)cout` and `ostream::operator<<(this, x)`."""
+    s = _RE_OSTREAM_OBJ_CAST.sub(r"(&std::\1)", code or "")
+    needle = "::operator<<"
+    n = len(s)
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while True:
+        k = s.find(needle, i)
+        if k < 0:
+            break
+        t = k + len(needle)
+        while t < n and s[t] in " \t\n\r":
+            t += 1
+        if t >= n or s[t] != "(":
+            i = k + 2
+            continue
+        close_p = _match_forward(s, t, "(", ")")
+        if close_p < 0:
+            i = k + 2
+            continue
+        t0 = _type_start(s, k)
+        if not (0 <= t0 < k):
+            i = k + 2
+            continue
+        last = _last_type_ident(s[t0:k])
+        if last not in {"ostream", "basic_ostream", "wostream", "basic_wostream"}:
+            i = k + 2
+            continue
+        args = _split_top_args(s[t + 1:close_p])
+        if len(args) != 2:
+            i = k + 2
+            continue
+        out.append(s[copied:t0])
+        out.append(f"(&((*({args[0]})) << ({args[1]})))")
+        copied = close_p + 1
+        i = copied
+    out.append(s[copied:])
+    s = _rewrite_std_free_lshift("".join(out))
+    s = _wrap_ostream_lshift_assign(s)
+    s = _RE_OSTREAM_ARRAY.sub(r"undefined1 \1\2", s)
+    return s
+
+
+def _rewrite_std_free_lshift(s: str) -> str:
+    """Ghidra `std::operator<<(ostream*, x)` → `&((*lhs) << rhs)`."""
+    needle = "std::operator<<"
+    n = len(s)
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while True:
+        k = s.find(needle, i)
+        if k < 0:
+            break
+        t = k + len(needle)
+        while t < n and s[t] in " \t\n\r":
+            t += 1
+        if t >= n or s[t] != "(":
+            i = k + 2
+            continue
+        close_p = _match_forward(s, t, "(", ")")
+        if close_p < 0:
+            i = k + 2
+            continue
+        args = _split_top_args(s[t + 1:close_p])
+        if len(args) != 2:
+            i = k + 2
+            continue
+        out.append(s[copied:k])
+        out.append(f"(&((*({args[0]})) << ({args[1]})))")
+        copied = close_p + 1
+        i = copied
+    out.append(s[copied:])
+    return "".join(out)
+
+
+_RE_OSTREAM_LSHIFT_ASSIGN = re.compile(
+    r"(=\s*)\(\s*\*\s*\(([A-Za-z_]\w*)\)\s*\)\s*<<\s*\("
+)
+_RE_OSTREAM_ARRAY = re.compile(
+    r"(?:std::)?basic_ostream\s*<[^\n]*>\s+([A-Za-z_]\w*)\s*(\[\s*\d+\s*\])"
+)
+_RE_GMP_CALL = re.compile(r"\b(?:__g)?mpz_[A-Za-z0-9_]+\s*\(")
+_RE_MPZ_PARAM = re.compile(r"\b(?:mpz_srcptr|mpz_ptr)\s+([A-Za-z_]\w*)\s*([,)])")
+
+
+def _wrap_ostream_lshift_assign(s: str) -> str:
+    """`p = (*q) << x` → `p = &((*q) << x)` so ostream* assignment type-checks."""
+    out: list[str] = []
+    copied = 0
+    for m in _RE_OSTREAM_LSHIFT_ASSIGN.finditer(s or ""):
+        open_rhs = m.end() - 1
+        close = _match_forward(s, open_rhs, "(", ")")
+        if close < 0:
+            continue
+        start_expr = m.start() + len(m.group(1))
+        if s[start_expr:start_expr + 2] == "(&":
+            continue
+        out.append(s[copied:m.start()])
+        out.append(m.group(1))
+        out.append("(&(")
+        out.append(s[start_expr:close + 1])
+        out.append("))")
+        copied = close + 1
+    out.append(s[copied:])
+    return "".join(out)
+
+
+def rewrite_gmp_amp_args(code: str) -> str:
+    """`mpz_foo(&x)` → `mpz_foo((mpz_ptr)&x)` (Ghidra takes address of a word)."""
+    s = code or ""
+    out: list[str] = []
+    copied = 0
+    for m in _RE_GMP_CALL.finditer(s):
+        open_p = m.end() - 1
+        close = _match_forward(s, open_p, "(", ")")
+        if close < 0:
+            continue
+        args = _split_top_args(s[open_p + 1:close])
+        new_args = []
+        changed = False
+        for a in args:
+            t = a.strip()
+            if t.startswith("&") and not t.startswith("(mpz_ptr)"):
+                new_args.append(f"(mpz_ptr)({t})")
+                changed = True
+            else:
+                new_args.append(a)
+        if not changed:
+            continue
+        out.append(s[copied:open_p + 1])
+        out.append(", ".join(new_args))
+        out.append(")")
+        copied = close + 1
+    out.append(s[copied:])
+    return "".join(out)
+
+
+def sanitize_ghidra_cpp(code: str) -> str:
+    """Rewrite Ghidra type spellings and member-call syntax into parseable C++."""
+    t = code or ""
+
+    def _types(chunk: str) -> str:
+        chunk = chunk.replace("_std::", "std::")
+        chunk = chunk.replace("std::__cxx11::", "std::")
+        chunk = re.sub(r"_+(?=>)", "", chunk)
+        for old, new in _UNDERSCORE_TYPES:
+            chunk = chunk.replace(old, new)
+        for rx, repl in _BARE_TEMPLATE:
+            chunk = rx.sub(repl, chunk)
+        chunk = _BARE_IOS.sub(r"std::\1", chunk)
+        chunk = _BARE_STRING.sub("std::string", chunk)
+        for rx, repl in _RE_IOS_OPENMODE:
+            chunk = rx.sub(repl, chunk)
+        chunk = _RE_MINGW_STDIO_OBJ.sub(r"std::\1", chunk)
+        chunk = _RE_GHIDRA_NTTP.sub(r"\1", chunk)
+        chunk = _RE_DAT_UNDERSCORE.sub(r"DAT_\1", chunk)
+        chunk = _RE_MPZ_T_PTR.sub("mpz_ptr ", chunk)
+        chunk = _RE_MPZ_PARAM.sub(r"ghidra_word \1\2", chunk)
+        chunk = re.sub(r"(?<!~)(?<!::)__new_allocator\b", "std::__new_allocator", chunk)
+        return chunk
+
+    t = _outside_strings(t, _types)
+    t = _USING_STD.sub("", t)
+    t = _strip_invalid_using(t)
+    t = rewrite_ghidra_member_calls(t)
+    t = rewrite_ghidra_ostream(t)
+    t = rewrite_gmp_amp_args(t)
+    t = _RE_STL_PRIV_FIELD.sub("", t)
+    t = _RE_STACK_ADDR_ASSIGN.sub(r"(void)&", t)
+    t = _RE_STACK_PTR_ASSIGN.sub(r"(void)(\2)", t)
+    return t

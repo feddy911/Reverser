@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from src.analysis.platform import is_noise_call, is_noise_constant
 
@@ -46,6 +46,25 @@ def literal_in_code(lit: str, code: str) -> bool:
     return any(c and c in code for c in candidates)
 
 
+def symbol_names_from_dump(
+    functions: Optional[Sequence[Dict[str, Any]]] = None,
+    thunks: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Dict[str, str]:
+    """address → Ghidra symbol (user, STL method, or import thunk)."""
+    names: Dict[str, str] = {}
+    for f in functions or []:
+        a = str(f.get("address") or "").strip()
+        n = str(f.get("name") or "").strip()
+        if a and n:
+            names[a] = n
+    for t in thunks or []:
+        a = str(t.get("address") or "").strip()
+        n = str(t.get("name") or "").strip()
+        if a and n:
+            names.setdefault(a, n)
+    return names
+
+
 def build_call_tokens(
     callees: Iterable[str],
     name_by_addr: Optional[Dict[str, str]] = None,
@@ -54,6 +73,8 @@ def build_call_tokens(
     """Единый builder токенов вызовов для refine / polish / final.
 
     Пропускает compiler/debug instrumentation (JustMyCode, RTC, GS, …).
+    Unresolved addresses (import thunks without a name) are not required as
+    FUN_<addr>: Ghidra already printed the C symbol (sqrt, memcpy, …).
     """
     name_by_addr = name_by_addr or {}
     thunk_target = thunk_target or {}
@@ -63,6 +84,8 @@ def build_call_tokens(
             continue
         tgt = thunk_target.get(c, c)
         primary = (name_by_addr.get(tgt) or name_by_addr.get(c) or "").strip()
+        if not primary:
+            continue
         tokens = []
         for t in (
             primary,
@@ -74,10 +97,9 @@ def build_call_tokens(
                 tokens.append(t)
         if not tokens:
             continue
-        label = primary or tokens[0]
-        if is_noise_call(label) or all(is_noise_call(t) for t in tokens):
+        if is_noise_call(primary) or all(is_noise_call(t) for t in tokens):
             continue
-        out.append((label, tokens))
+        out.append((primary, tokens))
     return out
 
 

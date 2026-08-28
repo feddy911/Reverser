@@ -1,0 +1,28 @@
+id: ghidra-vector_reserve-fill_n
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid fill_n(vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_>\
+  \ *p,int n)\r\n\r\n{\r\n  vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_>\
+  \ *in_stack_ffffffffffffffc8\r\n  ;\r\n  value_type_conflict *in_stack_ffffffffffffffd0;\r\
+  \n  \r\n  std::vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_>::reserve\r\
+  \n            (in_stack_ffffffffffffffc8,(size_type)in_stack_ffffffffffffffd0);\r\
+  \n  std::vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_>::push_back\r\
+  \n            (in_stack_ffffffffffffffc8,in_stack_ffffffffffffffd0);\r\n  return;\r\
+  \n}"
+guessed_name: fill_n
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  size_type sVar1;\r\n  vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_>\
+    \ *in_stack_ffffffffffffffa8\r\n  ;\r\n  int in_stack_ffffffffffffffb0;\r\n  vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_>\
+    \ v;\r\n  \r\n  __main();\r\n  std::vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_>::vector\r\
+    \n            (in_stack_ffffffffffffffa8);\r\n  fill_n(in_stack_ffffffffffffffa8,in_stack_ffffffffffffffb0);\r\
+    \n  sVar1 = std::vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_>::size\r\
+    \n                    (in_stack_ffffffffffffffa8);\r\n  std::vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_>::~vector\r\
+    \n            (in_stack_ffffffffffffffa8);\r\n  return (int)sVar1 + -1;\r\n}"
+contains:
+- fill_n
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump vector_reserve; review before accept
+gcc_fingerprint: ''

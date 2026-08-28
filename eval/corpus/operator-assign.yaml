@@ -1,0 +1,14 @@
+id: operator-assign
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*operator="
+recipe: sanitize
+ghidra_cpp: |
+  std::string::operator=(prefixPtr, (char *)inputStringPtr);
+  std::vector<std::string>::operator=(&lines, &initializerList);
+contains:
+  - "(*(prefixPtr) = ((char *)inputStringPtr))"
+  - "(*(&lines) = (initializerList))"
+not_contains:
+  - "::operator="
+compile: false
+notes: Type::operator=(this, rhs) Ghidra STL

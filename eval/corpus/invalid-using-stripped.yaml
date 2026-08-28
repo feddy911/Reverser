@@ -1,0 +1,12 @@
+id: invalid-using-stripped
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  using long long_unsigned int = unsigned long long;
+  int f() { return 1; }
+contains:
+  - "int f()"
+not_contains:
+  - "using long"
+compile: true
+notes: Ghidra emits invalid using-aliases that must be dropped

@@ -1,0 +1,18 @@
+id: bare-ostream-ofstream
+profile: gcc_pe_x64
+gcc_fingerprint: "'ostream' was not declared|'ofstream' was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  int write_n(char *path, int n)
+  {
+    ofstream out;
+    std::ofstream::ofstream((ofstream *)&out, path);
+    std::ostream::operator<<((ostream *)&out, n);
+    return 0;
+  }
+contains:
+  - "std::ofstream out"
+  - "(std::ofstream *)&out"
+  - "(std::ostream *)&out"
+compile: false
+notes: "Ghidra prints ofstream/ostream without std:: (generator fstream_write dump)"

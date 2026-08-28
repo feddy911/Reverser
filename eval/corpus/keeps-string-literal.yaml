@@ -1,0 +1,9 @@
+id: keeps-string-literal
+profile: generic
+recipe: sanitize
+ghidra_cpp: |
+  printf("restored: %s\n", pcVar2);
+contains:
+  - 'printf("restored: %s\n", pcVar2);'
+compile: false
+notes: sanitizer must not rewrite inside string literals

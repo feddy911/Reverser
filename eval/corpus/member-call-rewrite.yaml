@@ -1,0 +1,17 @@
+id: member-call-rewrite
+profile: gcc_pe_x64
+gcc_fingerprint: "is not a member of"
+recipe: sanitize
+ghidra_cpp: |
+  std::vector<unsigned long long>::reserve
+      ((std::vector<unsigned long long>*)p, n);
+  std::vector<unsigned long long>::vector((std::vector<unsigned long long>*)p);
+  std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
+contains:
+  - "->reserve(n)"
+  - "new ("
+  - "->~vector()"
+not_contains:
+  - "::reserve"
+compile: false
+notes: Type::method(this, args) Ghidra member-call dialect

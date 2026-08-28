@@ -1,0 +1,11 @@
+id: main-crt-stub
+profile: gcc_pe_x64
+gcc_fingerprint: "'__main' was not declared"
+recipe: assemble
+guessed_name: main
+ghidra_cpp: |
+  int main() { __main(); return 0; }
+contains:
+  - "inline void __main()"
+compile: true
+notes: MinGW CRT __main, belongs in assembler stubs not a sample pack

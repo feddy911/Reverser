@@ -5,7 +5,7 @@ Built with MinGW (`samples/build_samples.ps1`): `-std=c++17 -O0 -g`.
 | Binary | Focus for Reverser |
 |--------|--------------------|
 | `EchoFilter.exe` | strings, iostream, filtering |
-| `PointCloud.exe` | structs, math, printf |
+| `PointCloud.exe` | **held-out (P2)**: structs, math, printf. Рецепты по нему не пишут. |
 | `IniMini.exe` | parsing, maps, branching |
 | `XorCipher.exe` | byte loops, buffers |
 | `FibTimer.exe` | numeric loops, chrono |
@@ -20,5 +20,5 @@ powershell -ExecutionPolicy Bypass -File samples/build_samples.ps1
 Pipeline smoke (after Ghidra+Ollama up):
 
 ```powershell
-py main.py --binary samples/EchoFilter.exe --domain-pack none
+py main.py --binary samples/EchoFilter.exe
 ```

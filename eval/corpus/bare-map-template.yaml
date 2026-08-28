@@ -1,0 +1,13 @@
+id: bare-map-template
+profile: gcc_pe_x64
+gcc_fingerprint: "'map' was not declared in this scope"
+recipe: sanitize
+ghidra_cpp: |
+  int has_key(map<int, unsigned long long> *m, int k)
+  {
+    return (int)(m != 0);
+  }
+contains:
+  - "std::map<int, unsigned long long>"
+compile: true
+notes: "Ghidra drops std:: on map<T> (same dialect as bare vector<)"

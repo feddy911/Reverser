@@ -1,0 +1,22 @@
+id: pointer-arg-adjust
+profile: gcc_pe_x64
+gcc_fingerprint: "cannot convert 'std::string' to 'std::string\\*'"
+recipe: assemble
+guessed_name: go
+ghidra_cpp: |
+  void go(std::string *q) {
+    std::string s;
+    report(s);
+    report(q);
+  }
+extra_functions:
+  - name: report
+    cpp: |
+      void report(std::string *p) { (void)p; }
+contains:
+  - "report(&s)"
+  - "report(q)"
+not_contains:
+  - "report(&q)"
+compile: true
+notes: object arg vs pointer param — do not take address of an existing pointer

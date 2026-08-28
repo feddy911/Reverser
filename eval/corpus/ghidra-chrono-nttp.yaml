@@ -1,0 +1,17 @@
+id: ghidra-chrono-nttp
+profile: gcc_pe_x64
+gcc_fingerprint: "'_1000000' was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  void to_us_types(void)
+  {
+    duration<long_long_int,_std::ratio<1,_1000000>_> *p;
+    (void)p;
+  }
+contains:
+  - "std::chrono::duration<long long,std::ratio<1,1000000>>"
+not_contains:
+  - "_1000000"
+  - "_std::"
+compile: true
+notes: "Ghidra NTTP _1000000 and bare duration/ratio templates from chrono dumps"

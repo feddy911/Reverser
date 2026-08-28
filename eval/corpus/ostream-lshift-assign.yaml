@@ -1,0 +1,10 @@
+id: ostream-lshift-assign
+profile: gcc_pe_x64
+gcc_fingerprint: "invalid operands to binary expression.*<<"
+recipe: sanitize
+ghidra_cpp: |
+  pbVar2 =(*(pbVar1)) << (local_200);
+contains:
+  - "(&((*(pbVar1)) << (local_200))"
+compile: false
+notes: Ghidra assigns ostream& from operator<< into a pointer

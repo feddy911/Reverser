@@ -1,0 +1,20 @@
+id: ghidra-free-operator-lshift
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to 'operator<<'"
+recipe: sanitize
+ghidra_cpp: |
+  int report_n(uint64_t n)
+  {
+    ostream *poVar1;
+    poVar1 = std::operator<<((ostream *)__fu0__ZSt4cout, "n=");
+    std::operator<<(poVar1, "\n");
+    return 0;
+  }
+contains:
+  - "<< ("
+  - "&std::cout"
+not_contains:
+  - "std::operator<<"
+  - "__fu0__ZSt4cout"
+compile: true
+notes: "Ghidra free std::operator<<(ostream*, x) is stream insert"

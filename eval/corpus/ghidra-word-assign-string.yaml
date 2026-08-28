@@ -1,0 +1,14 @@
+id: ghidra-word-assign-string
+profile: gcc_pe_x64
+gcc_fingerprint: "no match for 'operator='.*ghidra_word.*const char"
+recipe: assemble
+guessed_name: go
+ghidra_cpp: |
+  void go(void) {
+    Blob rec;
+    rec.tag = "hello";
+  }
+contains:
+  - "struct Blob"
+compile: true
+notes: inferred struct fields are ghidra_word; Ghidra assigns string literals to them

@@ -34,12 +34,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override log level: DEBUG, INFO, WARNING, ERROR",
     )
 
-    parser.add_argument(
-        "--domain-pack",
-        dest="domain_pack",
-        help="Override domain pack: none | mycollatz",
-    )
-
     return parser
 
 
@@ -57,9 +51,6 @@ def main() -> int:
 
     if args.log_level:
         config.log_level = args.log_level
-
-    if args.domain_pack:
-        config.domain_pack = args.domain_pack
 
     return run(config)
 

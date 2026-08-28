@@ -1,0 +1,17 @@
+id: ghidra-dtor-not-std-qualified
+profile: gcc_pe_x64
+gcc_fingerprint: "expected class-name before"
+recipe: sanitize
+ghidra_cpp: |
+  int write_n(char *path, int n)
+  {
+    ofstream out;
+    std::ofstream::~ofstream((ofstream *)&out);
+    return 0;
+  }
+contains:
+  - "->~ofstream()"
+not_contains:
+  - "~std::ofstream"
+compile: true
+notes: "Do not rewrite ~ofstream into ~std::ofstream"

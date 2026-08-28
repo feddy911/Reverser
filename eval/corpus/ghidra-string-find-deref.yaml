@@ -1,0 +1,21 @@
+id: ghidra-string-find-deref
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*find"
+recipe: sanitize
+ghidra_cpp: |
+  int has_pre(string *src, string *pre)
+  {
+    size_type sVar1;
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *hay;
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *needle;
+    size_type pos;
+    sVar1 = std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::find
+                      (hay, needle, pos);
+    return (int)(sVar1 == 0);
+  }
+contains:
+  - "->find(*(needle), pos)"
+not_contains:
+  - "::find"
+compile: true
+notes: "Ghidra find(this, T*, pos) where the method wants T const&"

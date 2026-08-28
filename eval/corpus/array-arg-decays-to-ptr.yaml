@@ -1,0 +1,23 @@
+id: array-arg-decays-to-ptr
+profile: generic
+gcc_fingerprint: "cannot convert.*\\(\\*\\)\\[[0-9]+\\] to"
+recipe: assemble
+guessed_name: go
+ghidra_cpp: |
+  void go(CloudPt *q) {
+    CloudPt cloud[2];
+    report(cloud);
+    report(q);
+  }
+extra_functions:
+  - name: report
+    cpp: |
+      void report(CloudPt *p) { (void)p->x; }
+contains:
+  - "report(cloud)"
+  - "report(q)"
+  - "struct CloudPt"
+not_contains:
+  - "report(&cloud)"
+compile: true
+notes: array T name[N] already decays to T*; assembler must not emit &name

@@ -1,0 +1,16 @@
+id: ostream-ghidra-syntax
+profile: gcc_pe_x64
+gcc_fingerprint: "cannot convert.*basic_ostream|invalid conversion.*ostream"
+recipe: sanitize
+ghidra_cpp: |
+  pbVar1 = thunk((std::basic_ostream<char, std::char_traits<char>> *)std::cout, "n");
+  pbVar2 = std::basic_ostream<char, std::char_traits<char>>::operator<<(pbVar1, n);
+contains:
+  - "&std::cout"
+  - "<< ("
+  - "(&(("
+not_contains:
+  - "*)std::cout"
+  - "::operator<<"
+compile: false
+notes: Ghidra iostream this-pointer + operator<<

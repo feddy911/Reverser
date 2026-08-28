@@ -1,0 +1,21 @@
+id: ghidra-ostream-assemble
+profile: gcc_pe_x64
+gcc_fingerprint: "cannot convert.*basic_ostream"
+recipe: assemble
+guessed_name: go
+ghidra_cpp: |
+  void go() {
+    uint64_t n = 1;
+    std::basic_ostream<char, std::char_traits<char>> *pbVar1;
+    std::basic_ostream<char, std::char_traits<char>> *pbVar2;
+    pbVar1 = thunk_FUN_140014360(
+        (std::basic_ostream<char, std::char_traits<char>> *)std::cout, "n");
+    pbVar2 = std::basic_ostream<char, std::char_traits<char>>::operator<<(pbVar1, n);
+    (void)pbVar2;
+  }
+contains:
+  - "&std::cout"
+not_contains:
+  - "::operator<<"
+compile: true
+notes: ostream dialect after assemble (sanitize runs inside assembler)

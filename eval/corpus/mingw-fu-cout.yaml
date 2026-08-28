@@ -1,0 +1,19 @@
+id: mingw-fu-cout
+profile: gcc_pe_x64
+gcc_fingerprint: "'__fu.*__ZSt4cout' was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  int report_n(uint64_t n)
+  {
+    ostream *poVar1;
+    poVar1 = std::operator<<((ostream *)__fu0__ZSt4cout, "n=");
+    (void)poVar1;
+    return 0;
+  }
+contains:
+  - "std::cout"
+  - "std::ostream"
+not_contains:
+  - "__fu0__ZSt4cout"
+compile: false
+notes: "MinGW Ghidra IAT stub __fuN__ZSt4cout is std::cout"

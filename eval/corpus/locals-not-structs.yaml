@@ -1,0 +1,14 @@
+id: locals-not-structs
+profile: generic
+recipe: assemble
+guessed_name: go
+ghidra_cpp: |
+  void go() {
+    longlong local_110;
+    local_110 *p;
+    p = &local_110;
+  }
+not_contains:
+  - "struct local_110"
+compile: false
+notes: Ghidra temps must not become inferred structs

@@ -1,0 +1,23 @@
+# P2 held-out: apply corpus + Compiler agent + Critic only.
+# Do not add rewrite rules in ghidra_cpp.py / assembler.py from these binaries.
+
+top_k: 15
+
+entries:
+  - name: heldout_struct_fixture
+    ghidra_json: tests/fixtures/heldout_struct.json
+    user_names:
+      - dist2
+      - closest_ix
+      - span_len
+      - main
+
+  - name: pointcloud
+    binary: samples/PointCloud.exe
+    ghidra_json: output/cache/288b2c2990f4a6006f2ad54df43d32b0/ghidra_full_v6.json
+    user_names:
+      - main
+      - nearest_index
+      - path_length
+      - distance
+      - print_point

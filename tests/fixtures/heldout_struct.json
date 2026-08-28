@@ -1,0 +1,50 @@
+{
+  "functions": [
+    {
+      "address": "0x140001000",
+      "name": "dist2",
+      "size": 80,
+      "callees": [],
+      "ext_calls": [],
+      "ext_dlls": [],
+      "lib_matched": false,
+      "ghidra_code": "double dist2(CloudPt *a, CloudPt *b)\n{\n  double dx;\n  double dy;\n  dx = a->x - b->x;\n  dy = a->y - b->y;\n  return dx * dx + dy * dy;\n}\n"
+    },
+    {
+      "address": "0x140001080",
+      "name": "closest_ix",
+      "size": 160,
+      "callees": ["0x140001000"],
+      "ext_calls": [],
+      "ext_dlls": [],
+      "lib_matched": false,
+      "ghidra_code": "int closest_ix(CloudPt *pts, int n, CloudPt *query)\n{\n  int best;\n  int i;\n  double best_d;\n  double d;\n  best = 0;\n  best_d = dist2(pts, query);\n  i = 1;\n  while (i < n) {\n    d = dist2(pts + i, query);\n    if (d < best_d) {\n      best_d = d;\n      best = i;\n    }\n    i = i + 1;\n  }\n  return best;\n}\n"
+    },
+    {
+      "address": "0x140001140",
+      "name": "span_len",
+      "size": 90,
+      "callees": ["0x140001000"],
+      "ext_calls": [],
+      "ext_dlls": [],
+      "lib_matched": false,
+      "ghidra_code": "double span_len(CloudPt *pts, int n)\n{\n  double total;\n  int i;\n  total = 0.0;\n  i = 1;\n  while (i < n) {\n    total = total + dist2(pts + (i + -1), pts + i);\n    i = i + 1;\n  }\n  return total;\n}\n"
+    },
+    {
+      "address": "0x1400011c0",
+      "name": "main",
+      "size": 120,
+      "callees": ["0x140001080", "0x140001140"],
+      "ext_calls": ["printf"],
+      "ext_dlls": [],
+      "lib_matched": false,
+      "literals": ["heldout\\n"],
+      "ghidra_code": "int main(void)\n{\n  CloudPt cloud[2];\n  CloudPt query;\n  int idx;\n  cloud[0].x = 0.0;\n  cloud[0].y = 0.0;\n  cloud[1].x = 3.0;\n  cloud[1].y = 4.0;\n  query.x = 1.0;\n  query.y = 1.0;\n  printf(\"heldout\\n\");\n  idx = closest_ix(cloud, 2, &query);\n  (void)span_len(cloud, 2);\n  return idx;\n}\n"
+    }
+  ],
+  "imports": ["printf"],
+  "strings": [
+    {"string": "heldout\\n", "address": "0x140010000"}
+  ],
+  "thunks": []
+}

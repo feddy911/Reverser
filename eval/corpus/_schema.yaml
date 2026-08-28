@@ -1,0 +1,15 @@
+# Corpus YAML schema (files starting with _ are not loaded).
+#
+# id: string
+# profile: msvc_x64_debug | gcc_pe_x64 | gcc_elf_x64 | generic | ...
+# gcc_fingerprint: optional regex of a gcc diagnostic this class produces
+# recipe: sanitize | assemble | sanitize_then_assemble
+# ghidra_cpp: |  snippet as Ghidra printed it
+# contains / not_contains: strings that must (not) appear after the recipe
+# compile: if true, g++ -fsyntax-only (skipped when no compiler)
+# requires: [gmp]  skip compile if header missing
+# guessed_name / extra_functions: assemble only
+id: _schema
+recipe: sanitize
+ghidra_cpp: "// not loaded"
+notes: documentation only

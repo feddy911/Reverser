@@ -1,0 +1,17 @@
+id: void-assign-strip
+profile: generic
+gcc_fingerprint: "void value not ignored as it ought to be"
+recipe: assemble
+guessed_name: go
+ghidra_cpp: |
+  int go() { int u; u = step(1); return u; }
+extra_functions:
+  - name: step
+    cpp: |
+      void step(int x) { (void)x; }
+contains:
+  - "step(1)"
+not_contains:
+  - "u = step"
+compile: true
+notes: assignment from a void callee is invalid C++

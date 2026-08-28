@@ -1,0 +1,19 @@
+id: bare-initializer-list
+profile: gcc_pe_x64
+gcc_fingerprint: "'initializer_list' was not declared"
+recipe: sanitize_then_assemble
+guessed_name: go
+ghidra_cpp: |
+  int go(void) {
+    Item query;
+    initializer_list<Item> local_20;
+    (void)query;
+    (void)local_20;
+    return 0;
+  }
+contains:
+  - "std::initializer_list<Item>"
+  - "struct Item"
+  - "#include <initializer_list>"
+compile: true
+notes: "Ghidra drops std:: on initializer_list<T> (same dialect as bare vector<)"

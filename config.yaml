@@ -1,5 +1,5 @@
 # Путь к бинарнику, который анализируем
-binary_path: samples/MyCollatz.exe
+binary_path: samples/EchoFilter.exe
 
 # Куда сохранять логи, артефакты, JSON-отчеты
 output_dir: output
@@ -31,5 +31,10 @@ ml_weights_path: output/ml_weights.json
 
 polish: true
 
-# Domain pack: none (произвольный бинарник) | mycollatz (эталон GMP/Collatz)
-domain_pack: mycollatz
+# Phase 2: syntax-check restored C++ (g++/clang++/cl). compile_fix — один LLM-проход по ошибкам.
+compile_verify: true
+compile_fix: true
+# cxx_compiler: C:/msys64/ucrt64/bin/g++.exe
+compile_timeout: 60
+compile_per_function: true
+# llm_best_of: 2

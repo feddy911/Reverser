@@ -1,0 +1,17 @@
+id: ghidra-mingw_main-helper
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+  \ */\r\n\r\nint helper(void)\r\n\r\n{\r\n  return 0;\r\n}"
+guessed_name: helper
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  \r\n  __main();\r\n \
+    \ iVar1 = helper();\r\n  return iVar1;\r\n}"
+contains:
+- helper
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump mingw_main; review before accept
+gcc_fingerprint: ''

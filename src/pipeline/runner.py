@@ -10,10 +10,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from legacy.r2.cache import FileCache, compute_file_md5
 from src.analysis.features import FEATURE_KEYS
 from src.analysis.includes import make_preamble
-from src.analysis.scorer import GhidraFunctionScorer
+from src.analysis.scorer import GhidraFunctionScorer, select_llm_targets
 from src.analysis.triage import triage_binary
 from src.config import AppConfig
-from src.domains import get_domain_pack
+from src.domains.pack import NONE_PACK
 from src.ghidra.headless import GhidraError, run_ghidra_decompile
 from src.logging_setup import setup_logging
 from src.pipeline.metrics import RunMetrics
@@ -52,16 +52,144 @@ def _llm_cache_key(
     return f"llm/{LLM_PROMPT_VER}/{safe_profile}/{safe_model}/{kind}/{addr}"
 
 
+def _corpus_cases() -> List[Any]:
+    try:
+        from src.analysis.corpus import load_corpus
+        return load_corpus()
+    except Exception as exc:
+        logger.warning("corpus not loaded: %s", exc)
+        return []
+
+
+def _per_function_compile(
+    data: Dict[str, Any],
+    *,
+    restorer: Any,
+    functions: List[Dict[str, Any]],
+    run_dir: Path,
+    config: AppConfig,
+    metrics: RunMetrics,
+    cache: Optional[Any],
+    profile: str,
+    addr: str,
+    corpus_cases: Optional[List[Any]] = None,
+) -> None:
+    """Syntax-check one restored function; optional LLM fix (Phase 2).
+
+    Compile-fix writes compile_fn/*_fix.cpp and cache kind=compile_fn_fix.
+    It must not overwrite data['cpp_code'] or the restore cache key.
+    """
+    if data.get("classification") != "user_code":
+        return
+    body = (data.get("cpp_code") or "").strip()
+    if not body:
+        return
+    from src.analysis.compile_verify import compile_snippet
+    from src.analysis.ghidra_cpp import extract_named_function, sanitize_ghidra_cpp
+    from src.analysis.includes import make_preamble
+
+    fname = (data.get("guessed_name") or data.get("ghidra_name") or "").strip()
+    if fname:
+        body = extract_named_function(body, fname)
+    body = sanitize_ghidra_cpp(body)
+    data["cpp_code"] = body
+
+    preamble = make_preamble(
+        f"// per-function compile {addr}",
+        [data],
+        functions,
+    )
+    crep = compile_snippet(
+        body,
+        preamble_lines=preamble,
+        work_dir=run_dir / "compile_fn",
+        name=addr,
+        compiler=config.cxx_compiler,
+        timeout_sec=config.compile_timeout,
+    )
+    data["compile_ok"] = bool(crep.ok)
+    data["compile_n_errors"] = crep.n_errors
+    if not crep.attempted:
+        return
+    if crep.ok:
+        metrics.compile_fn_ok += 1
+        print("    -> compile ok", flush=True)
+        return
+    metrics.compile_fn_fail += 1
+    print(f"    -> compile FAIL errors={crep.n_errors}", flush=True)
+    if not (config.compile_fix and crep.errors):
+        return
+    from src.agents.compiler import match_errors, write_proposal
+
+    decision = match_errors(crep.errors, corpus_cases or [])
+    if decision.known_ids:
+        print(
+            f"    -> known dialect {', '.join(decision.known_ids[:4])}",
+            flush=True,
+        )
+    if not decision.need_llm:
+        metrics.compile_known_skip += 1
+        print("    -> Compiler agent: skip LLM (all errors in corpus)", flush=True)
+        return
+    try:
+        write_proposal(
+            run_dir / "corpus_proposals",
+            profile=profile,
+            errors=crep.errors,
+            snippet=body,
+            addr=addr,
+        )
+        metrics.compiler_proposals += 1
+    except Exception as exc:
+        logger.warning("corpus proposal failed for %s: %s", addr, exc)
+    try:
+        metrics.llm_attempted += 1
+        fixed = restorer.fix_compile(
+            body, crep.errors, compiler=crep.compiler
+        )
+        if not fixed:
+            metrics.llm_fail += 1
+            return
+        from src.agents.assembler import strip_int_dat_redecls
+        fixed = strip_int_dat_redecls(fixed)
+        crep2 = compile_snippet(
+            fixed,
+            preamble_lines=preamble,
+            work_dir=run_dir / "compile_fn",
+            name=addr + "_fix",
+            compiler=config.cxx_compiler or crep.compiler,
+            timeout_sec=config.compile_timeout,
+        )
+        data["compile_fix_ok"] = bool(crep2.ok)
+        data["compile_fix_n_errors"] = crep2.n_errors
+        if crep2.ok or (crep2.attempted and crep2.n_errors < crep.n_errors):
+            metrics.compile_fn_fixed += 1
+            metrics.llm_ok += 1
+            print(
+                f"    -> compile-fix errors {crep.n_errors} -> {crep2.n_errors}"
+                f" ok={crep2.ok} (not applied to restore)",
+                flush=True,
+            )
+            if cache is not None:
+                cache.put(
+                    _llm_cache_key(
+                        profile, addr, "compile_fn_fix", model=config.model_name
+                    ),
+                    {"cpp_code": fixed, "compile_ok": bool(crep2.ok)},
+                )
+        else:
+            metrics.llm_fail += 1
+    except Exception as exc:
+        metrics.llm_fail += 1
+        logger.warning("per-function compile-fix failed for %s: %s", addr, exc)
+
+
 def run(config: AppConfig) -> int:
     run_dir = setup_logging(config.output_dir, config.log_level)
     logger.info("Pipeline (Ghidra-only) started")
 
-    try:
-        pack = get_domain_pack(config.domain_pack)
-    except ValueError as exc:
-        logger.error("%s", exc)
-        return 2
-    logger.info("domain_pack=%s", pack.name)
+    pack = NONE_PACK
+    logger.info("no sample-specific hints; includes from calls/DLLs only")
 
     metrics = RunMetrics(
         domain_pack=pack.name,
@@ -221,7 +349,6 @@ def run(config: AppConfig) -> int:
         print(f"OK: импортов: {len(imports)}")
         print(f"OK: строк: {len(strings)}")
         print(f"OK: кандидатов: {len(candidates)}")
-        print(f"OK: domain_pack: {pack.name}")
         print(f"OK: triage: {triage.summary} -> {triage.profile}")
         print()
         print("=== TOP-15 USER CODE CANDIDATES ===")
@@ -231,7 +358,7 @@ def run(config: AppConfig) -> int:
 
         # 4. Этап 3: LLM-восстановление
         if config.use_llm:
-            from src.agents.assembler import assemble
+            from src.agents.assembler import assemble, user_emit_order
             from src.agents.restorer import CodeRestorerLLM
             from src.analysis.fidelity import check_function
             from src.llm.client import OllamaClient
@@ -248,8 +375,18 @@ def run(config: AppConfig) -> int:
                 profile=triage.profile,
             )
 
-            top = [s for s in scored if s["score"] > 0][: config.llm_top]
+            top, n_filtered = select_llm_targets(scored, config.llm_top)
+            metrics.runtime_filtered = n_filtered
             metrics.llm_top = len(top)
+            if n_filtered:
+                logger.info(
+                    "Runtime noise filtered from LLM top: %d (kept %d)",
+                    n_filtered, len(top),
+                )
+            print()
+            print("=== LLM TARGETS (CRT/STL filtered) ===")
+            for i, s in enumerate(top, 1):
+                print(f"{i:2}. score={s['score']:8.3f}  {s['name']}  @ {s['address']}")
             restored: List[Dict[str, Any]] = []
 
             guess_by_addr_init = {f["address"]: (f.get("name") or "") for f in functions}
@@ -262,6 +399,7 @@ def run(config: AppConfig) -> int:
 
             print()
             print("=== STAGE 3: LLM RESTORATION ===")
+            corpus_cases = _corpus_cases()
             t0 = time.perf_counter()
             for i, s in enumerate(top, 1):
                 addr = s["address"]
@@ -289,6 +427,7 @@ def run(config: AppConfig) -> int:
                                     s, gh_code, max_attempts=3,
                                     guess_by_addr=guess_by_addr_init,
                                     thunk_target=thunk_target_init,
+                                    best_of=config.llm_best_of,
                                 )
                                 break
                             except Exception as exc:
@@ -342,6 +481,15 @@ def run(config: AppConfig) -> int:
                 guess = data.get("guessed_name") or "-"
                 conf = data.get("confidence", 0)
                 print(f"    -> {cls} | {guess} | confidence {conf}")
+                from src.analysis.platform import is_runtime_noise, looks_like_user_restore_name
+                if (
+                    cls in ("stl", "crt")
+                    and looks_like_user_restore_name(s.get("name") or "")
+                    and (data.get("cpp_code") or "").strip()
+                ):
+                    data["classification"] = "user_code"
+                    cls = "user_code"
+                    print("    -> reclass user_code (user-like name)")
 
                 data["address"] = addr
                 data["ghidra_name"] = s["name"]
@@ -349,6 +497,19 @@ def run(config: AppConfig) -> int:
                 data["literals"] = s.get("literals", [])
                 data["ext_calls"] = s.get("ext_calls", [])
                 data["callees"] = s.get("callees", [])
+                if config.compile_verify and config.compile_per_function:
+                    _per_function_compile(
+                        data,
+                        restorer=restorer,
+                        functions=functions,
+                        run_dir=run_dir,
+                        config=config,
+                        metrics=metrics,
+                        cache=cache,
+                        profile=triage.profile,
+                        addr=addr,
+                        corpus_cases=corpus_cases,
+                    )
                 restored.append(data)
 
             metrics.mark_stage("llm_restore", t0)
@@ -388,13 +549,12 @@ def run(config: AppConfig) -> int:
                 t0 = time.perf_counter()
                 preamble = make_preamble(
                     f"// restored_v2.cpp: symbol linking + struct dedup + noise removal"
-                    f" [domain={pack.name} profile={triage.profile}]",
+                    f" [profile={triage.profile}]",
                     restored,
                     functions,
-                    pack=pack,
                 )
                 v2_text, n2 = assemble(
-                    restored, functions, thunks, pack=pack, preamble_lines=preamble
+                    restored, functions, thunks, preamble_lines=preamble
                 )
                 (run_dir / "restored_v2.cpp").write_text(v2_text, encoding="utf-8")
                 metrics.mark_stage("assemble", t0)
@@ -403,7 +563,7 @@ def run(config: AppConfig) -> int:
                 if config.polish:
                     from src.agents.polisher import CodePolisher
 
-                    polisher = CodePolisher(client, pack=pack)
+                    polisher = CodePolisher(client)
                     # Полная карта имён: Ghidra + угаданные LLM (единый fidelity)
                     name_by_addr = dict(guess_by_addr_init)
                     for r in restored:
@@ -416,10 +576,9 @@ def run(config: AppConfig) -> int:
 
                     v3_lines = make_preamble(
                         f"// restored_v3.cpp: polished C++17"
-                        f" [domain={pack.name} profile={triage.profile}]",
+                        f" [profile={triage.profile}]",
                         restored,
                         functions,
-                        pack=pack,
                     )
 
                     t0 = time.perf_counter()
@@ -504,38 +663,59 @@ def run(config: AppConfig) -> int:
                     v2_by_addr = dict(zip(*[iter(re.split(pat, v2_text)[1:])] * 2))
                     v3_by_addr = dict(zip(*[iter(re.split(pat, v3_text)[1:])] * 2))
 
-                    final_lines = [
-                        f"// restored_final.cpp: best-of v2/v3 by fidelity [domain={pack.name}]",
-                        "",
-                    ]
-                    report = []
+                    from src.agents.assembler import assemble
 
-                    for s in top:
-                        addr = s["address"]
+                    report = []
+                    emit = []
+                    ordered = user_emit_order(user_parts)
+                    by_addr_top = {s["address"]: s for s in top}
+                    for r in ordered:
+                        addr = r["address"]
+                        s = by_addr_top.get(addr) or r
                         v2 = v2_by_addr.get(addr, "")
                         v3c = v3_by_addr.get(addr, "")
                         toks = _call_tokens(
                             s.get("callees") or [], name_by_addr, thunk_target
                         )
-                        rep = check_function(s, v3c, toks)
-                        chosen_v3 = bool(v3c) and not rep["drift"]
-                        chosen = v3c if chosen_v3 else v2
-                        report.append({**rep, "chosen": "v3" if chosen_v3 else "v2"})
-
-                        final_lines.append("// " + "=" * 60)
-                        final_lines.append(
-                            f"// {name_by_addr.get(addr) or s['name']} @ {addr} "
-                            f"[{'v3' if chosen_v3 else 'v2'}] fid={rep['fidelity']}"
+                        rep_v2 = check_function(s, v2, toks)
+                        rep_v3 = check_function(s, v3c, toks) if v3c else None
+                        use_v3 = bool(
+                            rep_v3
+                            and v3c.strip()
+                            and rep_v3["fidelity"] >= rep_v2["fidelity"]
+                            and not (
+                                rep_v3["drift"] and not rep_v2["drift"]
+                            )
                         )
-                        final_lines.append("// " + "=" * 60)
-                        final_lines.append(chosen.strip())
-                        final_lines.append("")
+                        if use_v3:
+                            chosen, rep, tag = v3c, rep_v3, "v3"
+                        else:
+                            chosen, rep, tag = v2, rep_v2, "v2"
+                        name = (
+                            name_by_addr.get(addr)
+                            or s.get("name")
+                            or r.get("ghidra_name")
+                        )
+                        report.append({**rep, "chosen": tag})
+                        item = dict(r)
+                        item["cpp_code"] = chosen
+                        item["guessed_name"] = name
+                        emit.append(item)
+
+                    preamble = make_preamble(
+                        f"// restored_final.cpp: best-of v2/v3 by fidelity [profile={triage.profile}]",
+                        emit,
+                        functions,
+                    )
+                    final_text, _n = assemble(
+                        emit, functions, thunks, preamble_lines=preamble
+                    )
 
                     metrics.record_fidelity(report)
                     metrics.mark_stage("fidelity", t0)
                     _save_json(run_dir / "fidelity.json", report)
                     (run_dir / "restored_final.cpp").write_text(
-                        "\n".join(final_lines), encoding="utf-8"
+                        final_text, encoding="utf-8"
                     )
 
                     print()
@@ -553,6 +733,184 @@ def run(config: AppConfig) -> int:
                             extra = f" | consts={r['missing_consts'][:3]}"
                         print(f"{flag} {r['address']} fid={r['fidelity']:.2f}{extra}")
                     print("OK: restored_final.cpp")
+
+                source_cpp = None
+                for name in ("restored_final.cpp", "restored_v2.cpp", "restored.cpp"):
+                    cand = run_dir / name
+                    if cand.exists():
+                        source_cpp = cand
+                        break
+                name_by_addr = dict(guess_by_addr_init)
+                for r in restored:
+                    g = (r.get("guessed_name") or "").strip()
+                    if g and r.get("address"):
+                        name_by_addr[r["address"]] = g
+                thunk_target = {
+                    t["address"]: t["target"] for t in thunks if t.get("target")
+                }
+                ghidra_by_addr = {s["address"]: s for s in top}
+                tu_text = (
+                    source_cpp.read_text(encoding="utf-8") if source_cpp else ""
+                )
+                from src.agents.critic import review_compile_fix, review_run
+
+                assembled_ok = None
+                if config.compile_verify and source_cpp is not None:
+                    from src.analysis.compile_verify import compile_cpp
+                    from src.agents.compiler import match_errors, write_proposal
+
+                    t0 = time.perf_counter()
+                    crep = compile_cpp(
+                        source_cpp,
+                        compiler=config.cxx_compiler,
+                        timeout_sec=config.compile_timeout,
+                    )
+                    assembled_ok = bool(crep.ok) if crep.attempted else None
+                    payload = crep.to_dict()
+                    if (
+                        not crep.ok
+                        and crep.attempted
+                        and config.compile_fix
+                        and crep.errors
+                    ):
+                        decision = match_errors(crep.errors, corpus_cases)
+                        payload["compiler_agent"] = {
+                            "known_ids": decision.known_ids,
+                            "n_unknown": len(decision.unknown),
+                            "need_llm": decision.need_llm,
+                        }
+                        if decision.known_ids:
+                            print(
+                                "  known dialect: "
+                                + ", ".join(decision.known_ids[:6]),
+                                flush=True,
+                            )
+                        if not decision.need_llm:
+                            metrics.compile_known_skip += 1
+                            print(
+                                "  Compiler agent: skip LLM (all errors in corpus)",
+                                flush=True,
+                            )
+                        else:
+                            try:
+                                write_proposal(
+                                    run_dir / "corpus_proposals",
+                                    profile=triage.profile,
+                                    errors=crep.errors,
+                                    snippet=source_cpp.read_text(encoding="utf-8")[:4000],
+                                    addr="tu",
+                                )
+                                metrics.compiler_proposals += 1
+                            except Exception as exc:
+                                logger.warning("TU corpus proposal failed: %s", exc)
+                            try:
+                                metrics.llm_attempted += 1
+                                fixed = restorer.fix_compile(
+                                    source_cpp.read_text(encoding="utf-8"),
+                                    crep.errors,
+                                    compiler=crep.compiler,
+                                )
+                                if fixed:
+                                    from src.agents.assembler import strip_int_dat_redecls
+                                    fixed = strip_int_dat_redecls(fixed)
+                                    ident_ok, ident_reasons = review_compile_fix(
+                                        fixed,
+                                        user_parts,
+                                        ghidra_by_addr=ghidra_by_addr,
+                                    )
+                                    if not ident_ok:
+                                        print(
+                                            "  critic REJECT compile-fix: "
+                                            + "; ".join(ident_reasons),
+                                            flush=True,
+                                        )
+                                        metrics.llm_fail += 1
+                                        payload["compile_fix_rejected"] = ident_reasons
+                                    else:
+                                        fix_path = run_dir / "restored_compilefix.cpp"
+                                        fix_path.write_text(fixed, encoding="utf-8")
+                                        crep2 = compile_cpp(
+                                            fix_path,
+                                            compiler=config.cxx_compiler or crep.compiler,
+                                            timeout_sec=config.compile_timeout,
+                                        )
+                                        payload["compile_fix"] = crep2.to_dict()
+                                        if crep2.ok or (
+                                            crep2.attempted
+                                            and crep2.n_errors < crep.n_errors
+                                        ):
+                                            metrics.compile_fixed = True
+                                            metrics.llm_ok += 1
+                                        else:
+                                            metrics.llm_fail += 1
+                                else:
+                                    metrics.llm_fail += 1
+                            except Exception as exc:
+                                metrics.llm_fail += 1
+                                logger.warning("compile-fix LLM failed: %s", exc)
+                    metrics.mark_stage("compile", t0)
+                    metrics.compile_attempted = crep.attempted
+                    metrics.compile_ok = bool(assembled_ok)
+                    metrics.compile_n_errors = crep.n_errors
+                    metrics.compile_skipped = crep.skipped_reason
+                    payload["assembled_ok"] = assembled_ok
+                    _save_json(run_dir / "compile.json", payload)
+                    print()
+                    print("=== COMPILE VERIFY ===")
+                    if crep.skipped_reason and not crep.attempted:
+                        print(f"SKIP: {crep.skipped_reason}")
+                    else:
+                        flag = "OK" if assembled_ok else "FAIL"
+                        print(
+                            f"{flag}: {crep.compiler} errors={crep.n_errors} "
+                            f"assembled={assembled_ok} "
+                            f"fixed={metrics.compile_fixed}"
+                        )
+                        for err in crep.errors[:8]:
+                            print(
+                                f"  {err.get('file')}:{err.get('line')}: "
+                                f"{err.get('message')}"
+                            )
+
+                t_crit = time.perf_counter()
+                verdict = review_run(
+                    user_parts,
+                    ghidra_by_addr=ghidra_by_addr,
+                    name_by_addr=name_by_addr,
+                    thunk_target=thunk_target,
+                    tu_text=tu_text,
+                    compile_ok=assembled_ok,
+                    functions=functions,
+                    thunks=thunks,
+                )
+                metrics.critic_accept = bool(verdict.accept)
+                metrics.critic_reject = sum(
+                    1 for f in verdict.functions if not f.accept
+                )
+                metrics.mark_stage("critic", t_crit)
+                _save_json(run_dir / "critic.json", verdict.to_dict())
+                if not config.polish:
+                    _save_json(
+                        run_dir / "fidelity.json",
+                        [f.to_dict() for f in verdict.functions],
+                    )
+                    metrics.record_fidelity(
+                        [
+                            {"fidelity": f.fidelity, "address": f.address}
+                            for f in verdict.functions
+                        ]
+                    )
+                print()
+                print("=== CRITIC ===")
+                flag = "ACCEPT" if verdict.accept else "REJECT"
+                print(
+                    f"{flag}: identity={verdict.identity_ok} "
+                    f"fidelity={verdict.fidelity_ok} "
+                    f"compile={verdict.compile_ok} "
+                    f"reject_fn={metrics.critic_reject}"
+                )
+                for reason in verdict.reasons[:8]:
+                    print(f"  {reason}")
 
     except Exception:
         logger.exception("Pipeline failed")

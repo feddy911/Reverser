@@ -1,0 +1,21 @@
+id: ostream-array-and-gmp-amp
+profile: msvc_x64_debug
+gcc_fingerprint: "basic_ostream.*incomplete|cannot convert mpz"
+recipe: sanitize
+ghidra_cpp: |
+  void f(mpz_srcptr p) {
+    std::basic_ostream<char, std::char_traits<char>> *pbVar3;
+    std::basic_ostream<char, std::char_traits<char>> local_298[292];
+    __gmpz_init(&obj->field7);
+  }
+contains:
+  - "ghidra_word p"
+  - "undefined1 local_298[292]"
+  - "*pbVar3"
+  - "(mpz_ptr)(&obj->field7)"
+not_contains:
+  - "basic_ostream<char, std::char_traits<char>> local_298"
+compile: false
+requires:
+  - gmp
+notes: ostream-as-array buffer + mpz address-of

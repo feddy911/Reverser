@@ -27,6 +27,19 @@ class RunMetrics:
     domain_pack: str = "none"
     triage_profile: str = ""
     scoring_mode: str = "heuristic"
+    runtime_filtered: int = 0
+    compile_attempted: bool = False
+    compile_ok: bool = False
+    compile_n_errors: int = 0
+    compile_fixed: bool = False
+    compile_skipped: str = ""
+    compile_fn_ok: int = 0
+    compile_fn_fail: int = 0
+    compile_fn_fixed: int = 0
+    compile_known_skip: int = 0
+    compiler_proposals: int = 0
+    critic_accept: bool = True
+    critic_reject: int = 0
 
     def mark_stage(self, name: str, started_at: float) -> None:
         self.stages_sec[name] = round(time.perf_counter() - started_at, 3)
@@ -72,6 +85,23 @@ class RunMetrics:
                 "rolled_back": self.polish_rolled_back,
             },
             "fidelity": fid_summary,
+            "compile": {
+                "attempted": self.compile_attempted,
+                "ok": self.compile_ok,
+                "n_errors": self.compile_n_errors,
+                "fixed": self.compile_fixed,
+                "skipped": self.compile_skipped,
+                "fn_ok": self.compile_fn_ok,
+                "fn_fail": self.compile_fn_fail,
+                "fn_fixed": self.compile_fn_fixed,
+                "known_skip": self.compile_known_skip,
+                "proposals": self.compiler_proposals,
+            },
+            "critic": {
+                "accept": self.critic_accept,
+                "reject": self.critic_reject,
+            },
+            "runtime_filtered": self.runtime_filtered,
         }
 
     def summary_lines(self) -> List[str]:
@@ -101,4 +131,31 @@ class RunMetrics:
             f"  domain_pack={d['domain_pack']} profile={d.get('triage_profile') or '-'} "
             f"scoring={d['scoring_mode']}"
         )
+        if d.get("runtime_filtered"):
+            lines.append(f"  runtime_filtered={d['runtime_filtered']}")
+        comp = d["compile"]
+        if comp["attempted"] or comp["skipped"]:
+            if comp["skipped"] and not comp["attempted"]:
+                lines.append(f"  compile: skipped ({comp['skipped']})")
+            else:
+                lines.append(
+                    f"  compile: ok={comp['ok']} errors={comp['n_errors']} "
+                    f"fixed={comp['fixed']}"
+                    + (
+                        f" fn={comp.get('fn_ok', 0)}/{comp.get('fn_ok', 0) + comp.get('fn_fail', 0)}"
+                        f" fn_fixed={comp.get('fn_fixed', 0)}"
+                        if (comp.get("fn_ok") or comp.get("fn_fail"))
+                        else ""
+                    )
+                    + (
+                        f" known_skip={comp.get('known_skip', 0)}"
+                        if comp.get("known_skip")
+                        else ""
+                    )
+                )
+        crit = d.get("critic") or {}
+        if crit.get("reject") or crit.get("accept") is False:
+            lines.append(
+                f"  critic: accept={crit.get('accept')} reject={crit.get('reject', 0)}"
+            )
         return lines

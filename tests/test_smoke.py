@@ -13,7 +13,6 @@ from src.agents.assembler import assemble
 from src.analysis.features import FEATURE_KEYS, derive_features, extract_features, FeatureIndex
 from src.analysis.fidelity import check_function
 from src.analysis.scorer import GhidraFunctionScorer
-from src.domains import get_domain_pack, list_domain_packs
 from src.domains.pack import NONE_PACK
 
 
@@ -24,22 +23,11 @@ def _load_fixture():
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
 
 
-class TestDomainPacks(unittest.TestCase):
-    def test_registry(self):
-        packs = list_domain_packs()
-        self.assertIn("none", packs)
-        self.assertIn("mycollatz", packs)
-        self.assertFalse(get_domain_pack("none").has_polish_hints)
-        self.assertTrue(get_domain_pack("mycollatz").has_polish_hints)
-
-    def test_unknown_pack_raises(self):
-        with self.assertRaises(ValueError):
-            get_domain_pack("no_such_pack")
-
-    def test_mycollatz_preamble_has_gmp(self):
-        lines = get_domain_pack("mycollatz").preamble("// test")
-        self.assertIn("#include <gmp.h>", lines)
-        self.assertNotIn("#include <gmp.h>", NONE_PACK.preamble("// test"))
+class TestPreamble(unittest.TestCase):
+    def test_default_preamble_has_no_gmp(self):
+        lines = NONE_PACK.preamble("// test")
+        self.assertNotIn("#include <gmp.h>", lines)
+        self.assertIn("#include <cstdint>", lines)
 
 
 class TestFeaturesSmoke(unittest.TestCase):
@@ -87,13 +75,12 @@ class TestAssemblerDomain(unittest.TestCase):
             "ghidra_name": "FUN_140001000",
             "cpp_code": "void greet() { printf(\"hi\"); }\n",
         }]
-        text, n = assemble(restored, [], [], pack=NONE_PACK)
+        text, n = assemble(restored, [], [])
         self.assertEqual(n, 1)
         self.assertNotIn("gmp.h", text)
         self.assertIn("greet", text)
 
-    def test_mycollatz_pack_renames_and_gmp(self):
-        pack = get_domain_pack("mycollatz")
+    def test_assemble_keeps_types_from_code(self):
         restored = [{
             "classification": "user_code",
             "address": "0x140001000",
@@ -104,11 +91,208 @@ class TestAssemblerDomain(unittest.TestCase):
                 "void step(MyStruct* s) { (void)s; }\n"
             ),
         }]
-        text, n = assemble(restored, [], [], pack=pack)
+        text, n = assemble(restored, [], [])
         self.assertEqual(n, 1)
-        self.assertIn("gmp.h", text)
-        self.assertIn("CollatzState", text)
-        self.assertNotIn("MyStruct", text)
+        self.assertIn("MyStruct", text)
+        self.assertNotIn("CollatzState", text)
+        self.assertNotIn("gmp.h", text)
+
+    def test_infers_struct_from_member_access(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "init",
+            "ghidra_name": "FUN_1",
+            "cpp_code": (
+                "void init(Widget* obj) {\n"
+                "  obj->field2 = 0;\n"
+                "  obj->field3 = 1;\n"
+                "}\n"
+            ),
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertIn("struct Widget", text)
+        self.assertIn("field2", text)
+        self.assertIn("field3", text)
+        self.assertNotIn("CollatzState", text)
+
+    def test_infers_undeclared_struct_type_without_fields(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "dist2",
+            "ghidra_name": "FUN_1",
+            "cpp_code": (
+                "double dist2(CloudPt *a, CloudPt *b) {\n"
+                "  CloudPt query;\n"
+                "  (void)a; (void)b; (void)query;\n"
+                "  return 0;\n"
+                "}\n"
+            ),
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertIn("struct CloudPt", text)
+
+    def test_does_not_infer_ghidra_locals_as_structs(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "go",
+            "ghidra_name": "FUN_1",
+            "cpp_code": (
+                "void go() {\n"
+                "  longlong local_110;\n"
+                "  local_110 *p;\n"
+                "  p = &local_110;\n"
+                "}\n"
+            ),
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertNotIn("struct local_110", text)
+
+    def test_strips_assign_from_void_function(self):
+        restored = [
+            {
+                "classification": "user_code",
+                "address": "0x1",
+                "guessed_name": "step",
+                "ghidra_name": "FUN_1",
+                "cpp_code": "void step(int x) { (void)x; }\n",
+            },
+            {
+                "classification": "user_code",
+                "address": "0x2",
+                "guessed_name": "go",
+                "ghidra_name": "FUN_2",
+                "cpp_code": "int go() { int u; u = step(1); return u; }\n",
+            },
+        ]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 2)
+        self.assertIn("step(1)", text)
+        self.assertNotIn("u = step", text)
+
+    def test_thunk_and_dat_stubs(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x140001000",
+            "guessed_name": "go",
+            "ghidra_name": "FUN_140001000",
+            "cpp_code": (
+                "void go() {\n"
+                "  thunk_FUN_140021680(\"hi\");\n"
+                "  thunk_FUN_140021680(&DAT_14002db14);\n"
+                "}\n"
+            ),
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertIn("inline ghidra_word thunk_FUN_140021680(...)", text)
+        self.assertIn("static undefined DAT_14002db14", text)
+
+    def test_main_crt_stub(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "main",
+            "ghidra_name": "main",
+            "cpp_code": "int main() { __main(); return 0; }\n",
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertIn("inline void __main()", text)
+
+    def test_adjusts_object_args_to_pointer_params(self):
+        restored = [
+            {
+                "classification": "user_code",
+                "address": "0x1",
+                "guessed_name": "report",
+                "ghidra_name": "FUN_1",
+                "cpp_code": "void report(std::string *p) { (void)p; }\n",
+            },
+            {
+                "classification": "user_code",
+                "address": "0x2",
+                "guessed_name": "go",
+                "ghidra_name": "FUN_2",
+                "cpp_code": (
+                    "void go(std::string *q) {\n"
+                    "  std::string s;\n"
+                    "  report(s);\n"
+                    "  report(q);\n"
+                    "}\n"
+                ),
+            },
+        ]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 2)
+        self.assertIn("report(&s)", text)
+        self.assertIn("report(q)", text)
+        self.assertNotIn("report(&q)", text)
+
+    def test_array_arg_decays_to_pointer_param(self):
+        restored = [
+            {
+                "classification": "user_code",
+                "address": "0x1",
+                "guessed_name": "report",
+                "ghidra_name": "FUN_1",
+                "cpp_code": "void report(CloudPt *p) { (void)p->x; }\n",
+            },
+            {
+                "classification": "user_code",
+                "address": "0x2",
+                "guessed_name": "go",
+                "ghidra_name": "FUN_2",
+                "cpp_code": (
+                    "void go(CloudPt *q) {\n"
+                    "  CloudPt cloud[2];\n"
+                    "  report(cloud);\n"
+                    "  report(q);\n"
+                    "}\n"
+                ),
+            },
+        ]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 2)
+        self.assertIn("report(cloud)", text)
+        self.assertNotIn("report(&cloud)", text)
+        self.assertIn("report(q)", text)
+
+    def test_prototypes_main_last_and_strips_includes(self):
+        restored = [
+            {
+                "classification": "user_code",
+                "address": "0x1",
+                "guessed_name": "main",
+                "ghidra_name": "main",
+                "cpp_code": '#include <vector>\nint main() { helper(); return 0; }\n',
+            },
+            {
+                "classification": "user_code",
+                "address": "0x2",
+                "guessed_name": "helper",
+                "ghidra_name": "helper",
+                "cpp_code": "void helper() {}\n",
+            },
+        ]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 2)
+        self.assertIn("void helper();", text)
+        self.assertIn("int main();", text)
+        proto_at = text.find("// ---- prototypes ----")
+        funcs_at = text.find("// ---- functions ----")
+        helper_body = text.find("void helper() {", funcs_at)
+        main_body = text.find("int main() {", funcs_at)
+        self.assertLess(proto_at, funcs_at)
+        self.assertLess(helper_body, main_body)
+        # includes only in preamble, not inside function bodies
+        body = text[funcs_at:]
+        self.assertNotIn("#include <vector>", body)
 
 
 class TestFidelitySmoke(unittest.TestCase):
@@ -179,6 +363,66 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertEqual(rep["missing_ext"], [])
         self.assertNotIn("0xcccccccc", rep["missing_consts"])
         self.assertGreaterEqual(rep["fidelity"], 0.99)
+
+    def test_operator_shift_not_required_as_call_name(self):
+        from src.analysis.fidelity import build_call_tokens, check_function
+
+        toks = build_call_tokens(
+            ["0x10"],
+            name_by_addr={"0x10": "operator<<"},
+            thunk_target={},
+        )
+        self.assertEqual(toks, [])
+        entry = {
+            "address": "0x1",
+            "literals": [],
+            "ext_calls": ["operator<<"],
+            "ghidra_code": "std::cout << x;",
+        }
+        code = 'std::cout << "hi";'
+        rep = check_function(entry, code, toks)
+        self.assertEqual(rep["missing_ext"], [])
+        self.assertEqual(rep["missing_calls"], [])
+
+    def test_unresolved_addr_not_required_as_fun(self):
+        from src.analysis.fidelity import build_call_tokens, check_function
+
+        toks = build_call_tokens(["0x140008000"], name_by_addr={}, thunk_target={})
+        self.assertEqual(toks, [])
+        entry = {
+            "address": "0x1",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": "return hypot(x, y);",
+        }
+        rep = check_function(entry, "return hypot(x, y);", toks)
+        self.assertFalse(rep["drift"])
+        self.assertEqual(rep["missing_calls"], [])
+
+    def test_import_thunk_name_required(self):
+        from src.analysis.fidelity import (
+            build_call_tokens,
+            check_function,
+            symbol_names_from_dump,
+        )
+
+        names = symbol_names_from_dump(
+            functions=[],
+            thunks=[{"address": "0x2000", "name": "hypot", "target": None}],
+        )
+        toks = build_call_tokens(["0x2000"], name_by_addr=names, thunk_target={})
+        self.assertEqual([n for n, _ in toks], ["hypot"])
+        entry = {
+            "address": "0x1",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": "return hypot(x, y);",
+        }
+        ok = check_function(entry, "return hypot(a, b);", toks)
+        self.assertFalse(ok["drift"])
+        bad = check_function(entry, "return a + b;", toks)
+        self.assertTrue(bad["drift"])
+        self.assertIn("hypot", bad["missing_calls"])
 
 
 class TestExtractFeatures(unittest.TestCase):

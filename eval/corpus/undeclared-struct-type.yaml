@@ -1,0 +1,26 @@
+id: undeclared-struct-type
+profile: gcc_pe_x64
+gcc_fingerprint: "'[A-Z][A-Za-z0-9]*' was not declared in this scope"
+recipe: assemble
+guessed_name: dist2
+ghidra_cpp: |
+  double dist2(CloudPt *a, CloudPt *b)
+  {
+    double *in_RCX;
+    double *in_RDX;
+    return (*in_RCX - *in_RDX) * (*in_RCX - *in_RDX);
+  }
+extra_functions:
+  - name: go
+    cpp: |
+      int go(void) {
+        CloudPt query;
+        CloudPt cloud [2];
+        (void)query;
+        (void)cloud;
+        return 0;
+      }
+contains:
+  - "struct CloudPt"
+compile: true
+notes: Ghidra uses an undeclared T as param/local/array (generator dump heldout_struct_math)

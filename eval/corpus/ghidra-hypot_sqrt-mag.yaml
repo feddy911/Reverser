@@ -1,0 +1,20 @@
+id: ghidra-hypot_sqrt-mag
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\ndouble mag(double x,double\
+  \ y)\r\n\r\n{\r\n  double in_XMM0_Qa;\r\n  double dVar1;\r\n  double in_XMM1_Qa;\r\
+  \n  \r\n  dVar1 = sqrt(in_XMM0_Qa * in_XMM0_Qa + in_XMM1_Qa * in_XMM1_Qa);\r\n \
+  \ return dVar1;\r\n}"
+guessed_name: mag
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  double dVar1;\r\n  double in_stack_ffffffffffffffd8;\r\
+    \n  double in_stack_ffffffffffffffe0;\r\n  \r\n  __main();\r\n  dVar1 = mag(in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);\r\
+    \n  return (int)(dVar1 <= DAT_140004000);\r\n}"
+contains:
+- mag
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump hypot_sqrt; review before accept
+gcc_fingerprint: ''

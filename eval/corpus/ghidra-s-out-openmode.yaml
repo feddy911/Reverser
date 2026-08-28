@@ -1,0 +1,15 @@
+id: ghidra-s-out-openmode
+profile: gcc_pe_x64
+gcc_fingerprint: "'_S_out' was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  void open_out(ofstream *out, char *path)
+  {
+    std::ofstream::ofstream(out, path, _S_out);
+  }
+contains:
+  - "std::ios::out"
+not_contains:
+  - "_S_out"
+compile: false
+notes: "Ghidra uses libstdc++ _S_out instead of std::ios::out"

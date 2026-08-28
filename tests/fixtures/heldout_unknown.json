@@ -1,0 +1,17 @@
+{
+  "functions": [
+    {
+      "address": "0x140001000",
+      "name": "go",
+      "size": 40,
+      "callees": [],
+      "ext_calls": [],
+      "ext_dlls": [],
+      "lib_matched": false,
+      "ghidra_code": "int go(void)\n{\n  return wholly_new_ghidra_token + 1;\n}\n"
+    }
+  ],
+  "imports": [],
+  "strings": [],
+  "thunks": []
+}

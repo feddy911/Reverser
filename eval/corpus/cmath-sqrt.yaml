@@ -1,0 +1,15 @@
+id: cmath-sqrt
+profile: gcc_pe_x64
+gcc_fingerprint: "'sqrt' was not declared in this scope"
+recipe: assemble
+guessed_name: mag
+ghidra_cpp: |
+  double mag(double x, double y)
+  {
+    return sqrt(x * x + y * y);
+  }
+contains:
+  - "#include <cmath>"
+  - "sqrt("
+compile: true
+notes: Ghidra emits sqrt/hypot without <cmath>

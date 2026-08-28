@@ -57,6 +57,9 @@ _NOISE_CALL_EXACT = {
     "_RTC_Shutdown",
     "DebuggerProbe",
     "DebuggerRuntime",
+    "compare",
+    "__main",
+    "__mingw_printf",
 }
 _NOISE_CALL_PREFIXES = (
     "__CheckForDebugger",
@@ -65,6 +68,10 @@ _NOISE_CALL_PREFIXES = (
     "__security_",
     "__vcrt_",
     "__scrt_",
+    "operator",
+    "basic_string",
+    "~",
+    "__mingw",
 )
 
 # Константы-заполнители Debug-хипов/стека (не семантика программы)
@@ -86,6 +93,68 @@ def is_noise_call(name: str) -> bool:
 
 def is_noise_constant(tok: str) -> bool:
     return (tok or "").lower() in NOISE_CONSTANTS
+
+
+# Имена, которые не стоит кормить LLM: CRT/startup, libstdc++ internals, MinGW printf.
+_RUNTIME_NOISE_PREFIXES = (
+    "_M_", "_S_",
+    "__mingw", "__pformat", "__gnu", "__gdtoa", "__diff_", "__tmain",
+    "__cxa_", "__gxx_", "__acrt", "__scrt", "__vcrt",
+    "__GSHandler", "__security_", "__CheckFor",
+    "_RTC_", "_pei386",
+    "_FindPE", "_GetPE", "___chkstk", "_chkstk", "_Alloc_hider",
+    "__getmainargs", "_amsg_", "__relocate", "_Guard_alloc",
+    "dtoa_", "uninitialized_",
+    "std::", "thunk_", "~",
+)
+_RUNTIME_NOISE_EXACT = {
+    "_matherr", "mark_section_writable",     "DllMainCRTStartup",
+    "WinMainCRTStartup",
+    "mainCRTStartup", "__report_error", "register_frame_info",
+    "basic_string", "basic_string<>", "operator=", "operator<<",
+    "operator_delete", "operator new", "operator new[]",
+    "__main", "fprintf", "vfprintf", "printf", "sprintf",
+    "memcpy", "memset", "malloc", "free", "exit", "abort",
+    "cpp_unhandled_exception_filter",
+    # demangled STL/container methods (EchoFilter leftover in LLM top)
+    "compare", "back", "front", "end", "begin", "size", "empty",
+    "clear", "data", "c_str", "reserve", "resize", "push_back",
+    "pop_back", "insert", "erase", "swap", "assign", "append", "allocate",
+    "deallocate", "max_size", "length", "capacity", "move",
+    "vector", "string", "copy", "release", "pointer_to",
+    "dtoa_lock", "dtoa_lock_cleanup",
+    "substr", "find", "hash", "unordered_map", "map", "set", "list",
+    "count", "key_comp", "value_comp", "lower_bound", "upper_bound",
+    "equal_range", "tuple", "get", "forward",
+}
+def is_runtime_noise(name: str) -> bool:
+    """True для CRT/STL/MinGW internals — не целевой user-код для restore."""
+    n = (name or "").strip()
+    if not n:
+        return False
+    if n in _RUNTIME_NOISE_EXACT:
+        return True
+    # MinGW/PE helpers and unnamed CRT: _GetPEImageBase, ___chkstk_ms, …
+    if n.startswith("_"):
+        return True
+    if n.startswith("operator"):
+        return True
+    if n.startswith(_RUNTIME_NOISE_PREFIXES):
+        return True
+    if "<" in n:
+        return True
+    return False
+
+
+def looks_like_user_restore_name(name: str) -> bool:
+    """True if a demangled name is likely user code, not a one-word STL method."""
+    n = (name or "").strip()
+    if not n or is_runtime_noise(n):
+        return False
+    base = n.split("<", 1)[0]
+    if base == "main" or base.startswith("FUN_"):
+        return True
+    return "_" in base
 
 # Универсальные детекторы строк (без привязки к MSVC-путям)
 PATH_RE = re.compile(

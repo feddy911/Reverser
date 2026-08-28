@@ -1,0 +1,12 @@
+id: long-long-unsigned-int
+profile: gcc_pe_x64
+gcc_fingerprint: "long_long_unsigned_int was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  std::vector<long_long_unsigned_int> fib_series(unsigned n);
+contains:
+  - "unsigned long long"
+not_contains:
+  - "long long_unsigned"
+compile: true
+notes: Ghidra collapsed unsigned long long token

@@ -1,0 +1,15 @@
+id: dat-addr-as-byte-ptr
+profile: gcc_pe_x64
+gcc_fingerprint: "cannot convert 'ghidra_word\\*' to 'undefined\\*'"
+recipe: assemble
+guessed_name: go
+ghidra_cpp: |
+  void go(void) {
+    undefined *puVar1;
+    puVar1 = &DAT_14000aa00;
+    (void)puVar1;
+  }
+contains:
+  - "static undefined DAT_14000aa00"
+compile: true
+notes: Ghidra takes &DAT_* as a byte/string pointer, not ghidra_word*

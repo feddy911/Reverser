@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.analysis.features import (
     FeatureIndex, derive_features, extract_features,
 )
+from src.analysis.platform import is_runtime_noise
 
 logger = logging.getLogger("revllm.scorer")
 
@@ -33,14 +34,16 @@ class GhidraFunctionScorer:
         reasons: List[str] = []
         name = ft.get("name", "") or ""
 
-        if name.startswith("_"):
-            s += w["name_underscore"]; reasons.append("CRT/runtime (name)")
+        if is_runtime_noise(name) or name.startswith("_"):
+            s += w["name_underscore"]
+            reasons.append("CRT/runtime (name)")
         elif name.startswith("thunk_") or name.startswith("thunk "):
             s += w["name_thunk"]; reasons.append("thunk")
         elif "std::" in name:
             s += w["name_stl"]; reasons.append("STL (name)")
         elif name and not name.startswith("FUN_"):
-            s += w["name_lib"]; reasons.append("known library (signature)")
+            # Demangled user-like symbol — not a library penalty.
+            reasons.append("named symbol")
         if ft.get("lib_matched", 0):
             s += w["lib_matched"]; reasons.append("library (signature match)")
 
@@ -130,3 +133,25 @@ class GhidraFunctionScorer:
 
         scored.sort(key=lambda x: x["score"], reverse=True)
         return scored
+
+
+def select_llm_targets(
+    scored: List[Dict[str, Any]],
+    top_n: int,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Top-N для LLM без CRT/STL/MinGW internals.
+
+    Returns (targets, n_filtered). If everything is noise, falls back to raw top-N.
+    """
+    kept: List[Dict[str, Any]] = []
+    n_filtered = 0
+    for s in scored:
+        if is_runtime_noise(s.get("name") or ""):
+            n_filtered += 1
+            continue
+        kept.append(s)
+        if len(kept) >= top_n:
+            break
+    if kept:
+        return kept, n_filtered
+    return list(scored[:top_n]), n_filtered

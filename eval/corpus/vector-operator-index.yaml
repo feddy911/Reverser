@@ -1,0 +1,12 @@
+id: vector-operator-index
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*operator\\[\\]"
+recipe: sanitize
+ghidra_cpp: |
+  std::vector<int>::operator[](p, (size_type)i);
+contains:
+  - "(*(p))[(size_type)i]"
+not_contains:
+  - "::operator[]"
+compile: false
+notes: Ghidra Type::operator[](this, index) — same dialect as operator=

@@ -1,0 +1,16 @@
+id: ghidra-word-thunk
+profile: gcc_pe_x64
+gcc_fingerprint: "'thunk_FUN_.*' was not declared|cannot convert.*ghidra_word"
+recipe: assemble
+guessed_name: go
+ghidra_cpp: |
+  void go() {
+    char *p = thunk_FUN_140010000("x");
+    DAT_140020000 = DAT_140020000 ^ 1ull;
+    (void)p;
+  }
+contains:
+  - "inline ghidra_word thunk_FUN_140010000"
+  - "static undefined DAT_140020000"
+compile: true
+notes: unresolved thunk/DAT become ghidra_word stubs

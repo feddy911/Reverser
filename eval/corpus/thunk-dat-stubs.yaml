@@ -1,0 +1,15 @@
+id: thunk-dat-stubs
+profile: msvc_x64_debug
+gcc_fingerprint: "'thunk_FUN_.*' was not declared|'DAT_.*' was not declared"
+recipe: assemble
+guessed_name: go
+ghidra_cpp: |
+  void go() {
+    thunk_FUN_140021680("hi");
+    thunk_FUN_140021680(&DAT_14002db14);
+  }
+contains:
+  - "inline ghidra_word thunk_FUN_140021680(...)"
+  - "static undefined DAT_14002db14"
+compile: true
+notes: DAT/thunk stubs for unresolved Ghidra symbols

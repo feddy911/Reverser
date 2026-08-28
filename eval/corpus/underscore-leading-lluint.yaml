@@ -1,0 +1,16 @@
+id: underscore-leading-lluint
+profile: gcc_pe_x64
+gcc_fingerprint: "'_unsigned' was not declared|'int_const' was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  int has_key(map<int,_long_long_unsigned_int,_std::less<int>,_std::allocator<std::pair<int_const,_long_long_unsigned_int>_>_> *m);
+contains:
+  - "unsigned long long"
+  - "int const"
+  - "std::less<int>"
+not_contains:
+  - "_unsigned"
+  - "int_const"
+  - "_long_long_unsigned_int"
+compile: false
+notes: "Ghidra template noise: _long_long_unsigned_int and int_const (generator map_count dump)"

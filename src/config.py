@@ -41,8 +41,14 @@ class AppConfig:
     # Порог score для cascade "called by user seed" (heuristic)
     hot_seed_score: int = 60
 
-    # Optional domain pack: none | mycollatz
-    domain_pack: str = "none"
+    # Phase 2: syntax-check restored C++ and optional LLM compile-fix
+    compile_verify: bool = True
+    compile_fix: bool = True
+    cxx_compiler: str = ""
+    compile_timeout: int = 60
+    compile_per_function: bool = True
+    # Extra restore samples when fidelity is low (1 = off)
+    llm_best_of: int = 1
 
 
 def load_config(path: Union[str, Path]) -> AppConfig:
@@ -77,5 +83,12 @@ def load_config(path: Union[str, Path]) -> AppConfig:
         scoring_mode=str(data.get("scoring_mode", AppConfig.scoring_mode)),
         ml_weights_path=str(data.get("ml_weights_path", AppConfig.ml_weights_path)),
         polish=bool(data.get("polish", AppConfig.polish)),
-        domain_pack=str(data.get("domain_pack", AppConfig.domain_pack)),
+        compile_verify=bool(data.get("compile_verify", AppConfig.compile_verify)),
+        compile_fix=bool(data.get("compile_fix", AppConfig.compile_fix)),
+        cxx_compiler=str(data.get("cxx_compiler", AppConfig.cxx_compiler)),
+        compile_timeout=int(data.get("compile_timeout", AppConfig.compile_timeout)),
+        compile_per_function=bool(
+            data.get("compile_per_function", AppConfig.compile_per_function)
+        ),
+        llm_best_of=int(data.get("llm_best_of", AppConfig.llm_best_of)),
     )

@@ -39,7 +39,6 @@ def main() -> int:
 
         config = load_config(cfg_path)
         config.binary_path = str(exe)
-        config.domain_pack = "none"
         rc = run(config)
         entry = {"binary": name, "ok": rc == 0, "exit": rc}
         # pick latest metrics from newest run dir mentioning this md5 — runner prints path

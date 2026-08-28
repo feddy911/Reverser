@@ -4,11 +4,14 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from src.analysis.platform import is_system_dll
-from src.domains.pack import BASE_INCLUDES, DomainPack
+from src.domains.pack import BASE_INCLUDES, GHIDRA_TYPEDEFS
 
 # Имя внешней функции / префикс -> include
 _CALL_INCLUDE_RULES: List[tuple] = [
     (re.compile(r"^(printf|sprintf|fprintf|scanf|puts|putchar|snprintf)$"), "#include <cstdio>"),
+    (re.compile(
+        r"^(sqrt|pow|fabs|sin|cos|tan|log|exp|floor|ceil|round|hypot|fmod|atan2|asin|acos)$"
+    ), "#include <cmath>"),
     (re.compile(r"^(memcpy|memset|memcmp|strlen|strcpy|strncpy|strcmp)$"), "#include <cstring>"),
     (re.compile(r"^(malloc|free|calloc|realloc|atoi|exit|abort)$"), "#include <cstdlib>"),
     (re.compile(r"^(open|read|write|close|stat)$"), "#include <unistd.h>"),
@@ -76,18 +79,41 @@ def includes_from_dlls(dlls: Iterable[str]) -> Set[str]:
     return found
 
 
+_CODE_INCLUDE_RULES: List[tuple] = [
+    (re.compile(r"\bstd::(sort|stable_sort|partial_sort|equal|find|copy|fill|min|max|swap|reverse|count)\b"),
+     "#include <algorithm>"),
+    (re.compile(r"\b(?:std::)?initializer_list\b"), "#include <initializer_list>"),
+    (re.compile(
+        r"\b(?:std::)?(sqrt|pow|fabs|sin|cos|tan|log|exp|floor|ceil|round|hypot|fmod|atan2|asin|acos)\s*\("
+    ), "#include <cmath>"),
+    (re.compile(r"\bstd::unordered_map\b"), "#include <unordered_map>"),
+    (re.compile(r"\b(?:std::)?map\s*<"), "#include <map>"),
+    (re.compile(r"\b(?:std::)?(ofstream|ifstream|fstream)\b"), "#include <fstream>"),
+    (re.compile(r"\bstd::set\b"), "#include <set>"),
+    (re.compile(r"\bstd::optional\b"), "#include <optional>"),
+]
+
+
+def includes_from_source(text: str) -> Set[str]:
+    """Headers implied by tokens in restored C++ (not only Ghidra ext_calls)."""
+    found: Set[str] = set()
+    blob = text or ""
+    for rx, inc in _CODE_INCLUDE_RULES:
+        if rx.search(blob):
+            found.add(inc)
+    return found
+
+
 def collect_dynamic_includes(
     restored: Sequence[Dict[str, Any]],
     functions: Optional[Sequence[Dict[str, Any]]] = None,
-    pack: Optional[DomainPack] = None,
 ) -> List[str]:
-    """Собрать #include для preamble из вызовов/DLL + domain pack."""
+    """Собрать #include для preamble из вызовов и DLL бинарника."""
     incs: Set[str] = set(BASE_INCLUDES)
-    if pack:
-        incs.update(pack.extra_includes)
 
     for r in restored or []:
         incs |= includes_from_calls(r.get("ext_calls") or [])
+        incs |= includes_from_source(r.get("cpp_code") or "")
         for inc in r.get("includes") or []:
             s = str(inc).strip()
             if not s:
@@ -114,9 +140,10 @@ def make_preamble(
     comment: str,
     restored: Sequence[Dict[str, Any]],
     functions: Optional[Sequence[Dict[str, Any]]] = None,
-    pack: Optional[DomainPack] = None,
 ) -> List[str]:
     lines = [comment]
-    lines.extend(collect_dynamic_includes(restored, functions, pack))
+    lines.extend(collect_dynamic_includes(restored, functions))
+    lines.append("")
+    lines.extend(GHIDRA_TYPEDEFS)
     lines.append("")
     return lines

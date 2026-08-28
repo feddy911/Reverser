@@ -1,0 +1,603 @@
+from __future__ import annotations
+
+"""Mini-program generator for the Ghidra-dialect corpus.
+
+Fill path: tiny C++ → compile → (optional) Ghidra dump → draft YAML.
+Drafts are NOT auto-accepted into eval/corpus/.
+
+Identifier variation proves recipes are not glued to prefixPtr / EchoFilter names.
+
+  py -m src.analysis.gen_corpus --out output/corpus_gen
+  py -m src.analysis.gen_corpus --vary
+  py -m src.analysis.gen_corpus --ghidra --config config.yaml
+"""
+
+import argparse
+import hashlib
+import json
+import re
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
+
+from src.analysis.corpus import CorpusCase, apply_recipe, load_corpus
+from src.analysis.ghidra_cpp import _KNOWN_CLASSES, _KNOWN_MEMBERS, _UNDERSCORE_TYPE_BASE
+
+_IDENT = re.compile(r"(?<!::)\b([A-Za-z_]\w*)\b")
+
+_CXX_KEYWORDS = frozenset({
+    "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand", "bitor",
+    "bool", "break", "case", "catch", "char", "char8_t", "char16_t", "char32_t",
+    "class", "compl", "concept", "const", "consteval", "constexpr", "constinit",
+    "const_cast", "continue", "co_await", "co_return", "co_yield", "decltype",
+    "default", "delete", "do", "double", "dynamic_cast", "else", "enum",
+    "explicit", "export", "extern", "false", "float", "for", "friend", "goto",
+    "if", "inline", "int", "long", "mutable", "namespace", "new", "noexcept",
+    "not", "not_eq", "nullptr", "operator", "or", "or_eq", "private",
+    "protected", "public", "register", "reinterpret_cast", "requires", "return",
+    "short", "signed", "sizeof", "static", "static_assert", "static_cast",
+    "struct", "switch", "template", "this", "thread_local", "throw", "true",
+    "try", "typedef", "typeid", "typename", "union", "unsigned", "using",
+    "virtual", "void", "volatile", "wchar_t", "while", "xor", "xor_eq",
+    "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t",
+    "uint32_t", "uint64_t", "size_t", "uintptr_t", "ptrdiff_t",
+})
+
+_PROTECTED_EXTRA = frozenset({
+    "std", "chrono", "microseconds", "milliseconds", "duration_cast",
+    "cout", "cerr", "endl", "cin", "string", "wstring", "vector",
+    "basic_ostream", "char_traits", "allocator", "basic_string",
+    "mpz_t", "mpz_ptr", "mpz_srcptr", "mpf_t", "mpq_t",
+    "ghidra_word", "undefined", "undefined1", "undefined2", "undefined4",
+    "undefined8", "longlong", "ulonglong", "size_type", "unsigned_char",
+    "include",     "printf", "sprintf", "fprintf", "puts", "main",
+    "initializer_list", "cmath", "cstdio", "cstring", "cstdint", "cstdlib",
+    "algorithm", "iostream", "fstream", "chrono", "vector", "map",
+    "ofstream", "ifstream", "optional",
+    "sqrt", "pow", "fabs", "hypot", "sin", "cos", "tan",
+    "log", "exp", "floor", "ceil", "round", "fmod", "atan2", "asin", "acos",
+    "ios", "ios_base",
+    "duration", "ratio", "rep",
+    "nanoseconds", "microseconds", "milliseconds",
+})
+
+
+def _is_protected(ident: str) -> bool:
+    if ident in _CXX_KEYWORDS or ident in _PROTECTED_EXTRA:
+        return True
+    if ident in _KNOWN_CLASSES or ident in _KNOWN_MEMBERS:
+        return True
+    if ident in {old for old, _new in _UNDERSCORE_TYPE_BASE}:
+        return True
+    if ident.startswith("_") and ident[1:] in {old for old, _new in _UNDERSCORE_TYPE_BASE}:
+        return True
+    # Ghidra dialect tokens (_std::, _DAT_, __gmpz_, …) must stay for recipes.
+    if ident.startswith("_"):
+        return True
+    if ident.startswith((
+        "DAT_", "thunk_", "FUN_", "std", "local_", "param_",
+        "in_stack", "auStack", "mpz_", "long_long",
+    )):
+        return True
+    return False
+
+
+def ident_mapping(texts: Sequence[str], *, prefix: str = "v") -> Dict[str, str]:
+    seen: List[str] = []
+    for text in texts:
+        for ident in _IDENT.findall(text or ""):
+            if _is_protected(ident) or ident in seen:
+                continue
+            seen.append(ident)
+    return {name: f"{prefix}{i}" for i, name in enumerate(seen)}
+
+
+def apply_ident_map(text: str, mapping: Dict[str, str]) -> str:
+    if not mapping:
+        return text or ""
+
+    def repl(m: re.Match) -> str:
+        return mapping.get(m.group(1), m.group(1))
+
+    return _IDENT.sub(repl, text or "")
+
+
+def vary_case(case: CorpusCase, *, prefix: str = "v") -> Tuple[CorpusCase, Dict[str, str]]:
+    extras_cpp = [e.get("cpp") or "" for e in case.extra_functions]
+    mapping = ident_mapping(
+        [case.ghidra_cpp, *extras_cpp, *case.contains, *case.not_contains],
+        prefix=prefix,
+    )
+    extras = [
+        {
+            "name": apply_ident_map(e.get("name") or "", mapping),
+            "cpp": apply_ident_map(e.get("cpp") or "", mapping),
+        }
+        for e in case.extra_functions
+    ]
+    varied = CorpusCase(
+        id=case.id + "__vary",
+        profile=case.profile,
+        recipe=case.recipe,
+        ghidra_cpp=apply_ident_map(case.ghidra_cpp, mapping),
+        path=case.path,
+        gcc_fingerprint=case.gcc_fingerprint,
+        contains=[apply_ident_map(x, mapping) for x in case.contains],
+        not_contains=[apply_ident_map(x, mapping) for x in case.not_contains],
+        compile=False,
+        requires=list(case.requires),
+        guessed_name=apply_ident_map(case.guessed_name, mapping) or "f",
+        extra_functions=extras,
+        notes="identifier variation of " + case.id,
+    )
+    return varied, mapping
+
+
+def eval_variations(
+    cases: Optional[Sequence[CorpusCase]] = None,
+) -> Dict[str, object]:
+    loaded = list(cases) if cases is not None else load_corpus()
+    results = []
+    for case in loaded:
+        varied, mapping = vary_case(case)
+        try:
+            got = apply_recipe(varied)
+        except Exception as exc:
+            results.append({
+                "id": case.id, "ok": False, "error": str(exc), "n_map": len(mapping),
+            })
+            continue
+        errors = []
+        for needle in varied.contains:
+            if needle not in got:
+                errors.append(f"missing contains: {needle!r}")
+        for needle in varied.not_contains:
+            if needle in got:
+                errors.append(f"hit not_contains: {needle!r}")
+        results.append({
+            "id": case.id,
+            "ok": not errors,
+            "errors": errors,
+            "n_map": len(mapping),
+        })
+    n_ok = sum(1 for r in results if r.get("ok"))
+    return {"n_cases": len(results), "n_ok": n_ok, "n_fail": len(results) - n_ok, "results": results}
+
+
+@dataclass
+class MiniProgram:
+    id: str
+    source: str
+    dialect: str
+    requires: List[str] = field(default_factory=list)
+
+
+MINI_PROGRAMS: Tuple[MiniProgram, ...] = (
+    MiniProgram(
+        id="iostream_shift",
+        dialect="iostream",
+        source="""#include <iostream>
+#include <cstdint>
+int report_n(std::uint64_t n) {
+  std::cout << "n=" << n << "\\n";
+  return 0;
+}
+int main() { return report_n(1); }
+""",
+    ),
+    MiniProgram(
+        id="string_assign",
+        dialect="string",
+        source="""#include <string>
+std::string prefix_of(const std::string &src, const std::string &pfx) {
+  std::string out;
+  out = pfx;
+  out += src;
+  return out;
+}
+int main() { return prefix_of("abc", "x").size() == 4 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="vector_reserve",
+        dialect="vector",
+        source="""#include <vector>
+#include <cstdint>
+void fill_n(std::vector<std::uint64_t> *p, int n) {
+  p->reserve(static_cast<std::size_t>(n));
+  p->push_back(1);
+}
+int main() { std::vector<std::uint64_t> v; fill_n(&v, 4); return (int)v.size() - 1; }
+""",
+    ),
+    MiniProgram(
+        id="chrono_cast",
+        dialect="chrono",
+        source="""#include <chrono>
+long long to_us(std::chrono::steady_clock::duration d) {
+  return std::chrono::duration_cast<std::chrono::microseconds>(d).count();
+}
+int main() { return to_us(std::chrono::microseconds{1}) == 1 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="mingw_main",
+        dialect="crt",
+        source="""int helper() { return 0; }
+int main() { return helper(); }
+""",
+    ),
+    MiniProgram(
+        id="gmp_init",
+        dialect="gmp",
+        requires=["gmp"],
+        source="""#include <gmp.h>
+void init_one(mpz_t x) {
+  mpz_init(x);
+  mpz_set_ui(x, 1);
+}
+int main() { mpz_t x; init_one(x); mpz_clear(x); return 0; }
+""",
+    ),
+    MiniProgram(
+        id="hypot_sqrt",
+        dialect="cmath",
+        source="""#include <cmath>
+double mag(double x, double y) {
+  return std::sqrt(x * x + y * y);
+}
+int main() { return mag(3.0, 4.0) > 4.0 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="init_list_vector",
+        dialect="initializer_list",
+        source="""#include <vector>
+#include <cstdint>
+int sum3() {
+  std::vector<std::uint64_t> xs{1, 2, 3};
+  return (int)(xs[0] + xs[1] + xs[2]);
+}
+int main() { return sum3() == 6 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="string_find",
+        dialect="string",
+        source="""#include <string>
+int has_pre(const std::string &src, const std::string &pre) {
+  return src.find(pre) == 0 ? 1 : 0;
+}
+int main() { return has_pre("abc", "a") ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="map_count",
+        dialect="map",
+        source="""#include <map>
+#include <cstdint>
+int has_key(std::map<int, std::uint64_t> *m, int k) {
+  return m->count(k) ? 1 : 0;
+}
+int main() {
+  std::map<int, std::uint64_t> m;
+  m[1] = 2;
+  return has_key(&m, 1) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="fstream_write",
+        dialect="fstream",
+        source="""#include <fstream>
+int write_n(const char *path, int n) {
+  std::ofstream out(path);
+  out << n;
+  return out.good() ? 0 : 1;
+}
+int main() { return write_n("nul", 1); }
+""",
+    ),
+)
+
+
+HELDOUT_PROGRAMS: Tuple[MiniProgram, ...] = (
+    MiniProgram(
+        id="heldout_struct_math",
+        dialect="heldout",
+        source="""#include <cstdio>
+struct CloudPt { double x; double y; };
+static double dist2(const CloudPt& a, const CloudPt& b) {
+  const double dx = a.x - b.x;
+  const double dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+static int closest_ix(CloudPt* pts, int n, const CloudPt& query) {
+  int best = 0;
+  double best_d = dist2(pts[0], query);
+  for (int i = 1; i < n; ++i) {
+    const double d = dist2(pts[i], query);
+    if (d < best_d) { best_d = d; best = i; }
+  }
+  return best;
+}
+int main() {
+  CloudPt cloud[2] = {{0.0, 0.0}, {3.0, 4.0}};
+  CloudPt query{1.0, 1.0};
+  std::printf("heldout\\n");
+  return closest_ix(cloud, 2, query);
+}
+""",
+    ),
+)
+
+
+def emit_programs(
+    out_dir: Path,
+    programs: Sequence[MiniProgram] = MINI_PROGRAMS,
+) -> List[Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = []
+    for prog in programs:
+        path = out_dir / f"{prog.id}.cpp"
+        path.write_text(prog.source, encoding="utf-8")
+        written.append(path)
+    return written
+
+
+def compile_programs(
+    out_dir: Path,
+    *,
+    compiler: str = "",
+    programs: Sequence[MiniProgram] = MINI_PROGRAMS,
+) -> List[Dict[str, object]]:
+    from src.analysis.compile_verify import compile_cpp, find_cxx_compiler
+    from src.analysis.corpus import _gmp_available
+
+    cxx = find_cxx_compiler(compiler)
+    reports = []
+    for prog in programs:
+        src = out_dir / f"{prog.id}.cpp"
+        rec: Dict[str, object] = {"id": prog.id, "path": str(src), "ok": False}
+        if not src.exists():
+            rec["error"] = "missing source"
+            reports.append(rec)
+            continue
+        if not cxx:
+            rec["skipped"] = "no C++ compiler"
+            reports.append(rec)
+            continue
+        if "gmp" in prog.requires and not _gmp_available(cxx):
+            rec["skipped"] = "gmp.h not available"
+            rec["ok"] = True
+            reports.append(rec)
+            continue
+        crep = compile_cpp(src, compiler=cxx, timeout_sec=30)
+        rec["ok"] = bool(crep.ok)
+        rec["n_errors"] = crep.n_errors
+        rec["skipped"] = crep.skipped_reason
+        if not crep.ok:
+            rec["stderr"] = (crep.stderr or "")[-500:]
+        reports.append(rec)
+    return reports
+
+
+def _slug(text: str, n: int = 12) -> str:
+    return hashlib.sha1((text or "").encode("utf-8")).hexdigest()[:n]
+
+
+def drafts_from_ghidra(
+    ghidra: Dict,
+    *,
+    program_id: str,
+    out_dir: Path,
+    profile: str = "generic",
+) -> List[Path]:
+    """Write unevaluated YAML drafts. Not loaded by eval_corpus (subdir)."""
+    import yaml
+
+    from src.analysis.platform import is_runtime_noise
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: List[Path] = []
+    for fn in ghidra.get("functions") or []:
+        code = (fn.get("code") or fn.get("ghidra_code") or "").strip()
+        size = int(fn.get("size") or 0)
+        name = str(fn.get("name") or "f")
+        if size < 8 or not code:
+            continue
+        if is_runtime_noise(name) or name.startswith("__"):
+            continue
+        cid = f"draft-{program_id}-{_slug(name + code)}"
+        payload = {
+            "id": cid,
+            "profile": profile,
+            "recipe": "sanitize",
+            "ghidra_cpp": code,
+            "contains": [],
+            "not_contains": [],
+            "compile": False,
+            "guessed_name": name,
+            "notes": (
+                f"auto-draft from generator program {program_id}; "
+                "not accepted into eval/corpus"
+            ),
+        }
+        path = out_dir / f"{cid}.yaml"
+        path.write_text(
+            yaml.safe_dump(payload, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        written.append(path)
+    return written
+
+
+def run_ghidra_on_programs(
+    out_dir: Path,
+    *,
+    ghidra_path: Path,
+    draft_dir: Path,
+    timeout_sec: int = 900,
+    programs: Optional[Sequence[MiniProgram]] = None,
+    dump_dir: Optional[Path] = None,
+    force: bool = False,
+) -> List[Dict[str, object]]:
+    """Link mini-programs and decompile. Dumps are persisted under dump_dir."""
+    import subprocess
+
+    from src.analysis.compile_verify import find_cxx_compiler
+    from src.ghidra.headless import run_ghidra_decompile
+
+    cxx = find_cxx_compiler()
+    if not cxx:
+        return [{"error": "no C++ compiler for --ghidra"}]
+    root = Path(__file__).resolve().parents[2]
+    dump_dir = dump_dir or (out_dir / "ghidra_dumps")
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    wanted = list(programs) if programs is not None else list(MINI_PROGRAMS) + list(
+        HELDOUT_PROGRAMS
+    )
+    reports = []
+    for prog in wanted:
+        if prog.requires:
+            continue
+        src = out_dir / f"{prog.id}.cpp"
+        if not src.exists():
+            src = out_dir / "heldout" / f"{prog.id}.cpp"
+        if not src.exists():
+            continue
+        dump = dump_dir / f"{prog.id}.json"
+        rec: Dict[str, object] = {"id": prog.id, "dump": str(dump)}
+        if dump.exists() and not force:
+            rec["cached"] = True
+            data = json.loads(dump.read_text(encoding="utf-8"))
+            paths = drafts_from_ghidra(data, program_id=prog.id, out_dir=draft_dir)
+            rec["drafts"] = [str(p) for p in paths]
+            reports.append(rec)
+            continue
+        exe = dump_dir / f"{prog.id}.exe"
+        link = subprocess.run(
+            [cxx, "-std=c++17", "-O0", "-g", str(src), "-o", str(exe)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        rec["linked"] = link.returncode == 0
+        if link.returncode != 0:
+            rec["stderr"] = (link.stderr or "")[-500:]
+            reports.append(rec)
+            continue
+        proj = dump_dir / f"{prog.id}_proj"
+        try:
+            ghidra = run_ghidra_decompile(
+                ghidra_path,
+                exe,
+                proj,
+                [root / "scripts", root / "src" / "ghidra"],
+                dump,
+                timeout_sec=timeout_sec,
+            )
+        except Exception as exc:
+            rec["error"] = str(exc)
+            reports.append(rec)
+            continue
+        paths = drafts_from_ghidra(ghidra, program_id=prog.id, out_dir=draft_dir)
+        rec["drafts"] = [str(p) for p in paths]
+        reports.append(rec)
+    return reports
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Generate corpus mini-programs / variations")
+    parser.add_argument("--out", default="output/corpus_gen", help="Where to write .cpp")
+    parser.add_argument("--vary", action="store_true", help="Re-eval corpus with renamed idents")
+    parser.add_argument("--compile", action="store_true", help="Syntax-check emitted programs")
+    parser.add_argument("--ghidra", action="store_true", help="Link + Ghidra dump → draft YAML")
+    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--draft-dir", default="output/corpus_draft")
+    parser.add_argument("--force-ghidra", action="store_true", help="Re-decompile even if dump exists")
+    parser.add_argument("--ids", action="append", help="Only these program ids (repeatable)")
+    parser.add_argument("--no-emit", action="store_true")
+    parser.add_argument(
+        "--heldout",
+        action="store_true",
+        help="Emit/compile P2 held-out programs (not used to write recipes)",
+    )
+    args = parser.parse_args(argv)
+
+    out_dir = Path(args.out)
+    rc = 0
+    if not args.no_emit:
+        paths = emit_programs(out_dir)
+        print(f"OK: emitted {len(paths)} programs -> {out_dir}")
+
+    if args.compile or args.ghidra:
+        reports = compile_programs(out_dir)
+        n_ok = sum(1 for r in reports if r.get("ok") or r.get("skipped"))
+        print(f"OK: compile {n_ok}/{len(reports)}")
+        for r in reports:
+            if not r.get("ok") and not r.get("skipped"):
+                rc = 1
+                print(f"  FAIL {r['id']}: {r.get('stderr') or r.get('error')}")
+            else:
+                print(f"  OK   {r['id']}" + (f" skip={r.get('skipped')}" if r.get("skipped") else ""))
+
+    if args.vary:
+        report = eval_variations()
+        print(f"OK: vary {report['n_ok']}/{report['n_cases']}")
+        for r in report["results"]:
+            if r.get("ok"):
+                print(f"  OK   {r['id']} map={r.get('n_map')}")
+            else:
+                rc = 1
+                print(f"  FAIL {r['id']}: {r.get('errors') or r.get('error')}")
+
+    if args.heldout:
+        hdir = out_dir / "heldout"
+        paths = emit_programs(hdir, programs=HELDOUT_PROGRAMS)
+        print(f"OK: heldout emitted {len(paths)} -> {hdir}")
+        if args.compile or args.ghidra:
+            reports = compile_programs(hdir, programs=HELDOUT_PROGRAMS)
+            n_ok = sum(1 for r in reports if r.get("ok") or r.get("skipped"))
+            print(f"OK: heldout compile {n_ok}/{len(reports)}")
+            for r in reports:
+                if not r.get("ok") and not r.get("skipped"):
+                    rc = 1
+                    print(f"  FAIL {r['id']}: {r.get('stderr') or r.get('error')}")
+                else:
+                    print(f"  OK   {r['id']}")
+            print("note: held-out compile of SOURCE is not a recipe; do not patch sanitizer")
+
+    if args.ghidra:
+        from src.config import load_config
+
+        emit_programs(out_dir / "heldout", programs=HELDOUT_PROGRAMS)
+        cfg = load_config(args.config)
+        if not cfg.ghidra_path:
+            print("FAIL: --ghidra needs ghidra_path in config")
+            return 2
+        wanted = None
+        if args.ids:
+            by_id = {p.id: p for p in list(MINI_PROGRAMS) + list(HELDOUT_PROGRAMS)}
+            wanted = [by_id[i] for i in args.ids if i in by_id]
+            if not wanted:
+                print("FAIL: --ids matched no programs")
+                return 2
+        reports = run_ghidra_on_programs(
+            out_dir,
+            ghidra_path=Path(cfg.ghidra_path),
+            draft_dir=Path(args.draft_dir),
+            timeout_sec=cfg.ghidra_timeout,
+            programs=wanted,
+            dump_dir=out_dir / "ghidra_dumps",
+            force=args.force_ghidra,
+        )
+        print(f"OK: ghidra drafts -> {args.draft_dir}")
+        for r in reports:
+            print(f"  {r.get('id', '?')}: {r}")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,18 @@
+id: ghidra-vector-push-deref
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*push_back"
+recipe: sanitize
+ghidra_cpp: |
+  void fill_n(vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_> *p, int n)
+  {
+    vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_> *xs;
+    value_type_conflict *item;
+    std::vector<long_long_unsigned_int,_std::allocator<long_long_unsigned_int>_>::push_back
+              (xs, item);
+  }
+contains:
+  - "->push_back(*(item))"
+not_contains:
+  - "::push_back"
+compile: true
+notes: "Ghidra push_back(this, T*) where the method wants T"

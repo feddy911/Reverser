@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from src.analysis.features import FEATURE_KEYS
-from src.analysis.scorer import GhidraFunctionScorer
+from src.analysis.scorer import GhidraFunctionScorer, select_llm_targets
 from src.analysis.triage import triage_binary
 
 
@@ -46,12 +46,20 @@ def _score_dump(
     return scorer.score_all(candidates)
 
 
+def _name_matches(got: str, want: str) -> bool:
+    g = (got or "").lower()
+    w = (want or "").lower()
+    base = g.split("<", 1)[0]
+    return w == g or w == base or base.startswith(w) or w in base
+
+
 def eval_entry(
     name: str,
     *,
     binary: Optional[Path] = None,
     ghidra_json: Optional[Path] = None,
     labels_path: Optional[Path] = None,
+    user_names: Optional[List[str]] = None,
     top_k: int = 15,
 ) -> Dict[str, Any]:
     if ghidra_json is None and binary is None:
@@ -115,6 +123,25 @@ def eval_entry(
             round(hit / len(positives), 3) if positives else None
         )
 
+    if user_names:
+        hits = sum(
+            1 for want in user_names
+            if any(_name_matches(t["name"], want) for t in top)
+        )
+        metrics["user_names"] = list(user_names)
+        metrics["recall_at_k_names"] = round(hits / len(user_names), 3)
+        filtered, n_noise = select_llm_targets(scored, top_k)
+        f_hits = sum(
+            1 for want in user_names
+            if any(_name_matches(t["name"], want) for t in filtered)
+        )
+        metrics["runtime_filtered"] = n_noise
+        metrics["recall_at_k_names_filtered"] = round(f_hits / len(user_names), 3)
+        metrics["top_filtered"] = [
+            {"address": t["address"], "name": t["name"], "score": t["score"]}
+            for t in filtered
+        ]
+
     return {
         "name": name,
         "binary": str(binary) if binary else None,
@@ -156,6 +183,7 @@ def run_manifest(manifest_path: Path, out_path: Path) -> Dict[str, Any]:
                     binary=_resolve(binary),
                     ghidra_json=_resolve(ghidra_json),
                     labels_path=_resolve(labels),
+                    user_names=list(e.get("user_names") or []) or None,
                     top_k=int(e.get("top_k") or data.get("top_k") or 15),
                 )
             )
@@ -208,6 +236,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 f"  OK   {r['name']}: funcs={m.get('functions')} "
                 f"cand={m.get('candidates')} profile={tri} "
                 f"recall@k={m.get('recall_at_k')}"
+                + (
+                    f" names={m.get('recall_at_k_names')}"
+                    f" filtered={m.get('recall_at_k_names_filtered')}"
+                    if m.get("recall_at_k_names") is not None
+                    else ""
+                )
             )
     return 0 if report.get("n_ok") == report.get("n_entries") else 1
 
