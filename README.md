@@ -66,7 +66,7 @@ py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json
 
 Новые rewrite в `ghidra_cpp.py` / `assembler.py` не добавляются по итогам одного exe.
 Сначала фикстура в `eval/corpus/<id>.yaml` (сниппет + recipe + contains / not_contains), затем рецепт.
-Схема полей: `eval/corpus/_schema.yaml`. Сейчас **90** загружаемых фикстуры.
+Схема полей: `eval/corpus/_schema.yaml`. Сейчас **110** загружаемых фикстур.
 
 ```bash
 py -m src.analysis.eval_corpus
@@ -97,16 +97,21 @@ py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-
 py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-dir output/librarian_draft --accept-compiled
 ```
 
-Целиком зелёные generator-дампы (assemble + gcc, без held-out): `hypot_sqrt`, `mingw_main`, `vector_reserve`, `iostream_shift`, `string_assign`, `string_find`, `set_count`, `algo_sort`, `chrono_cast`, `pair_first`, `string_substr`, `umap_count`, `vector_empty`, `string_compare`, `list_size`, `map_emplace`, `algo_reverse`, `string_append`, `vector_clear`, `cmath_fabs`, `string_erase`, `vector_resize`, `cstring_memcpy`, `cstring_memcmp`, `string_length`, `vector_pop_back`, `utility_swap`, `cstring_strlen`, `cstring_memset`, `string_c_str`, `vector_size`, `cmath_pow`.
+Целиком зелёные generator-дампы (assemble + gcc, без held-out): `hypot_sqrt`, `mingw_main`, `vector_reserve`, `iostream_shift`, `string_assign`, `string_find`, `set_count`, `algo_sort`, `chrono_cast`, `pair_first`, `string_substr`, `umap_count`, `vector_empty`, `string_compare`, `list_size`, `map_emplace`, `algo_reverse`, `string_append`, `vector_clear`, `cmath_fabs`, `string_erase`, `vector_resize`, `cstring_memcpy`, `cstring_memcmp`, `string_length`, `vector_pop_back`, `utility_swap`, `cstring_strlen`, `cstring_memset`, `string_c_str`, `vector_size`, `cmath_pow`, `cstring_strcmp`, `cstring_memmove`, `cstring_strcpy`, `string_clear`, `string_data`, `string_empty`, `vector_capacity`, `cmath_floor`, `cmath_sin`, `cstdio_printf`, `cmath_ceil`, `cmath_cos`, `cstring_strncpy`, `cstdio_sprintf`, `cstdlib_atoi`, `string_resize`, `string_reserve`, `pair_second`, `list_empty`, `set_empty`.
 
-Compiler agent классифицирует gcc-диагностики по `gcc_fingerprint` корпуса.
-Известный класс — без LLM. Неизвестный — один LLM-проход и YAML-черновик (не патч sanitizer).
+Compiler agent классифицирует gcc-диагностики по `gcc_fingerprint` корпуса
+(`src/agents/compiler.py` `match_errors`). Это и есть P3: детерминированный
+gcc→recipe_id, уже включён в per-fn и TU compile-fix. Известный класс — без LLM.
+Неизвестный — один LLM-проход и YAML-черновик (не патч sanitizer).
+Scoring ML (`train_scorer`) не используется как compile-oracle.
+
+Из 110 фикстур около половины — compile-ok дампы генератора с пустым fingerprint
+(регрессия рецепта). В классификатор входят только классы с непустым
+`gcc_fingerprint`. Гейт классификатора: `py -m src.analysis.eval_classifier`.
 
 Critic (`critic.json`) принимает прогон только при compile ∧ fidelity ∧ identity:
 подмена `starts_with` на `std::sort` — reject, даже если TU зелёный.
 `compile_ok` считается по собранному TU, не по compile-fix.
-
-Классификатор gcc→recipe (P3) не включать, пока корпус заметно меньше ~100 классов.
 
 ## Held-out (P2)
 

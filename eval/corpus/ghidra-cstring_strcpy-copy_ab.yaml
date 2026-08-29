@@ -1,0 +1,19 @@
+id: ghidra-cstring_strcpy-copy_ab
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid copy_ab(char *d)\r\
+  \n\r\n{\r\n  undefined2 *in_RCX;\r\n  \r\n  *in_RCX = 0x6261;\r\n  *(undefined1\
+  \ *)(in_RCX + 1) = 0;\r\n  return;\r\n}"
+guessed_name: copy_ab
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  char *in_stack_ffffffffffffffc8;\r\n\
+    \  char a [4];\r\n  \r\n  __main();\r\n  copy_ab(in_stack_ffffffffffffffc8);\r\
+    \n  return 1;\r\n}"
+contains:
+- copy_ab
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cstring_strcpy; review before accept
+gcc_fingerprint: ''

@@ -1,0 +1,19 @@
+id: ghidra-pair_second-second_of
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint second_of(pair<int,_int>\
+  \ *p)\r\n\r\n{\r\n  longlong in_RCX;\r\n  \r\n  return *(int *)(in_RCX + 4);\r\n\
+  }"
+guessed_name: second_of
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  pair<int,_int> *in_stack_ffffffffffffffc8;\r\
+    \n  pair<int,_int> x;\r\n  \r\n  __main();\r\n  iVar1 = second_of(in_stack_ffffffffffffffc8);\r\
+    \n  return (int)(iVar1 != 4);\r\n}"
+contains:
+- second_of
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump pair_second; review before accept
+gcc_fingerprint: ''

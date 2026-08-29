@@ -1,0 +1,19 @@
+id: ghidra-cstdlib_atoi-parse1
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint parse1(char *s)\r\
+  \n\r\n{\r\n  int iVar1;\r\n  char *in_RCX;\r\n  \r\n  iVar1 = atoi(in_RCX);\r\n\
+  \  return iVar1;\r\n}"
+guessed_name: parse1
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  char *in_stack_ffffffffffffffd8;\r\
+    \n  \r\n  __main();\r\n  iVar1 = parse1(in_stack_ffffffffffffffd8);\r\n  return\
+    \ (int)(iVar1 != 1);\r\n}"
+contains:
+- parse1
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cstdlib_atoi; review before accept
+gcc_fingerprint: ''

@@ -1,0 +1,26 @@
+id: ghidra-string_clear-wipe_s
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid wipe_s(string *s)\r\
+  \n\r\n{\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *in_stack_ffffffffffffffd8;\r\
+  \n  \r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::clear\r\
+  \n            (in_stack_ffffffffffffffd8);\r\n  return;\r\n}"
+guessed_name: wipe_s
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  bool bVar1;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+    \ *in_stack_ffffffffffffff98;\r\n  char *in_stack_ffffffffffffffa0;\r\n  allocator<char>\
+    \ *in_stack_ffffffffffffffa8;\r\n  string a;\r\n  undefined1 local_21;\r\n  undefined1\
+    \ *local_20;\r\n  \r\n  __main();\r\n  local_20 = &local_21;\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string<>\r\
+    \n            (in_stack_ffffffffffffff98,in_stack_ffffffffffffffa0,in_stack_ffffffffffffffa8);\r\
+    \n  std::__new_allocator<char>::~__new_allocator((__new_allocator<char> *)in_stack_ffffffffffffff98);\r\
+    \n  wipe_s(in_stack_ffffffffffffff98);\r\n  bVar1 = std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::empty\r\
+    \n                    (in_stack_ffffffffffffff98);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffff98);\r\n  return (uint)!bVar1;\r\n}"
+contains:
+- wipe_s
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump string_clear; review before accept
+gcc_fingerprint: ''

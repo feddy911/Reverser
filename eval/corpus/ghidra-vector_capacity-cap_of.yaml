@@ -1,0 +1,23 @@
+id: ghidra-vector_capacity-cap_of
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint cap_of(vector<int,_std::allocator<int>_>\
+  \ *v)\r\n\r\n{\r\n  size_type sVar1;\r\n  vector<int,_std::allocator<int>_> *in_stack_ffffffffffffffd8;\r\
+  \n  \r\n  sVar1 = std::vector<int,_std::allocator<int>_>::capacity(in_stack_ffffffffffffffd8);\r\
+  \n  return (int)sVar1;\r\n}"
+guessed_name: cap_of
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  vector<int,_std::allocator<int>_>\
+    \ *in_stack_ffffffffffffffa8;\r\n  size_type in_stack_ffffffffffffffb0;\r\n  vector<int,_std::allocator<int>_>\
+    \ v;\r\n  \r\n  __main();\r\n  std::vector<int,_std::allocator<int>_>::vector(in_stack_ffffffffffffffa8);\r\
+    \n  std::vector<int,_std::allocator<int>_>::reserve\r\n            (in_stack_ffffffffffffffa8,in_stack_ffffffffffffffb0);\r\
+    \n  iVar1 = cap_of(in_stack_ffffffffffffffa8);\r\n  std::vector<int,_std::allocator<int>_>::~vector(in_stack_ffffffffffffffa8);\r\
+    \n  return (uint)(iVar1 < 4);\r\n}"
+contains:
+- cap_of
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump vector_capacity; review before accept
+gcc_fingerprint: ''

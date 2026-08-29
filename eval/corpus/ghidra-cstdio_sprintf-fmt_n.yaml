@@ -1,0 +1,20 @@
+id: ghidra-cstdio_sprintf-fmt_n
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint fmt_n(char *buf,int\
+  \ n)\r\n\r\n{\r\n  int iVar1;\r\n  char *in_RCX;\r\n  uint in_EDX;\r\n  \r\n  iVar1\
+  \ = __mingw_sprintf(in_RCX,\"%d\",(ulonglong)in_EDX);\r\n  return iVar1;\r\n}"
+guessed_name: fmt_n
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  char *in_stack_ffffffffffffffc8;\r\
+    \n  int in_stack_ffffffffffffffd0;\r\n  char b [16];\r\n  \r\n  __main();\r\n\
+    \  iVar1 = fmt_n(in_stack_ffffffffffffffc8,in_stack_ffffffffffffffd0);\r\n  return\
+    \ (int)(iVar1 != 1);\r\n}"
+contains:
+- fmt_n
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cstdio_sprintf; review before accept
+gcc_fingerprint: ''

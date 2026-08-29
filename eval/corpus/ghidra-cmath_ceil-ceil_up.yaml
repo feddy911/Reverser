@@ -1,0 +1,19 @@
+id: ghidra-cmath_ceil-ceil_up
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint ceil_up(double x)\r\
+  \n\r\n{\r\n  double in_XMM0_Qa;\r\n  double dVar1;\r\n  \r\n  dVar1 = ceil(in_XMM0_Qa);\r\
+  \n  return (int)dVar1;\r\n}"
+guessed_name: ceil_up
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  double in_stack_ffffffffffffffd8;\r\
+    \n  \r\n  __main();\r\n  iVar1 = ceil_up(in_stack_ffffffffffffffd8);\r\n  return\
+    \ (int)(iVar1 != 2);\r\n}"
+contains:
+- ceil_up
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cmath_ceil; review before accept
+gcc_fingerprint: ''

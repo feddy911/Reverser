@@ -1,0 +1,27 @@
+id: ghidra-string_resize-to_len
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid to_len(string *s,int\
+  \ n)\r\n\r\n{\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+  \ *in_stack_ffffffffffffffd8;\r\n  size_type in_stack_ffffffffffffffe0;\r\n  \r\n\
+  \  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::resize\r\
+  \n            (in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);\r\n  return;\r\
+  \n}"
+guessed_name: to_len
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  size_type sVar1;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+    \ *in_stack_ffffffffffffffa8;\r\n  int in_stack_ffffffffffffffb0;\r\n  string\
+    \ a;\r\n  \r\n  __main();\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string\r\
+    \n            (in_stack_ffffffffffffffa8);\r\n  to_len(in_stack_ffffffffffffffa8,in_stack_ffffffffffffffb0);\r\
+    \n  sVar1 = std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::size\r\
+    \n                    (in_stack_ffffffffffffffa8);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffffa8);\r\n  return (uint)(sVar1 != 2);\r\n\
+    }"
+contains:
+- to_len
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump string_resize; review before accept
+gcc_fingerprint: ''

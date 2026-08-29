@@ -1,0 +1,19 @@
+id: ghidra-cmath_floor-trunc1
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint trunc1(double x)\r\
+  \n\r\n{\r\n  double in_XMM0_Qa;\r\n  double dVar1;\r\n  \r\n  dVar1 = floor(in_XMM0_Qa);\r\
+  \n  return (int)dVar1;\r\n}"
+guessed_name: trunc1
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  double in_stack_ffffffffffffffd8;\r\
+    \n  \r\n  __main();\r\n  iVar1 = trunc1(in_stack_ffffffffffffffd8);\r\n  return\
+    \ (int)(iVar1 != 1);\r\n}"
+contains:
+- trunc1
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cmath_floor; review before accept
+gcc_fingerprint: ''

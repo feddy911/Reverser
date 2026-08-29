@@ -1,0 +1,20 @@
+id: ghidra-cstring_strncpy-copy3
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid copy3(char *d,char\
+  \ *s)\r\n\r\n{\r\n  char *in_RCX;\r\n  char *in_RDX;\r\n  \r\n  strncpy(in_RCX,in_RDX,3);\r\
+  \n  return;\r\n}"
+guessed_name: copy3
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  char *in_stack_ffffffffffffffc8;\r\n\
+    \  char *in_stack_ffffffffffffffd0;\r\n  char a [4];\r\n  \r\n  __main();\r\n\
+    \  copy3(in_stack_ffffffffffffffc8,in_stack_ffffffffffffffd0);\r\n  return 1;\r\
+    \n}"
+contains:
+- copy3
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cstring_strncpy; review before accept
+gcc_fingerprint: ''

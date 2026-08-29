@@ -160,8 +160,21 @@ class TestIncludes(unittest.TestCase):
             includes_from_source("memcpy(d, s, 2);"),
         )
         self.assertIn(
+            "#include <cstring>",
+            includes_from_source("memmove(d, s, 2);"),
+        )
+        self.assertIn("#include <cstring>", includes_from_calls(["memmove"]))
+        self.assertIn(
             "#include <utility>",
             includes_from_source("std::swap(a, b);"),
+        )
+        self.assertIn(
+            "#include <cstdio>",
+            includes_from_source('sprintf(buf, "%d", n);'),
+        )
+        self.assertIn(
+            "#include <cstdlib>",
+            includes_from_source("return atoi(s);"),
         )
 
 

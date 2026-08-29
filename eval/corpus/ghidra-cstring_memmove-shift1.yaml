@@ -1,0 +1,19 @@
+id: ghidra-cstring_memmove-shift1
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid shift1(char *p)\r\
+  \n\r\n{\r\n  undefined2 *in_RCX;\r\n  \r\n  *(undefined2 *)((longlong)in_RCX + 1)\
+  \ = *in_RCX;\r\n  return;\r\n}"
+guessed_name: shift1
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  char *in_stack_ffffffffffffffc8;\r\n\
+    \  char a [4];\r\n  \r\n  __main();\r\n  shift1(in_stack_ffffffffffffffc8);\r\n\
+    \  return 1;\r\n}"
+contains:
+- shift1
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cstring_memmove; review before accept
+gcc_fingerprint: ''

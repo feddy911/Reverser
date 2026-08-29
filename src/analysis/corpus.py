@@ -7,7 +7,7 @@ is `py -m src.analysis.eval_corpus`, not a green TU on the last sample.
 
 YAML fields:
   id, profile, recipe, ghidra_cpp
-  gcc_fingerprint   optional regex (for a future Compiler agent)
+  gcc_fingerprint   optional regex (Compiler agent match_errors)
   contains / not_contains
   compile           syntax-check the recipe output (skipped if no compiler)
   requires          e.g. [gmp] — skip compile if the header is missing

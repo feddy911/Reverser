@@ -12,7 +12,7 @@ _CALL_INCLUDE_RULES: List[tuple] = [
     (re.compile(
         r"^(sqrt|pow|fabs|sin|cos|tan|log|exp|floor|ceil|round|hypot|fmod|atan2|asin|acos)$"
     ), "#include <cmath>"),
-    (re.compile(r"^(memcpy|memset|memcmp|strlen|strcpy|strncpy|strcmp)$"), "#include <cstring>"),
+    (re.compile(r"^(memcpy|memmove|memset|memcmp|strlen|strcpy|strncpy|strcmp)$"), "#include <cstring>"),
     (re.compile(r"^(malloc|free|calloc|realloc|atoi|exit|abort)$"), "#include <cstdlib>"),
     (re.compile(r"^(open|read|write|close|stat)$"), "#include <unistd.h>"),
     (re.compile(r"^operator<<"), "#include <iostream>"),
@@ -83,8 +83,12 @@ _CODE_INCLUDE_RULES: List[tuple] = [
     (re.compile(r"\bstd::(sort|stable_sort|partial_sort|equal|find|copy|fill|min|max|swap|reverse|count)\b"),
      "#include <algorithm>"),
     (re.compile(r"\b(?:std::)?swap\s*\("), "#include <utility>"),
-    (re.compile(r"\b(?:memcpy|memset|memcmp|strlen|strcpy|strncpy|strcmp)\s*\("),
+    (re.compile(r"\b(?:memcpy|memmove|memset|memcmp|strlen|strcpy|strncpy|strcmp)\s*\("),
      "#include <cstring>"),
+    (re.compile(r"\b(?:printf|sprintf|snprintf|fprintf|puts|putchar)\s*\("),
+     "#include <cstdio>"),
+    (re.compile(r"\b(?:atoi|malloc|free|calloc|realloc|exit|abort)\s*\("),
+     "#include <cstdlib>"),
     (re.compile(r"\b(?:std::)?initializer_list\b"), "#include <initializer_list>"),
     (re.compile(
         r"\b(?:std::)?(sqrt|pow|fabs|sin|cos|tan|log|exp|floor|ceil|round|hypot|fmod|atan2|asin|acos)\s*\("

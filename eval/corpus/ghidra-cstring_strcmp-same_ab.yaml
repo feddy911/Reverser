@@ -1,0 +1,19 @@
+id: ghidra-cstring_strcmp-same_ab
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint same_ab(char *s)\r\
+  \n\r\n{\r\n  int iVar1;\r\n  char *in_RCX;\r\n  \r\n  iVar1 = strcmp(in_RCX,\"ab\"\
+  );\r\n  return (int)(iVar1 == 0);\r\n}"
+guessed_name: same_ab
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  char *in_stack_ffffffffffffffd8;\r\
+    \n  \r\n  __main();\r\n  iVar1 = same_ab(in_stack_ffffffffffffffd8);\r\n  return\
+    \ (int)(iVar1 == 0);\r\n}"
+contains:
+- same_ab
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cstring_strcmp; review before accept
+gcc_fingerprint: ''

@@ -1,0 +1,26 @@
+id: ghidra-string_reserve-room_n
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid room_n(string *s,int\
+  \ n)\r\n\r\n{\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+  \ *in_stack_ffffffffffffffd8;\r\n  size_type in_stack_ffffffffffffffe0;\r\n  \r\n\
+  \  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::reserve\r\
+  \n            (in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);\r\n  return;\r\
+  \n}"
+guessed_name: room_n
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  size_type sVar1;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+    \ *in_stack_ffffffffffffffa8;\r\n  int in_stack_ffffffffffffffb0;\r\n  string\
+    \ a;\r\n  \r\n  __main();\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string\r\
+    \n            (in_stack_ffffffffffffffa8);\r\n  room_n(in_stack_ffffffffffffffa8,in_stack_ffffffffffffffb0);\r\
+    \n  sVar1 = std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::capacity\r\
+    \n                    (in_stack_ffffffffffffffa8);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffffa8);\r\n  return (uint)(sVar1 < 8);\r\n}"
+contains:
+- room_n
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump string_reserve; review before accept
+gcc_fingerprint: ''

@@ -59,7 +59,9 @@ _PROTECTED_EXTRA = frozenset({
     "unordered_map", "unordered_set", "pair", "substr", "list", "empty",
     "compare", "append", "clear", "reverse", "emplace", "fill", "erase",
     "resize", "fabs", "multiset", "memcpy", "memcmp", "memset", "strlen",
-    "swap", "length", "pop_back", "c_str", "strcmp",
+    "swap", "length", "pop_back", "c_str", "strcmp", "strcpy", "memmove",
+    "capacity", "printf", "puts", "strncpy", "sprintf", "atoi",
+    "reserve", "second",
 
     "ofstream", "ifstream", "optional", "sort", "min", "max",
     "sqrt", "pow", "fabs", "hypot", "sin", "cos", "tan",
@@ -703,6 +705,253 @@ double cube(double x) {
   return std::pow(x, 3.0);
 }
 int main() { return cube(2.0) > 7.0 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="cstring_strcmp",
+        dialect="cstring",
+        source="""#include <cstring>
+int same_ab(const char *s) {
+  return strcmp(s, "ab") == 0 ? 1 : 0;
+}
+int main() { return same_ab("ab") ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="cstring_memmove",
+        dialect="cstring",
+        source="""#include <cstring>
+void shift1(char *p) {
+  memmove(p + 1, p, 2);
+}
+int main() {
+  char a[4] = {'a', 'b', 'c', 0};
+  shift1(a);
+  return a[1] == 'a' ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cstring_strcpy",
+        dialect="cstring",
+        source="""#include <cstring>
+void copy_ab(char *d) {
+  strcpy(d, "ab");
+}
+int main() {
+  char a[4] = {0};
+  copy_ab(a);
+  return a[0] == 'a' ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_clear",
+        dialect="string",
+        source="""#include <string>
+void wipe_s(std::string *s) {
+  s->clear();
+}
+int main() {
+  std::string a("ab");
+  wipe_s(&a);
+  return a.empty() ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_data",
+        dialect="string",
+        source="""#include <string>
+int byte0(std::string *s) {
+  return (int)(unsigned char)s->data()[0];
+}
+int main() {
+  std::string a("ab");
+  return byte0(&a) == (int)'a' ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_empty",
+        dialect="string",
+        source="""#include <string>
+int no_chars(std::string *s) {
+  return s->empty() ? 1 : 0;
+}
+int main() {
+  std::string a;
+  return no_chars(&a) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vector_capacity",
+        dialect="vector",
+        source="""#include <vector>
+int cap_of(std::vector<int> *v) {
+  return (int)v->capacity();
+}
+int main() {
+  std::vector<int> v;
+  v.reserve(4);
+  return cap_of(&v) >= 4 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cmath_floor",
+        dialect="cmath",
+        source="""#include <cmath>
+int trunc1(double x) {
+  return (int)std::floor(x);
+}
+int main() { return trunc1(1.9) == 1 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="cmath_sin",
+        dialect="cmath",
+        source="""#include <cmath>
+double sin0(double x) {
+  return std::sin(x);
+}
+int main() { return sin0(0.0) > -0.1 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="cstdio_printf",
+        dialect="cstdio",
+        source="""#include <cstdio>
+int say_n(int n) {
+  printf("%d\\n", n);
+  return 0;
+}
+int main() { return say_n(1); }
+""",
+    ),
+    MiniProgram(
+        id="cmath_ceil",
+        dialect="cmath",
+        source="""#include <cmath>
+int ceil_up(double x) {
+  return (int)std::ceil(x);
+}
+int main() { return ceil_up(1.1) == 2 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="cmath_cos",
+        dialect="cmath",
+        source="""#include <cmath>
+double cos0(double x) {
+  return std::cos(x);
+}
+int main() { return cos0(0.0) > 0.5 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="cstring_strncpy",
+        dialect="cstring",
+        source="""#include <cstring>
+void copy3(char *d, const char *s) {
+  strncpy(d, s, 3);
+}
+int main() {
+  char a[4] = {0};
+  copy3(a, "abc");
+  return a[0] == 'a' ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cstdio_sprintf",
+        dialect="cstdio",
+        source="""#include <cstdio>
+int fmt_n(char *buf, int n) {
+  return sprintf(buf, "%d", n);
+}
+int main() {
+  char b[16];
+  return fmt_n(b, 1) == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cstdlib_atoi",
+        dialect="cstdlib",
+        source="""#include <cstdlib>
+int parse1(const char *s) {
+  return atoi(s);
+}
+int main() { return parse1("1") == 1 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="string_resize",
+        dialect="string",
+        source="""#include <string>
+void to_len(std::string *s, int n) {
+  s->resize((std::size_t)n);
+}
+int main() {
+  std::string a;
+  to_len(&a, 2);
+  return a.size() == 2 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_reserve",
+        dialect="string",
+        source="""#include <string>
+void room_n(std::string *s, int n) {
+  s->reserve((std::size_t)n);
+}
+int main() {
+  std::string a;
+  room_n(&a, 8);
+  return a.capacity() >= 8 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="pair_second",
+        dialect="pair",
+        source="""#include <utility>
+int second_of(std::pair<int, int> *p) {
+  return p->second;
+}
+int main() {
+  std::pair<int, int> x{3, 4};
+  return second_of(&x) == 4 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="list_empty",
+        dialect="list",
+        source="""#include <list>
+int no_items(std::list<int> *l) {
+  return l->empty() ? 1 : 0;
+}
+int main() {
+  std::list<int> l;
+  return no_items(&l) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="set_empty",
+        dialect="set",
+        source="""#include <set>
+int no_vals(std::set<int> *s) {
+  return s->empty() ? 1 : 0;
+}
+int main() {
+  std::set<int> s;
+  return no_vals(&s) ? 0 : 1;
+}
 """,
     ),
 )
