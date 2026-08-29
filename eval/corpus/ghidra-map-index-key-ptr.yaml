@@ -1,0 +1,22 @@
+id: ghidra-map-index-key-ptr
+profile: gcc_pe_x64
+gcc_fingerprint: "ambiguous overload for 'operator\\[\\]'"
+recipe: sanitize
+ghidra_cpp: |
+  void put_one(map<int,_long_long_unsigned_int,_std::less<int>,_std::allocator<std::pair<int_const,_long_long_unsigned_int>_>_> *m)
+  {
+    key_type *k;
+    std::
+    map<int,_long_long_unsigned_int,_std::less<int>,_std::allocator<std::pair<int_const,_long_long_unsigned_int>_>_>
+    ::map(m);
+    (void)std::
+             map<int,_long_long_unsigned_int,_std::less<int>,_std::allocator<std::pair<int_const,_long_long_unsigned_int>_>_>
+             ::operator[](m, (key_type *)k);
+  }
+contains:
+  - "new ("
+  - "[*((key_type *)k)]"
+not_contains:
+  - "::operator[]"
+compile: true
+notes: "Ghidra splits std:: / map< and passes key_type* to operator[]"

@@ -1,0 +1,23 @@
+id: ghidra-list_size-len
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint len(list<int,_std::allocator<int>_>\
+  \ *l)\r\n\r\n{\r\n  size_type sVar1;\r\n  list<int,_std::allocator<int>_> *in_stack_ffffffffffffffd8;\r\
+  \n  \r\n  sVar1 = std::__cxx11::list<int,_std::allocator<int>_>::size(in_stack_ffffffffffffffd8);\r\
+  \n  return (int)sVar1;\r\n}"
+guessed_name: len
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  list<int,_std::allocator<int>_>\
+    \ *in_stack_ffffffffffffffa8;\r\n  value_type_conflict *in_stack_ffffffffffffffb0;\r\
+    \n  list<int,_std::allocator<int>_> l;\r\n  \r\n  __main();\r\n  std::__cxx11::list<int,_std::allocator<int>_>::list(in_stack_ffffffffffffffa8);\r\
+    \n  std::__cxx11::list<int,_std::allocator<int>_>::push_back\r\n            (in_stack_ffffffffffffffa8,in_stack_ffffffffffffffb0);\r\
+    \n  iVar1 = len(in_stack_ffffffffffffffa8);\r\n  std::__cxx11::list<int,_std::allocator<int>_>::~list(in_stack_ffffffffffffffa8);\r\
+    \n  return (uint)(iVar1 != 1);\r\n}"
+contains:
+- len
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump list_size; review before accept
+gcc_fingerprint: ''

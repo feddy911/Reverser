@@ -1,0 +1,17 @@
+id: ghidra-underscore-int-template
+profile: gcc_pe_x64
+gcc_fingerprint: "'_int' was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  int first_of(pair<int,_int> *p);
+  int has_key(unordered_map<int,_int,_std::hash<int>,_std::equal_to<int>,_std::allocator<std::pair<int_const,_int>_>_> *m, int k);
+contains:
+  - "std::pair<int,int>"
+  - "std::unordered_map<int,int"
+  - "int const"
+not_contains:
+  - "_int"
+  - "_std::"
+  - "int_const"
+compile: false
+notes: "Ghidra prefixes a template primitive with _ after a comma: pair<int,_int>"

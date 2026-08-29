@@ -1,0 +1,13 @@
+id: bare-deque-template
+profile: gcc_pe_x64
+gcc_fingerprint: "'deque' was not declared in this scope"
+recipe: sanitize
+ghidra_cpp: |
+  void add_front(deque<int> *d)
+  {
+    (void)d;
+  }
+contains:
+  - "std::deque<int>"
+compile: true
+notes: "Ghidra drops std:: on deque<T>"

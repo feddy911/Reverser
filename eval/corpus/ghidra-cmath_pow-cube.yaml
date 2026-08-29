@@ -1,0 +1,20 @@
+id: ghidra-cmath_pow-cube
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\ndouble cube(double x)\r\
+  \n\r\n{\r\n  double in_XMM0_Qa;\r\n  double dVar1;\r\n  \r\n  dVar1 = pow(in_XMM0_Qa,DAT_140004000);\r\
+  \n  return dVar1;\r\n}"
+guessed_name: cube
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Globals starting with '_' overlap smaller symbols at the same\
+    \ address */\r\n/* WARNING: Unknown calling convention -- yet parameter storage\
+    \ is locked */\r\n\r\nint main(void)\r\n\r\n{\r\n  double dVar1;\r\n  double in_stack_ffffffffffffffd8;\r\
+    \n  \r\n  __main();\r\n  dVar1 = cube(in_stack_ffffffffffffffd8);\r\n  return\
+    \ (int)(dVar1 <= _DAT_140004010);\r\n}"
+contains:
+- cube
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cmath_pow; review before accept
+gcc_fingerprint: ''

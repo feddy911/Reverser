@@ -40,8 +40,13 @@ _BARE_TEMPLATE = (
     (re.compile(r"(?<![:\w])char_traits\s*<"), "std::char_traits<"),
     (re.compile(r"(?<![:\w])initializer_list\s*<"), "std::initializer_list<"),
     (re.compile(r"(?<![:\w])unordered_map\s*<"), "std::unordered_map<"),
+    (re.compile(r"(?<![:\w])unordered_set\s*<"), "std::unordered_set<"),
     (re.compile(r"(?<![:\w])map\s*<"), "std::map<"),
+    (re.compile(r"(?<![:\w])multiset\s*<"), "std::multiset<"),
     (re.compile(r"(?<![:\w])set\s*<"), "std::set<"),
+    (re.compile(r"(?<![:\w])list\s*<"), "std::list<"),
+    (re.compile(r"(?<![:\w])deque\s*<"), "std::deque<"),
+    (re.compile(r"(?<![:\w])optional\s*<"), "std::optional<"),
     (re.compile(r"(?<![:\w])less\s*<"), "std::less<"),
     (re.compile(r"(?<![:\w])pair\s*<"), "std::pair<"),
     (re.compile(r"(?<![:\w])duration\s*<"), "std::chrono::duration<"),
@@ -69,7 +74,7 @@ _QUOTED = re.compile(r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')')
 
 _KNOWN_CLASSES = frozenset({
     "vector", "basic_string", "string", "allocator", "__new_allocator",
-    "unordered_map", "map", "set", "list", "deque", "array",
+    "unordered_map", "unordered_set", "map", "set", "multiset", "list", "deque", "array",
     "__normal_iterator", "char_traits", "optional", "pair",
     "initializer_list", "map", "less", "ostream", "ofstream",
     "duration", "ratio",
@@ -81,6 +86,7 @@ _KNOWN_MEMBERS = frozenset({
     "swap", "assign", "append", "find", "substr", "compare", "at",
     "back", "front", "length", "capacity", "max_size", "shrink_to_fit",
     "get_allocator", "release", "get", "count", "operator",
+    "value_or", "has_value", "reset",
 })
 
 
@@ -190,6 +196,28 @@ def _split_top_args(inner: str) -> list[str]:
     return args
 
 
+def _deref_if_ident(expr: str) -> str:
+    """Ghidra often passes T* where the real API wants T / T const&."""
+    t = (expr or "").strip()
+    if re.fullmatch(r"[A-Za-z_]\w*", t):
+        return f"*({t})"
+    return t
+
+
+def _deref_ptrish(expr: str) -> str:
+    t = (expr or "").strip()
+    if re.fullmatch(r"[A-Za-z_]\w*", t) or _RE_PTR_CAST.match(t):
+        return f"*({t})"
+    return t
+
+
+_ASSOC_INDEX = frozenset({
+    "map", "set", "multimap", "multiset",
+    "unordered_map", "unordered_set", "unordered_multimap", "unordered_multiset",
+})
+_RE_PTR_CAST = re.compile(r"^\(\s*[^()]*\*\s*\)")
+
+
 def _rewrite_one_call(typ: str, meth: str, dtor: bool, args: list[str]) -> str | None:
     last = _last_type_ident(typ)
     if not last:
@@ -198,9 +226,22 @@ def _rewrite_one_call(typ: str, meth: str, dtor: bool, args: list[str]) -> str |
         recv, rhs = args[0], args[1].strip()
         if rhs.startswith("&"):
             rhs = rhs[1:].strip()
+        else:
+            rhs = _deref_if_ident(rhs)
         return f"(*({recv}) = ({rhs}))"
+    if meth == "operator+=" and len(args) >= 2:
+        recv, rhs = args[0], args[1].strip()
+        if rhs.startswith("&"):
+            rhs = rhs[1:].strip()
+        else:
+            rhs = _deref_if_ident(rhs)
+        return f"(*({recv}) += ({rhs}))"
     if meth == "operator[]" and len(args) >= 2:
-        return f"(*({args[0]}))[{args[1]}]"
+        idx = args[1].strip()
+        if last in _ASSOC_INDEX:
+            if re.fullmatch(r"[A-Za-z_]\w*", idx) or _RE_PTR_CAST.match(idx):
+                idx = f"*({idx})"
+        return f"(*({args[0]}))[{idx}]"
     if meth.startswith("operator"):
         return None
     if not args:
@@ -214,6 +255,10 @@ def _rewrite_one_call(typ: str, meth: str, dtor: bool, args: list[str]) -> str |
         a0 = extra[0]
         if re.fullmatch(r"[A-Za-z_]\w*", a0):
             extra[0] = f"*({a0})"
+    if extra and meth == "insert" and last in _ASSOC_INDEX:
+        a0 = extra[0]
+        if re.fullmatch(r"[A-Za-z_]\w*", a0):
+            extra[0] = f"*({a0})"
     rest = ", ".join(extra)
     rest = re.sub(
         r",\s*\(\s*(?:std::)?allocator\s*<[^>]*>\s*\*\s*\)[^,]*$",
@@ -223,6 +268,21 @@ def _rewrite_one_call(typ: str, meth: str, dtor: bool, args: list[str]) -> str |
     if dtor or meth == last:
         if dtor:
             return f"({recv})->~{last}()"
+        if last in {"basic_string", "string"}:
+            # C-string ctor is (this, char*, Allocator const&) — only the
+            # allocator extra is T*; do not deref the char* ident.
+            if extra:
+                extra = list(extra)
+                extra[-1] = _deref_if_ident(extra[-1])
+            rest = ", ".join(extra)
+            rest = re.sub(
+                r",\s*\(\s*(?:std::)?allocator\s*<[^>]*>\s*\*\s*\)[^,]*$",
+                "",
+                rest,
+            )
+        if last == "duration":
+            extra = [_deref_ptrish(a) for a in extra]
+            rest = ", ".join(extra)
         if rest:
             return f"new ({recv}) {typ}({rest})"
         return f"new ({recv}) {typ}()"
@@ -245,10 +305,14 @@ def rewrite_ghidra_member_calls(code: str) -> str:
             i += 1
             continue
         j = i + 2
+        while j < n and s[j] in " \t\n\r":
+            j += 1
         dtor = False
         if j < n and s[j] == "~":
             dtor = True
             j += 1
+            while j < n and s[j] in " \t\n\r":
+                j += 1
         k = j
         while k < n and (s[k].isalnum() or s[k] == "_"):
             k += 1
@@ -257,7 +321,10 @@ def rewrite_ghidra_member_calls(code: str) -> str:
             continue
         meth = s[j:k]
         if meth == "operator":
-            if k < n and s[k] == "=":
+            if k + 1 < n and s[k:k + 2] == "+=":
+                meth = "operator+="
+                k += 2
+            elif k < n and s[k] == "=":
                 meth = "operator="
                 k += 1
             elif k + 1 < n and s[k] == "[" and s[k + 1] == "]":
@@ -379,6 +446,102 @@ _RE_STACK_ADDR_ASSIGN = re.compile(
 _RE_STACK_PTR_ASSIGN = re.compile(
     r"\b(padding|auStack\w*|local_[0-9A-Fa-f]+)\s*\[[^\]]+\]\s*=\s*(\1\s*\+[^;]+)"
 )
+
+
+def _rewrite_duration_cast(code: str) -> str:
+    """Ghidra `duration_cast<To, Rep, Period>(T*)` → `duration_cast<To>(*ptr)`."""
+    needle = "duration_cast<"
+    s = code or ""
+    n = len(s)
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while True:
+        k = s.find(needle, i)
+        if k < 0:
+            break
+        t = k + len("duration_cast")
+        close_a = _match_forward(s, t, "<", ">")
+        if close_a < 0:
+            i = k + 2
+            continue
+        targs = _split_top_args(s[t + 1:close_a])
+        if not targs:
+            i = k + 2
+            continue
+        p = close_a + 1
+        while p < n and s[p] in " \t\n\r":
+            p += 1
+        if p >= n or s[p] != "(":
+            i = k + 2
+            continue
+        close_p = _match_forward(s, p, "(", ")")
+        if close_p < 0:
+            i = k + 2
+            continue
+        args = _split_top_args(s[p + 1:close_p])
+        if len(args) != 1:
+            i = k + 2
+            continue
+        arg = args[0].strip()
+        if _RE_PTR_CAST.match(arg):
+            arg = f"*({arg})"
+        out.append(s[copied:k])
+        out.append(f"duration_cast<{targs[0]}>({arg})")
+        copied = close_p + 1
+        i = copied
+    out.append(s[copied:])
+    return "".join(out)
+
+
+def _rewrite_std_swap(code: str) -> str:
+    """Ghidra `std::swap<T>(T*, T*)` → `std::swap<T>(*a, *b)` when T is not a pointer."""
+    needle = "std::swap"
+    s = code or ""
+    n = len(s)
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while True:
+        k = s.find(needle, i)
+        if k < 0:
+            break
+        t = k + len(needle)
+        while t < n and s[t] in " \t\n\r":
+            t += 1
+        targs: list[str] = []
+        if t < n and s[t] == "<":
+            close_a = _match_forward(s, t, "<", ">")
+            if close_a < 0:
+                i = k + 2
+                continue
+            targs = _split_top_args(s[t + 1:close_a])
+            t = close_a + 1
+            while t < n and s[t] in " \t\n\r":
+                t += 1
+        if t >= n or s[t] != "(":
+            i = k + 2
+            continue
+        close_p = _match_forward(s, t, "(", ")")
+        if close_p < 0:
+            i = k + 2
+            continue
+        args = _split_top_args(s[t + 1:close_p])
+        if len(args) != 2:
+            i = k + 2
+            continue
+        if targs and "*" not in targs[0]:
+            args = [_deref_ptrish(a) for a in args]
+        else:
+            i = close_p + 1
+            continue
+        out.append(s[copied:k])
+        tpart = f"<{','.join(targs)}>" if targs else ""
+        out.append(f"std::swap{tpart}({args[0]}, {args[1]})")
+        copied = close_p + 1
+        i = copied
+    out.append(s[copied:])
+    return "".join(out)
 
 
 def rewrite_ghidra_ostream(code: str) -> str:
@@ -531,13 +694,23 @@ def sanitize_ghidra_cpp(code: str) -> str:
         chunk = re.sub(r"_+(?=>)", "", chunk)
         for old, new in _UNDERSCORE_TYPES:
             chunk = chunk.replace(old, new)
+        # Ghidra: pair<int,_int> / map<int,_int,…> — '_' before a primitive targ.
+        chunk = re.sub(
+            r"\b_(int|char|bool|void|float|double|short|long)\b",
+            r"\1",
+            chunk,
+        )
         for rx, repl in _BARE_TEMPLATE:
             chunk = rx.sub(repl, chunk)
+        chunk = re.sub(r"\bstd::\s+std::", "std::", chunk)
+        chunk = re.sub(r"::\s+std::chrono::duration\s*<", "::duration<", chunk)
+        chunk = re.sub(r"\b([A-Za-z_]\w*)\s*\.\s*__r\b", r"(&\1)", chunk)
         chunk = _BARE_IOS.sub(r"std::\1", chunk)
         chunk = _BARE_STRING.sub("std::string", chunk)
         for rx, repl in _RE_IOS_OPENMODE:
             chunk = rx.sub(repl, chunk)
         chunk = _RE_MINGW_STDIO_OBJ.sub(r"std::\1", chunk)
+        chunk = re.sub(r"(?<!::)(?<![.>])\bswap\s*([<(])", r"std::swap\1", chunk)
         chunk = _RE_GHIDRA_NTTP.sub(r"\1", chunk)
         chunk = _RE_DAT_UNDERSCORE.sub(r"DAT_\1", chunk)
         chunk = _RE_MPZ_T_PTR.sub("mpz_ptr ", chunk)
@@ -549,6 +722,8 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _USING_STD.sub("", t)
     t = _strip_invalid_using(t)
     t = rewrite_ghidra_member_calls(t)
+    t = _rewrite_duration_cast(t)
+    t = _rewrite_std_swap(t)
     t = rewrite_ghidra_ostream(t)
     t = rewrite_gmp_amp_args(t)
     t = _RE_STL_PRIV_FIELD.sub("", t)

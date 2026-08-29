@@ -1,0 +1,14 @@
+id: bare-list-template
+profile: gcc_pe_x64
+gcc_fingerprint: "'list' was not declared in this scope"
+recipe: sanitize
+ghidra_cpp: |
+  int len(list<int> *l)
+  {
+    (void)l;
+    return 0;
+  }
+contains:
+  - "std::list<int>"
+compile: true
+notes: "Ghidra drops std:: on list<T>"

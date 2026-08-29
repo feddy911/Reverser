@@ -150,6 +150,19 @@ class TestIncludes(unittest.TestCase):
             "#include <cmath>",
             includes_from_source("return sqrt(x * x + y * y);"),
         )
+        self.assertIn("#include <set>", includes_from_source("set<int> *s;"))
+        self.assertIn(
+            "#include <optional>",
+            includes_from_source("optional<int> *p;"),
+        )
+        self.assertIn(
+            "#include <cstring>",
+            includes_from_source("memcpy(d, s, 2);"),
+        )
+        self.assertIn(
+            "#include <utility>",
+            includes_from_source("std::swap(a, b);"),
+        )
 
 
 class TestGhidraHeadlessLocator(unittest.TestCase):
@@ -285,6 +298,11 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("new (", got)
         self.assertIn("->~vector()", got)
         self.assertNotIn("::reserve", got)
+        br = sanitize_ghidra_cpp(
+            "std::basic_string<char>::\n                     c_str(p);\n"
+        )
+        self.assertIn("->c_str()", br)
+        self.assertNotIn("::c_str", br)
 
     def test_duration_cast_not_rewritten(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -292,6 +310,29 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         raw = "auto us = std::chrono::duration_cast<std::chrono::microseconds>(d);"
         self.assertIn("duration_cast", sanitize_ghidra_cpp(raw))
         self.assertNotIn("->duration_cast", sanitize_ghidra_cpp(raw))
+        self.assertIn("duration_cast<std::chrono::microseconds>(d)", sanitize_ghidra_cpp(raw))
+
+    def test_chrono_duration_cast_extra_targs_and_priv_r(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "std::chrono::duration_cast<std::chrono::duration<long_long_int,"
+            "_std::ratio<1,_1000000>_>,_long_long_int,_std::ratio<1,_1000000000>_>"
+            "((duration<long_long_int,_std::ratio<1,_1000000000>_> *)p);\n"
+        )
+        self.assertIn(
+            "duration_cast<std::chrono::duration<long long,std::ratio<1,1000000>>>",
+            got,
+        )
+        self.assertNotIn(",long long,std::ratio<1,1000000000>>", got)
+        self.assertNotIn("->duration_cast", got)
+        priv = sanitize_ghidra_cpp(
+            "std::chrono::duration<long_long_int,_std::ratio<1,_1000000>_>::duration<int>"
+            "((duration<long_long_int,_std::ratio<1,_1000000>_> *)local.__r, (int *)rep);\n"
+        )
+        self.assertIn("(&local)", priv)
+        self.assertNotIn(".__r", priv)
+        self.assertIn("new (", priv)
 
     def test_extract_named_drops_extras(self):
         from src.analysis.ghidra_cpp import extract_named_function
@@ -345,6 +386,54 @@ int main(int argc, char **argv) { return 0; }
         self.assertIn("(*(&lines) = (initializerList))", got)
         self.assertNotIn("::operator=", got)
 
+    def test_string_assign_ptr_and_plus_eq(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "std::string::operator=(dst, src);\n"
+            "std::string::operator+=(dst, src);\n"
+        )
+        self.assertIn("(*(dst) = (*(src)))", got)
+        self.assertIn("(*(dst) += (*(src)))", got)
+        self.assertNotIn("::operator=", got)
+        self.assertNotIn("::operator+=", got)
+
+    def test_string_ctor_deref_alloc_ident(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "std::basic_string<char>::basic_string<>(p, (char *)s, a);\n"
+        )
+        self.assertIn("new (", got)
+        self.assertIn("*(a)", got)
+        self.assertNotIn("::basic_string<>", got)
+        dump = sanitize_ghidra_cpp(
+            "std::basic_string<char>::basic_string<>(p, s, a);\n"
+        )
+        self.assertIn("*(a)", dump)
+        self.assertNotIn("*(s)", dump)
+
+    def test_ghidra_underscore_int_template(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp("int first_of(pair<int,_int> *p);")
+        self.assertIn("std::pair<int,int>", got)
+        self.assertNotIn("_int", got)
+
+    def test_map_index_key_ptr_and_split_std(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        raw = (
+            "std::\n"
+            "map<int, unsigned long long>::map(m);\n"
+            "std::map<int, unsigned long long>::operator[](m, (key_type *)k);\n"
+        )
+        got = sanitize_ghidra_cpp(raw)
+        self.assertIn("new (", got)
+        self.assertNotIn("std::\n  std::map", got)
+        self.assertIn("[*((key_type *)k)]", got)
+        self.assertNotIn("::operator[]", got)
+
     def test_operator_index_rewrite(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 
@@ -360,6 +449,38 @@ int main(int argc, char **argv) { return 0; }
         got = sanitize_ghidra_cpp("initializer_list<Item> local_20;")
         self.assertIn("std::initializer_list<Item>", got)
         self.assertNotIn(" std::std::initializer_list", got)
+
+    def test_bare_set_and_optional(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        self.assertIn("std::set<int>", sanitize_ghidra_cpp("set<int> *s;"))
+        self.assertIn("std::optional<int>", sanitize_ghidra_cpp("optional<int> *p;"))
+        self.assertIn("std::deque<int>", sanitize_ghidra_cpp("deque<int> *d;"))
+        self.assertIn("std::list<int>", sanitize_ghidra_cpp("list<int> *l;"))
+        self.assertIn(
+            "std::unordered_set<int>",
+            sanitize_ghidra_cpp("unordered_set<int> *s;"),
+        )
+        self.assertIn(
+            "std::multiset<int>",
+            sanitize_ghidra_cpp("multiset<int> *s;"),
+        )
+        sw = sanitize_ghidra_cpp("swap(a, b); (p)->swap(q);")
+        self.assertIn("std::swap(a, b)", sw)
+        self.assertIn("->swap(q)", sw)
+        self.assertNotIn("->std::swap", sw)
+        tswap = sanitize_ghidra_cpp("std::swap<int>(a, b);")
+        self.assertIn("*(a)", tswap)
+        self.assertIn("*(b)", tswap)
+        self.assertIn(
+            "->value_or(0)",
+            sanitize_ghidra_cpp("std::optional<int>::value_or(p, 0);"),
+        )
+        ins = sanitize_ghidra_cpp("std::set<int>::insert(s, k);")
+        self.assertIn("->insert(*(k))", ins)
+        vec_ins = sanitize_ghidra_cpp("std::vector<int>::insert(v, it, x);")
+        self.assertIn("->insert(it, x)", vec_ins)
+        self.assertNotIn("*(it)", vec_ins)
 
     def test_map_underscore_types_and_bare_map(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp

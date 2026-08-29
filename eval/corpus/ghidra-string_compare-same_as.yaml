@@ -1,0 +1,34 @@
+id: ghidra-string_compare-same_as
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint same_as(string *a,string\
+  \ *b)\r\n\r\n{\r\n  int iVar1;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+  \ *in_stack_ffffffffffffffd8;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+  \ *in_stack_ffffffffffffffe0;\r\n  \r\n  iVar1 = std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::compare\r\
+  \n                    (in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);\r\n\
+  \  return (int)(iVar1 == 0);\r\n}"
+guessed_name: same_as
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+    \ *in_stack_ffffffffffffff68;\r\n  string *in_stack_ffffffffffffff70;\r\n  allocator<char>\
+    \ *in_stack_ffffffffffffff78;\r\n  string b;\r\n  string a;\r\n  undefined1 local_2a;\r\
+    \n  undefined1 local_29;\r\n  undefined1 *local_28;\r\n  undefined1 *local_20;\r\
+    \n  \r\n  __main();\r\n  local_20 = &local_2a;\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string<>\r\
+    \n            (in_stack_ffffffffffffff68,(char *)in_stack_ffffffffffffff70,in_stack_ffffffffffffff78);\r\
+    \n  std::__new_allocator<char>::~__new_allocator((__new_allocator<char> *)in_stack_ffffffffffffff68);\r\
+    \n  local_28 = &local_29;\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string<>\r\
+    \n            (in_stack_ffffffffffffff68,(char *)in_stack_ffffffffffffff70,in_stack_ffffffffffffff78);\r\
+    \n  std::__new_allocator<char>::~__new_allocator((__new_allocator<char> *)in_stack_ffffffffffffff68);\r\
+    \n  iVar1 = same_as(in_stack_ffffffffffffff68,in_stack_ffffffffffffff70);\r\n\
+    \  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffff68);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffff68);\r\n  return (uint)(iVar1 == 0);\r\n\
+    }"
+contains:
+- same_as
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump string_compare; review before accept
+gcc_fingerprint: ''

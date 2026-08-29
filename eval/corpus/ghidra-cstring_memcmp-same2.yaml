@@ -1,0 +1,19 @@
+id: ghidra-cstring_memcmp-same2
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint same2(char *a,char\
+  \ *b)\r\n\r\n{\r\n  int iVar1;\r\n  void *in_RCX;\r\n  void *in_RDX;\r\n  \r\n \
+  \ iVar1 = memcmp(in_RCX,in_RDX,2);\r\n  return (int)(iVar1 == 0);\r\n}"
+guessed_name: same2
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  char *in_stack_ffffffffffffffd8;\r\
+    \n  char *in_stack_ffffffffffffffe0;\r\n  \r\n  __main();\r\n  iVar1 = same2(in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);\r\
+    \n  return (int)(iVar1 == 0);\r\n}"
+contains:
+- same2
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cstring_memcmp; review before accept
+gcc_fingerprint: ''

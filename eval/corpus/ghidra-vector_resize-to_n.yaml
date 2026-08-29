@@ -1,0 +1,24 @@
+id: ghidra-vector_resize-to_n
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid to_n(vector<int,_std::allocator<int>_>\
+  \ *v,int n)\r\n\r\n{\r\n  vector<int,_std::allocator<int>_> *in_stack_ffffffffffffffd8;\r\
+  \n  size_type in_stack_ffffffffffffffe0;\r\n  \r\n  std::vector<int,_std::allocator<int>_>::resize\r\
+  \n            (in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);\r\n  return;\r\
+  \n}"
+guessed_name: to_n
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  size_type sVar1;\r\n  vector<int,_std::allocator<int>_>\
+    \ *in_stack_ffffffffffffffa8;\r\n  int in_stack_ffffffffffffffb0;\r\n  vector<int,_std::allocator<int>_>\
+    \ v;\r\n  \r\n  __main();\r\n  std::vector<int,_std::allocator<int>_>::vector(in_stack_ffffffffffffffa8);\r\
+    \n  to_n(in_stack_ffffffffffffffa8,in_stack_ffffffffffffffb0);\r\n  sVar1 = std::vector<int,_std::allocator<int>_>::size(in_stack_ffffffffffffffa8);\r\
+    \n  std::vector<int,_std::allocator<int>_>::~vector(in_stack_ffffffffffffffa8);\r\
+    \n  return (uint)((int)sVar1 != 2);\r\n}"
+contains:
+- to_n
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump vector_resize; review before accept
+gcc_fingerprint: ''

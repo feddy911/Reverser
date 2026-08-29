@@ -1,0 +1,28 @@
+id: ghidra-chrono_cast-to_us
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nlonglong to_us(duration\
+  \ d)\r\n\r\n{\r\n  rep rVar1;\r\n  duration<long_long_int,_std::ratio<1,_1000000>_>\
+  \ *in_stack_ffffffffffffffc8;\r\n  \r\n  std::chrono::\r\n  duration_cast<std::chrono::duration<long_long_int,_std::ratio<1,_1000000>_>,_long_long_int,_std::ratio<1,_1000000000>_>\r\
+  \n            ((duration<long_long_int,_std::ratio<1,_1000000000>_> *)in_stack_ffffffffffffffc8);\r\
+  \n  rVar1 = std::chrono::duration<long_long_int,_std::ratio<1,_1000000>_>::count\r\
+  \n                    (in_stack_ffffffffffffffc8);\r\n  return rVar1;\r\n}"
+guessed_name: to_us
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  longlong lVar1;\r\n  duration in_stack_ffffffffffffffb8;\r\
+    \n  duration<long_long_int,_std::ratio<1,_1000000>_> *in_stack_ffffffffffffffc0;\r\
+    \n  \r\n  __main();\r\n  std::chrono::duration<long_long_int,_std::ratio<1,_1000000>_>::duration<int>\r\
+    \n            ((duration<long_long_int,_std::ratio<1,_1000000>_> *)in_stack_ffffffffffffffb8.__r,\r\
+    \n             (int *)in_stack_ffffffffffffffc0);\r\n  std::chrono::duration<long_long_int,_std::ratio<1,_1000000000>_>::\r\
+    \n  duration<long_long_int,_std::ratio<1,_1000000>_>\r\n            ((duration<long_long_int,_std::ratio<1,_1000000000>_>\
+    \ *)in_stack_ffffffffffffffb8.__r,\r\n             in_stack_ffffffffffffffc0);\r\
+    \n  lVar1 = to_us(in_stack_ffffffffffffffb8);\r\n  return (int)(lVar1 != 1);\r\
+    \n}"
+contains:
+- to_us
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump chrono_cast; review before accept
+gcc_fingerprint: ''

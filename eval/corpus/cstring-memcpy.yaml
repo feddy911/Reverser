@@ -1,0 +1,15 @@
+id: cstring-memcpy
+profile: gcc_pe_x64
+gcc_fingerprint: "'memcpy' was not declared in this scope"
+recipe: assemble
+guessed_name: copy2
+ghidra_cpp: |
+  void copy2(char *d, char *s)
+  {
+    memcpy(d, s, 2);
+  }
+contains:
+  - "#include <cstring>"
+  - "memcpy("
+compile: true
+notes: "Ghidra emits memcpy without <cstring> (same class as strlen/memcmp)"

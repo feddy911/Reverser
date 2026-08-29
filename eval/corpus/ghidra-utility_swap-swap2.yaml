@@ -1,0 +1,21 @@
+id: ghidra-utility_swap-swap2
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid swap2(int *a,int\
+  \ *b)\r\n\r\n{\r\n  int *in_stack_ffffffffffffffd8;\r\n  int *in_stack_ffffffffffffffe0;\r\
+  \n  \r\n  std::swap<int>(in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);\r\
+  \n  return;\r\n}"
+guessed_name: swap2
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int *in_stack_ffffffffffffffc8;\r\n \
+    \ int *in_stack_ffffffffffffffd0;\r\n  int y;\r\n  int x;\r\n  \r\n  __main();\r\
+    \n  swap2(in_stack_ffffffffffffffc8,in_stack_ffffffffffffffd0);\r\n  return 1;\r\
+    \n}"
+contains:
+- swap2
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump utility_swap; review before accept
+gcc_fingerprint: ''

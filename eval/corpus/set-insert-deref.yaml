@@ -1,0 +1,15 @@
+id: set-insert-deref
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*insert"
+recipe: sanitize
+ghidra_cpp: |
+  void add_one(set<int> *s, int *k)
+  {
+    std::set<int>::insert(s, k);
+  }
+contains:
+  - "->insert(*(k))"
+not_contains:
+  - "::insert"
+compile: true
+notes: "Ghidra set::insert(this, T*) where insert wants T const&; not vector::insert"

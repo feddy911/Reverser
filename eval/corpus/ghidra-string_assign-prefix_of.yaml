@@ -1,0 +1,38 @@
+id: ghidra-string_assign-prefix_of
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nstring * prefix_of(string\
+  \ *src,string *pfx)\r\n\r\n{\r\n  string *in_RCX;\r\n  string *out;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+  \ *in_stack_ffffffffffffffc8;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+  \ *in_stack_ffffffffffffffd0;\r\n  \r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string\r\
+  \n            (in_stack_ffffffffffffffc8);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::operator=\r\
+  \n            (in_stack_ffffffffffffffc8,in_stack_ffffffffffffffd0);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::operator+=\r\
+  \n            (in_stack_ffffffffffffffc8,in_stack_ffffffffffffffd0);\r\n  return\
+  \ in_RCX;\r\n}"
+guessed_name: prefix_of
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  size_type sVar1;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+    \ *in_stack_ffffffffffffff38;\r\n  string *in_stack_ffffffffffffff40;\r\n  string\
+    \ *in_stack_ffffffffffffff48;\r\n  undefined1 local_59 [48];\r\n  undefined1 local_29;\r\
+    \n  undefined1 *local_28;\r\n  undefined1 *local_20;\r\n  \r\n  __main();\r\n\
+    \  local_20 = local_59;\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string<>\r\
+    \n            (in_stack_ffffffffffffff38,(char *)in_stack_ffffffffffffff40,\r\n\
+    \             (allocator<char> *)in_stack_ffffffffffffff48);\r\n  local_28 = &local_29;\r\
+    \n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string<>\r\
+    \n            (in_stack_ffffffffffffff38,(char *)in_stack_ffffffffffffff40,\r\n\
+    \             (allocator<char> *)in_stack_ffffffffffffff48);\r\n  prefix_of(in_stack_ffffffffffffff40,in_stack_ffffffffffffff48);\r\
+    \n  sVar1 = std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::size\r\
+    \n                    (in_stack_ffffffffffffff38);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffff38);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffff38);\r\n  std::__new_allocator<char>::~__new_allocator((__new_allocator<char>\
+    \ *)in_stack_ffffffffffffff38);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffff38);\r\n  std::__new_allocator<char>::~__new_allocator((__new_allocator<char>\
+    \ *)in_stack_ffffffffffffff38);\r\n  return (uint)(sVar1 != 4);\r\n}"
+contains:
+- prefix_of
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump string_assign; review before accept
+gcc_fingerprint: ''

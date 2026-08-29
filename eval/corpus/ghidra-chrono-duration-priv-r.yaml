@@ -1,0 +1,20 @@
+id: ghidra-chrono-duration-priv-r
+profile: gcc_pe_x64
+gcc_fingerprint: "'__r' is private"
+recipe: sanitize
+ghidra_cpp: |
+  void build_us(void)
+  {
+    duration local;
+    int *rep;
+    std::chrono::duration<long_long_int,_std::ratio<1,_1000000>_>::duration<int>
+              ((duration<long_long_int,_std::ratio<1,_1000000>_> *)local.__r, (int *)rep);
+  }
+contains:
+  - "(&local)"
+  - "new ("
+not_contains:
+  - ".__r"
+  - "duration(int *)"
+compile: true
+notes: "Ghidra uses duration.__r as the object address and passes int* into duration(rep)"

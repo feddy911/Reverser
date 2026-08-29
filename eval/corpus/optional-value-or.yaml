@@ -1,0 +1,15 @@
+id: optional-value-or
+profile: gcc_pe_x64
+gcc_fingerprint: "is not a member of"
+recipe: sanitize
+ghidra_cpp: |
+  int or_zero(optional<int> *p)
+  {
+    return std::optional<int>::value_or(p, 0);
+  }
+contains:
+  - "->value_or(0)"
+not_contains:
+  - "::value_or"
+compile: true
+notes: "Ghidra optional::value_or(this, x) is a member call"

@@ -1,0 +1,23 @@
+id: ghidra-string-assign-ptr
+profile: gcc_pe_x64
+gcc_fingerprint: "no match for 'operator='.*basic_string.*basic_string"
+recipe: sanitize
+ghidra_cpp: |
+  string * prefix_of(string *src, string *pfx)
+  {
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *dst;
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *rhs;
+    std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::operator=
+              (dst, rhs);
+    std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::operator+=
+              (dst, rhs);
+    return dst;
+  }
+contains:
+  - "(*(dst) = (*(rhs)))"
+  - "(*(dst) += (*(rhs)))"
+not_contains:
+  - "::operator="
+  - "::operator+="
+compile: true
+notes: "Ghidra string::operator=/+= (this, T*) wants T const&; do not deref (char *) rhs"

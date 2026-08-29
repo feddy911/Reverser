@@ -1,0 +1,17 @@
+id: ghidra-swap-targs-ptr
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to 'swap<int>\\(int\\*&"
+recipe: sanitize
+ghidra_cpp: |
+  void swap2(int *a, int *b)
+  {
+    std::swap<int>(a, b);
+  }
+contains:
+  - "std::swap"
+  - "*(a)"
+  - "*(b)"
+not_contains:
+  - "swap<int>(a, b)"
+compile: true
+notes: "Ghidra std::swap<T>(T*, T*) — T is the value type; deref ident args. Not member ->swap."

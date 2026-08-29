@@ -1,0 +1,13 @@
+id: bare-unordered-set-template
+profile: gcc_pe_x64
+gcc_fingerprint: "'unordered_set' was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  int has_n(unordered_set<int> *s, int n)
+  {
+    return (int)(s != 0);
+  }
+contains:
+  - "std::unordered_set<int>"
+compile: true
+notes: "Ghidra drops std:: on unordered_set<T>"

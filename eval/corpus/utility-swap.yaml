@@ -1,0 +1,17 @@
+id: utility-swap
+profile: gcc_pe_x64
+gcc_fingerprint: "'swap' was not declared in this scope"
+recipe: sanitize_then_assemble
+guessed_name: swap2
+ghidra_cpp: |
+  void swap2(int *a, int *b)
+  {
+    swap(a, b);
+  }
+contains:
+  - "#include <utility>"
+  - "std::swap("
+not_contains:
+  - "->std::swap"
+compile: true
+notes: "Ghidra drops std:: on free swap(); do not rewrite member ->swap"

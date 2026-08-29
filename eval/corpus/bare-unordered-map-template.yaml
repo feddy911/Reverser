@@ -1,0 +1,13 @@
+id: bare-unordered-map-template
+profile: gcc_pe_x64
+gcc_fingerprint: "'unordered_map' was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  int has_key(unordered_map<int, int> *m, int k)
+  {
+    return (int)(m != 0);
+  }
+contains:
+  - "std::unordered_map<int, int>"
+compile: true
+notes: "Ghidra drops std:: on unordered_map<T>"

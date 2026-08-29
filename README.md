@@ -66,7 +66,7 @@ py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json
 
 Новые rewrite в `ghidra_cpp.py` / `assembler.py` не добавляются по итогам одного exe.
 Сначала фикстура в `eval/corpus/<id>.yaml` (сниппет + recipe + contains / not_contains), затем рецепт.
-Схема полей: `eval/corpus/_schema.yaml`. Сейчас **42** загружаемых фикстуры.
+Схема полей: `eval/corpus/_schema.yaml`. Сейчас **90** загружаемых фикстуры.
 
 ```bash
 py -m src.analysis.eval_corpus
@@ -97,7 +97,7 @@ py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-
 py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-dir output/librarian_draft --accept-compiled
 ```
 
-Целиком зелёные generator-дампы (assemble + gcc, без held-out): `hypot_sqrt`, `mingw_main`, `vector_reserve`, `iostream_shift`.
+Целиком зелёные generator-дампы (assemble + gcc, без held-out): `hypot_sqrt`, `mingw_main`, `vector_reserve`, `iostream_shift`, `string_assign`, `string_find`, `set_count`, `algo_sort`, `chrono_cast`, `pair_first`, `string_substr`, `umap_count`, `vector_empty`, `string_compare`, `list_size`, `map_emplace`, `algo_reverse`, `string_append`, `vector_clear`, `cmath_fabs`, `string_erase`, `vector_resize`, `cstring_memcpy`, `cstring_memcmp`, `string_length`, `vector_pop_back`, `utility_swap`, `cstring_strlen`, `cstring_memset`, `string_c_str`, `vector_size`, `cmath_pow`.
 
 Compiler agent классифицирует gcc-диагностики по `gcc_fingerprint` корпуса.
 Известный класс — без LLM. Неизвестный — один LLM-проход и YAML-черновик (не патч sanitizer).
@@ -170,9 +170,8 @@ tests/
 - Не запускайте недоверенные бинарники без изоляции: Ghidra загружает файл целиком.
 - Полный multi-binary ML-датасет (5–10 labeled) — следующий шаг: наполните `eval/` и переобучите scorer.
 - Generator-дампы, которые ещё не собираются целиком (очередь корпуса, не PointCloud):
-  `string_assign` (`operator=` / `operator+=` с `string*`),
-  `string_find` (`basic_string(char*, allocator*)`),
-  `map_count` (разорванный ctor, `operator[](key*)`),
+  `map_count` (Ghidra пишет `mapped_type*` для `operator[]`, это `T&`),
   `init_list_vector` (`reference` как `T&`, не `T*`),
-  `chrono_cast` (лишние template-аргументы `duration_cast`, приватный `__r`),
-  `fstream_write` (`ios::good()` без объекта — без честного receiver не чинить).
+  `chrono_cast` (лишние template-аргументы `duration_cast`, приватный `__r`, ctor из `int*`),
+  `fstream_write` (`ios::good()` без объекта — без честного receiver не чинить),
+  `optional_value` (Ghidra печатает внутренности `remove_cv_t`, не user-API).

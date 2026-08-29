@@ -1,0 +1,18 @@
+id: ghidra-cstring_memset-zero2
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid zero2(char *p)\r\
+  \n\r\n{\r\n  void *in_RCX;\r\n  \r\n  memset(in_RCX,0,2);\r\n  return;\r\n}"
+guessed_name: zero2
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  char *in_stack_ffffffffffffffc8;\r\n\
+    \  char a [2];\r\n  \r\n  __main();\r\n  zero2(in_stack_ffffffffffffffc8);\r\n\
+    \  return 1;\r\n}"
+contains:
+- zero2
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cstring_memset; review before accept
+gcc_fingerprint: ''

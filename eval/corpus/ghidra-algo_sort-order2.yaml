@@ -1,0 +1,20 @@
+id: ghidra-algo_sort-order2
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid order2(int *p)\r\
+  \n\r\n{\r\n  int *in_stack_ffffffffffffffd8;\r\n  int *in_stack_ffffffffffffffe0;\r\
+  \n  \r\n  std::sort<int*>(in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);\r\
+  \n  return;\r\n}"
+guessed_name: order2
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int *in_stack_ffffffffffffffc8;\r\n \
+    \ int xs [2];\r\n  \r\n  __main();\r\n  order2(in_stack_ffffffffffffffc8);\r\n\
+    \  return 1;\r\n}"
+contains:
+- order2
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump algo_sort; review before accept
+gcc_fingerprint: ''

@@ -53,8 +53,15 @@ _PROTECTED_EXTRA = frozenset({
     "undefined8", "longlong", "ulonglong", "size_type", "unsigned_char",
     "include",     "printf", "sprintf", "fprintf", "puts", "main",
     "initializer_list", "cmath", "cstdio", "cstring", "cstdint", "cstdlib",
-    "algorithm", "iostream", "fstream", "chrono", "vector", "map",
-    "ofstream", "ifstream", "optional",
+    "algorithm", "iostream", "fstream", "chrono", "vector", "map", "set",
+    "utility",
+    "ofstream", "ifstream", "optional", "sort", "min", "max", "deque",
+    "unordered_map", "unordered_set", "pair", "substr", "list", "empty",
+    "compare", "append", "clear", "reverse", "emplace", "fill", "erase",
+    "resize", "fabs", "multiset", "memcpy", "memcmp", "memset", "strlen",
+    "swap", "length", "pop_back", "c_str", "strcmp",
+
+    "ofstream", "ifstream", "optional", "sort", "min", "max",
     "sqrt", "pow", "fabs", "hypot", "sin", "cos", "tan",
     "log", "exp", "floor", "ceil", "round", "fmod", "atan2", "asin", "acos",
     "ios", "ios_base",
@@ -297,6 +304,405 @@ int write_n(const char *path, int n) {
   return out.good() ? 0 : 1;
 }
 int main() { return write_n("nul", 1); }
+""",
+    ),
+    MiniProgram(
+        id="set_count",
+        dialect="set",
+        source="""#include <set>
+int has_n(std::set<int> *s, int n) {
+  return s->count(n) ? 1 : 0;
+}
+int main() {
+  std::set<int> s;
+  s.insert(1);
+  return has_n(&s, 1) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="optional_value",
+        dialect="optional",
+        source="""#include <optional>
+int or_zero(std::optional<int> *p) {
+  return p->value_or(0);
+}
+int main() {
+  std::optional<int> x{3};
+  return or_zero(&x) == 3 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="algo_sort",
+        dialect="algorithm",
+        source="""#include <algorithm>
+void order2(int *p) {
+  std::sort(p, p + 2);
+}
+int main() {
+  int xs[2] = {2, 1};
+  order2(xs);
+  return xs[0] == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="umap_count",
+        dialect="unordered_map",
+        source="""#include <unordered_map>
+int has_key(std::unordered_map<int, int> *m, int k) {
+  return m->count(k) ? 1 : 0;
+}
+int main() {
+  std::unordered_map<int, int> m;
+  m.emplace(1, 2);
+  return has_key(&m, 1) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_substr",
+        dialect="string",
+        source="""#include <string>
+int take2(const std::string &s) {
+  return (int)s.substr(0, 2).size();
+}
+int main() { return take2("ab") == 2 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="pair_first",
+        dialect="pair",
+        source="""#include <utility>
+int first_of(std::pair<int, int> *p) {
+  return p->first;
+}
+int main() {
+  std::pair<int, int> x{3, 4};
+  return first_of(&x) == 3 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="deque_push",
+        dialect="deque",
+        source="""#include <deque>
+void add_front(std::deque<int> *d) {
+  d->push_front(1);
+}
+int main() {
+  std::deque<int> d;
+  add_front(&d);
+  return d.front() == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vector_empty",
+        dialect="vector",
+        source="""#include <vector>
+int is_empty(std::vector<int> *v) {
+  return v->empty() ? 1 : 0;
+}
+int main() {
+  std::vector<int> v;
+  return is_empty(&v) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_compare",
+        dialect="string",
+        source="""#include <string>
+int same_as(std::string *a, std::string *b) {
+  return a->compare(*b) == 0 ? 1 : 0;
+}
+int main() {
+  std::string a("ab");
+  std::string b("ab");
+  return same_as(&a, &b) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="list_size",
+        dialect="list",
+        source="""#include <list>
+int len(std::list<int> *l) {
+  return (int)l->size();
+}
+int main() {
+  std::list<int> l;
+  l.push_back(1);
+  return len(&l) == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="map_emplace",
+        dialect="map",
+        source="""#include <map>
+int has_key(std::map<int, int> *m, int k) {
+  return m->count(k) ? 1 : 0;
+}
+int main() {
+  std::map<int, int> m;
+  m.emplace(1, 2);
+  return has_key(&m, 1) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="uset_count",
+        dialect="unordered_set",
+        source="""#include <unordered_set>
+int has_n(std::unordered_set<int> *s, int n) {
+  return s->count(n) ? 1 : 0;
+}
+int main() {
+  std::unordered_set<int> s;
+  s.insert(1);
+  return has_n(&s, 1) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="algo_reverse",
+        dialect="algorithm",
+        source="""#include <algorithm>
+void flip2(int *p) {
+  std::reverse(p, p + 2);
+}
+int main() {
+  int xs[2] = {1, 2};
+  flip2(xs);
+  return xs[0] == 2 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_append",
+        dialect="string",
+        source="""#include <string>
+void add_on(std::string *s, std::string *t) {
+  s->append(*t);
+}
+int main() {
+  std::string a("a");
+  std::string b("b");
+  add_on(&a, &b);
+  return a.size() == 2 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vector_clear",
+        dialect="vector",
+        source="""#include <vector>
+void wipe(std::vector<int> *v) {
+  v->clear();
+}
+int main() {
+  std::vector<int> v;
+  v.push_back(1);
+  wipe(&v);
+  return v.empty() ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="algo_fill",
+        dialect="algorithm",
+        source="""#include <algorithm>
+void ones2(int *p) {
+  std::fill(p, p + 2, 1);
+}
+int main() {
+  int xs[2] = {0, 0};
+  ones2(xs);
+  return xs[0] == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_erase",
+        dialect="string",
+        source="""#include <string>
+void drop_first(std::string *s) {
+  s->erase(0, 1);
+}
+int main() {
+  std::string a("ab");
+  drop_first(&a);
+  return a.size() == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vector_resize",
+        dialect="vector",
+        source="""#include <vector>
+void to_n(std::vector<int> *v, int n) {
+  v->resize((std::size_t)n);
+}
+int main() {
+  std::vector<int> v;
+  to_n(&v, 2);
+  return (int)v.size() == 2 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cmath_fabs",
+        dialect="cmath",
+        source="""#include <cmath>
+double abs1(double x) {
+  return std::fabs(x);
+}
+int main() { return abs1(-1.0) > 0.5 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="mset_count",
+        dialect="multiset",
+        source="""#include <set>
+int has_n(std::multiset<int> *s, int n) {
+  return s->count(n) ? 1 : 0;
+}
+int main() {
+  std::multiset<int> s;
+  s.insert(1);
+  return has_n(&s, 1) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cstring_memcpy",
+        dialect="cstring",
+        source="""#include <cstring>
+void copy2(char *d, const char *s) {
+  memcpy(d, s, 2);
+}
+int main() {
+  char a[3] = {0, 0, 0};
+  copy2(a, "ab");
+  return a[0] == 'a' ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cstring_memcmp",
+        dialect="cstring",
+        source="""#include <cstring>
+int same2(const char *a, const char *b) {
+  return memcmp(a, b, 2) == 0 ? 1 : 0;
+}
+int main() { return same2("ab", "ab") ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="utility_swap",
+        dialect="utility",
+        source="""#include <utility>
+void swap2(int *a, int *b) {
+  std::swap(*a, *b);
+}
+int main() {
+  int x = 1, y = 2;
+  swap2(&x, &y);
+  return x == 2 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_length",
+        dialect="string",
+        source="""#include <string>
+int len_of(std::string *s) {
+  return (int)s->length();
+}
+int main() {
+  std::string a("ab");
+  return len_of(&a) == 2 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vector_pop_back",
+        dialect="vector",
+        source="""#include <vector>
+void drop_last(std::vector<int> *v) {
+  v->pop_back();
+}
+int main() {
+  std::vector<int> v;
+  v.push_back(1);
+  v.push_back(2);
+  drop_last(&v);
+  return (int)v.size() == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cstring_strlen",
+        dialect="cstring",
+        source="""#include <cstring>
+int len2(const char *s) {
+  return (int)strlen(s);
+}
+int main() { return len2("ab") == 2 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="cstring_memset",
+        dialect="cstring",
+        source="""#include <cstring>
+void zero2(char *p) {
+  memset(p, 0, 2);
+}
+int main() {
+  char a[2] = {1, 1};
+  zero2(a);
+  return a[0] == 0 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_c_str",
+        dialect="string",
+        source="""#include <string>
+int first_ch(std::string *s) {
+  return (int)(unsigned char)s->c_str()[0];
+}
+int main() {
+  std::string a("ab");
+  return first_ch(&a) == (int)'a' ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vector_size",
+        dialect="vector",
+        source="""#include <vector>
+int len_of(std::vector<int> *v) {
+  return (int)v->size();
+}
+int main() {
+  std::vector<int> v;
+  v.push_back(1);
+  return len_of(&v) == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cmath_pow",
+        dialect="cmath",
+        source="""#include <cmath>
+double cube(double x) {
+  return std::pow(x, 3.0);
+}
+int main() { return cube(2.0) > 7.0 ? 0 : 1; }
 """,
     ),
 )

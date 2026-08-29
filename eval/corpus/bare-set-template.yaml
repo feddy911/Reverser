@@ -1,0 +1,13 @@
+id: bare-set-template
+profile: gcc_pe_x64
+gcc_fingerprint: "'set' was not declared in this scope"
+recipe: sanitize
+ghidra_cpp: |
+  int has_n(set<int> *s, int n)
+  {
+    return (int)(s != 0);
+  }
+contains:
+  - "std::set<int>"
+compile: true
+notes: "Ghidra drops std:: on set<T> (same dialect as bare map<)"

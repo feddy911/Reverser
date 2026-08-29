@@ -1,0 +1,19 @@
+id: ghidra-chrono-duration-cast-targs
+profile: gcc_pe_x64
+gcc_fingerprint: "wrong number of template arguments.*duration_cast"
+recipe: sanitize
+ghidra_cpp: |
+  unsigned long long to_us(duration d)
+  {
+    duration<long_long_int,_std::ratio<1,_1000000>_> *p;
+    std::chrono::duration_cast<std::chrono::duration<long_long_int,_std::ratio<1,_1000000>_>,_long_long_int,_std::ratio<1,_1000000000>_>
+              ((duration<long_long_int,_std::ratio<1,_1000000000>_> *)p);
+    return 0;
+  }
+contains:
+  - "duration_cast<std::chrono::duration<long long,std::ratio<1,1000000>>>"
+not_contains:
+  - "duration_cast<std::chrono::duration<long long,std::ratio<1,1000000>>,long long"
+  - "->duration_cast"
+compile: true
+notes: "Ghidra duration_cast<To, Rep, Period>(T*) — only To is a real template arg; arg is T*"

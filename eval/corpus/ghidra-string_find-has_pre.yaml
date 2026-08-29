@@ -1,0 +1,34 @@
+id: ghidra-string_find-has_pre
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint has_pre(string *src,string\
+  \ *pre)\r\n\r\n{\r\n  size_type sVar1;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+  \ *in_stack_ffffffffffffffd8;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+  \ *in_stack_ffffffffffffffe0;\r\n  size_type in_stack_ffffffffffffffe8;\r\n  \r\n\
+  \  sVar1 = std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::find\r\
+  \n                    (in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0,in_stack_ffffffffffffffe8);\r\
+  \n  return (int)(sVar1 == 0);\r\n}"
+guessed_name: has_pre
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+    \ *in_stack_ffffffffffffff58;\r\n  string *in_stack_ffffffffffffff60;\r\n  allocator<char>\
+    \ *in_stack_ffffffffffffff68;\r\n  undefined1 local_59 [48];\r\n  undefined1 local_29;\r\
+    \n  undefined1 *local_28;\r\n  undefined1 *local_20;\r\n  \r\n  __main();\r\n\
+    \  local_20 = local_59;\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string<>\r\
+    \n            (in_stack_ffffffffffffff58,(char *)in_stack_ffffffffffffff60,in_stack_ffffffffffffff68);\r\
+    \n  local_28 = &local_29;\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string<>\r\
+    \n            (in_stack_ffffffffffffff58,(char *)in_stack_ffffffffffffff60,in_stack_ffffffffffffff68);\r\
+    \n  iVar1 = has_pre(in_stack_ffffffffffffff58,in_stack_ffffffffffffff60);\r\n\
+    \  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffff58);\r\n  std::__new_allocator<char>::~__new_allocator((__new_allocator<char>\
+    \ *)in_stack_ffffffffffffff58);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffff58);\r\n  std::__new_allocator<char>::~__new_allocator((__new_allocator<char>\
+    \ *)in_stack_ffffffffffffff58);\r\n  return (uint)(iVar1 == 0);\r\n}"
+contains:
+- has_pre
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump string_find; review before accept
+gcc_fingerprint: ''

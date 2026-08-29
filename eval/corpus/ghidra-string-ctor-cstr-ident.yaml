@@ -1,0 +1,21 @@
+id: ghidra-string-ctor-cstr-ident
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*basic_string.*char&"
+recipe: sanitize
+ghidra_cpp: |
+  void make_s(void)
+  {
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *p;
+    char *s;
+    allocator<char> *a;
+    std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string<>
+              (p, s, a);
+  }
+contains:
+  - "new ("
+  - "*(a)"
+not_contains:
+  - "*(s)"
+  - "::basic_string<>"
+compile: true
+notes: "Ghidra basic_string(this, char* ident, allocator* ident) — deref allocator only, not the C string"

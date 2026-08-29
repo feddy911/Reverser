@@ -1,0 +1,20 @@
+id: ghidra-cmath_fabs-abs1
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\ndouble abs1(double x)\r\
+  \n\r\n{\r\n  ulonglong in_XMM0_Qa;\r\n  \r\n  return (double)(in_XMM0_Qa & DAT_140004000);\r\
+  \n}"
+guessed_name: abs1
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Globals starting with '_' overlap smaller symbols at the same\
+    \ address */\r\n/* WARNING: Unknown calling convention -- yet parameter storage\
+    \ is locked */\r\n\r\nint main(void)\r\n\r\n{\r\n  double dVar1;\r\n  double in_stack_ffffffffffffffd8;\r\
+    \n  \r\n  __main();\r\n  dVar1 = abs1(in_stack_ffffffffffffffd8);\r\n  return\
+    \ (int)(dVar1 <= _DAT_140004018);\r\n}"
+contains:
+- abs1
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cmath_fabs; review before accept
+gcc_fingerprint: ''

@@ -1,0 +1,20 @@
+id: ghidra-string-ctor-alloc-ptr
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*basic_string.*allocator"
+recipe: sanitize
+ghidra_cpp: |
+  void make_s(void)
+  {
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *p;
+    char *s;
+    allocator<char> *a;
+    std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string<>
+              (p, (char *)s, a);
+  }
+contains:
+  - "new ("
+  - "*(a)"
+not_contains:
+  - "::basic_string<>"
+compile: true
+notes: "Ghidra basic_string(this, char*, allocator*) — last ident is allocator*"

@@ -1,0 +1,13 @@
+id: bare-multiset-template
+profile: gcc_pe_x64
+gcc_fingerprint: "'multiset' was not declared in this scope"
+recipe: sanitize
+ghidra_cpp: |
+  int has_n(multiset<int> *s, int n)
+  {
+    return (int)(s != 0);
+  }
+contains:
+  - "std::multiset<int>"
+compile: true
+notes: "Ghidra drops std:: on multiset<T>"

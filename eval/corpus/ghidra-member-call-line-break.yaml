@@ -1,0 +1,19 @@
+id: ghidra-member-call-line-break
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*c_str.*basic_string"
+recipe: sanitize
+ghidra_cpp: |
+  int first_ch(string *s)
+  {
+    byte *pbVar1;
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *p;
+    pbVar1 = (byte *)std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::
+                     c_str(p);
+    return (int)*pbVar1;
+  }
+contains:
+  - "->c_str()"
+not_contains:
+  - "::c_str"
+compile: true
+notes: "Ghidra breaks Type::\\n method(this) across lines; skip whitespace after ::"

@@ -1,0 +1,13 @@
+id: bare-optional-template
+profile: gcc_pe_x64
+gcc_fingerprint: "'optional' was not declared in this scope"
+recipe: sanitize
+ghidra_cpp: |
+  int or_zero(optional<int> *p)
+  {
+    return (int)(p != 0);
+  }
+contains:
+  - "std::optional<int>"
+compile: true
+notes: "Ghidra drops std:: on optional<T>"
