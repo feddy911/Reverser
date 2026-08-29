@@ -514,6 +514,130 @@ int main(int argc, char **argv) { return 0; }
         self.assertNotIn("_unsigned", got)
         self.assertNotIn("int_const", got)
 
+    def test_const_std_not_glued_to_conststd(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "std::allocator<std::pair<const_std::__cxx11::basic_string<char>, int> > *m;"
+        )
+        self.assertIn("const std::basic_string", got)
+        self.assertNotIn("conststd", got)
+        self.assertNotIn("const_std::", got)
+
+    def test_lexical_table_drives_const_std_and_m_cur(self):
+        from src.analysis.lexical import LEXICAL_PATH, apply_lexical
+
+        self.assertTrue(LEXICAL_PATH.is_file())
+        glued = apply_lexical("const_std::string x;", "before_underscore_std")
+        self.assertEqual(glued, "const std::string x;")
+        cur = apply_lexical("it._M_cur = 0;", "after_templates")
+        self.assertEqual(cur, "(it) = 0;")
+
+    def test_underscore_false_true_nttp(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "_Node_iterator<std::pair<int,int>,_false,_true> *it;\n"
+        )
+        self.assertIn(",false,true>", got)
+        self.assertNotIn("_false", got)
+        self.assertNotIn("_true", got)
+        self.assertIn("std::__detail::_Node_iterator<", got)
+
+    def test_node_iterator_member_star(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "std::__detail::\n"
+            "_Node_iterator<std::pair<int,int>,_false,_true>\n"
+            "::operator*(it);\n"
+            "std::__detail::_Node_iterator<std::pair<int,int>,_false,_true>"
+            "::operator++(it);\n"
+        )
+        self.assertIn("->operator*()", got)
+        self.assertIn("->operator++()", got)
+        self.assertNotIn("std::__detail::std::__detail::", got)
+        self.assertNotIn("::operator*(", got)
+
+    def test_string_front_ref_not_star_deref(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "pvVar2 = std::__cxx11::basic_string<char>::back(p);\n"
+            "if (*pvVar2 != ' ') return;\n"
+        )
+        self.assertIn("->back()", got)
+        self.assertIn("pvVar2 != ' '", got)
+        self.assertNotIn("*pvVar2", got)
+
+    def test_string_begin_not_cast_to_char_ptr(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "local_28 = (char *)std::__cxx11::basic_string<char>::begin(p);\n"
+        )
+        self.assertIn("(void)((p)->begin())", got)
+        self.assertNotIn("(char *)", got)
+
+    def test_detail_iterator_compare_is_infix(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "bVar1 = std::__detail::operator==(a, b);\n"
+            "bVar2 = std::__detail::operator!=(a, b);\n"
+        )
+        self.assertIn("(a) == (b)", got)
+        self.assertIn("(a) != (b)", got)
+        self.assertNotIn("__detail::operator==", got)
+        self.assertNotIn("__detail::operator!=", got)
+
+    def test_std_string_operator_eq_not_forced_infix(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "bVar1 = std::operator==<char,_std::char_traits<char>,_std::allocator<char>_>(s, p);\n"
+        )
+        self.assertIn("std::operator==", got)
+        self.assertNotIn("(s) == (p)", got)
+
+    def test_hashtable_priv_cur_and_node_type(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "local_28._M_cur = (__node_type *)m->end();\n"
+            "if (a._M_current == b._M_current) return;\n"
+            "a._M_current = a._M_current + 1;\n"
+        )
+        self.assertIn("(local_28) =", got)
+        self.assertIn("(a) == (b)", got)
+        self.assertIn("(a) = (a) + 1", got)
+        self.assertNotIn("_M_cur", got)
+        self.assertNotIn("_M_current", got)
+        self.assertNotIn("__node_type", got)
+
+    def test_pointer_pair_fields_rewritten(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "pointer ppVar3;\n(void)ppVar3->second;\n"
+        )
+        self.assertIn("pointer ppVar3", got)
+        self.assertIn("((std::pair<ghidra_word, ghidra_word> *)ppVar3)->second", got)
+        self.assertNotIn("ppVar3->second", got)
+
+    def test_nrvo_iter_as_string_dropped(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "__const_iterator it;\n"
+            "basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *p;\n"
+            "std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>"
+            "::basic_string(p, (basic_string<char,_std::char_traits<char>,"
+            "_std::allocator<char>_> *) it._M_current);\n"
+        )
+        self.assertIn("(void)0", got)
+        self.assertNotIn("new (", got)
+
     def test_mingw_fu_cout_and_s_out(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 

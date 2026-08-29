@@ -66,7 +66,7 @@ py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json
 
 Новые rewrite в `ghidra_cpp.py` / `assembler.py` не добавляются по итогам одного exe.
 Сначала фикстура в `eval/corpus/<id>.yaml` (сниппет + recipe + contains / not_contains), затем рецепт.
-Схема полей: `eval/corpus/_schema.yaml`. Сейчас **121** загружаемых фикстур.
+Схема полей: `eval/corpus/_schema.yaml`. Сейчас **134** загружаемых фикстур.
 
 ```bash
 py -m src.analysis.eval_corpus
@@ -94,6 +94,21 @@ py -m src.analysis.gen_corpus --ghidra --config config.yaml
 `gcc_fingerprint` и фикстура **до** рецепта. Не плодить compile-ok YAML с пустым отпечатком ради счётчика.
 Красные generator-дампы ниже не чинить.
 
+Q3b (план, не restore): тот же цикл unknown→мини→фикстура можно крутить офлайн (`dialect_loop`) —
+очередь нормализованных диагностик, каталог мини, Ghidra, YAML до рецепта. Лексика — таблица замен;
+структурный патч без автомержа; семантика красной восьмёрки (`T&` vs `T*`, `ios::good()` без объекта) —
+skip-forever. Live `main.py` только применяет корпус и пишет `corpus_proposals`.
+
+```bash
+py -m src.analysis.dialect_loop --from-report output/apply_inimini_report.json
+py -m src.analysis.dialect_loop --message "invalid cast from type '__const_iterator'..." --emit
+py -m src.analysis.dialect_loop --message "..." --emit --dumps-dir output/corpus_gen/ghidra_dumps
+# опционально: --ghidra --config config.yaml  (дамп + проверка токена)
+```
+
+Команда не патчит `ghidra_cpp.py` и не копирует YAML в `eval/corpus/`. Бюджет по умолчанию — один мини.
+Известный fingerprint → skip; красная восьмёрка → skip-forever; остальное — каталог или `no_catalog`.
+
 Librarian собирает черновик YAML из дампа и принимает его в `eval/corpus/` только после зелёного `eval_case`.
 Имена held-out / сэмплов (`heldout`, `pointcloud`, `echofilter`, `mycollatz`, …) отклоняются.
 
@@ -110,7 +125,7 @@ gcc→recipe_id, уже включён в per-fn и TU compile-fix. Извест
 Неизвестный — один LLM-проход и YAML-черновик (не патч sanitizer).
 Scoring ML (`train_scorer`) не используется как compile-oracle.
 
-Из 121 фикстур 55 с `gcc_fingerprint` (классификатор), остальные — compile-ok
+Из 134 фикстур 68 с `gcc_fingerprint` (классификатор), остальные — compile-ok
 регрессия рецепта. Гейт классификатора синтезирует probe-сообщение из regex
 (или берёт `gcc_probe`) и проверяет, что `match_errors` попадает в свой id.
 

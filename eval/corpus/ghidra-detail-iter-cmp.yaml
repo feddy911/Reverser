@@ -1,0 +1,21 @@
+id: ghidra-detail-iter-cmp
+profile: gcc_pe_x64
+gcc_fingerprint: "'operator==' is not a member of 'std::__detail'|'operator!=' is not a member of 'std::__detail'"
+recipe: sanitize
+ghidra_cpp: |
+  bool same(_Node_iterator<int,_false,_true> *a, _Node_iterator<int,_false,_true> *b)
+  {
+    return std::__detail::operator==(a, b);
+  }
+  bool diff(_Node_iterator<int,_false,_true> *a, _Node_iterator<int,_false,_true> *b)
+  {
+    return std::__detail::operator!=(a, b);
+  }
+contains:
+  - ") == ("
+  - ") != ("
+not_contains:
+  - "__detail::operator=="
+  - "__detail::operator!="
+compile: false
+notes: "Ghidra prints hashtable iterator compare as std::__detail::operator==/!="

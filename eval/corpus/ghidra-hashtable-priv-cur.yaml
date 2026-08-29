@@ -1,0 +1,28 @@
+id: ghidra-hashtable-priv-cur
+profile: gcc_pe_x64
+gcc_fingerprint: "'_M_cur' is protected|'__node_type' was not declared|_M_current' is protected"
+recipe: sanitize
+ghidra_cpp: |
+  void take_end(_Node_iterator_base<int,_true> local_28, unordered_map<int,int> *m)
+  {
+    local_28._M_cur = (__node_type *)std::unordered_map<int,int>::end(m);
+  }
+  bool done(iterator a, iterator b)
+  {
+    if (a._M_current == b._M_current) {
+      return true;
+    }
+    a._M_current = a._M_current + 1;
+    return false;
+  }
+contains:
+  - "(local_28) ="
+  - "(a) == (b)"
+  - "(a) = (a) + 1"
+  - "->end()"
+not_contains:
+  - "_M_cur"
+  - "_M_current"
+  - "__node_type"
+compile: false
+notes: "Ghidra stores hashtable/vector iterators via private _M_cur/_M_current and __node_type"

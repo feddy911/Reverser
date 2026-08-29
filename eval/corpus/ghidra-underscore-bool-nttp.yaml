@@ -1,0 +1,15 @@
+id: ghidra-underscore-bool-nttp
+profile: gcc_pe_x64
+gcc_fingerprint: "'_false' was not declared|'_true' was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  _Node_iterator<std::pair<int,int>,_false,_true> *it;
+  _Node_iterator_base<std::pair<int,int>,_true> *base;
+contains:
+  - ",false,true>"
+  - ",true>"
+not_contains:
+  - "_false"
+  - "_true"
+compile: false
+notes: "Ghidra NTTP bools are _false/_true, same underscore-prefix as _int"

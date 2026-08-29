@@ -1,0 +1,17 @@
+id: ghidra-pointer-pair-fields
+profile: gcc_pe_x64
+gcc_fingerprint: "'pointer' \\{aka 'void\\*'\\} is not a pointer-to-object type"
+recipe: sanitize
+ghidra_cpp: |
+  void show_val(void)
+  {
+    pointer ppVar3;
+    (void)ppVar3->second;
+  }
+contains:
+  - "pointer ppVar3"
+  - "((std::pair<ghidra_word, ghidra_word> *)ppVar3)->second"
+not_contains:
+  - "ppVar3->second"
+compile: true
+notes: "Ghidra types pair* as pointer (void*) then uses ->first/->second; keep void* so real pair* still assigns"

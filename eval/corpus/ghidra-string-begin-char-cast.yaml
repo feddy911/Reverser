@@ -1,0 +1,18 @@
+id: ghidra-string-begin-char-cast
+profile: gcc_pe_x64
+gcc_fingerprint: "invalid cast from type '.*iterator' to type 'char\\*'"
+recipe: sanitize
+ghidra_cpp: |
+  void ltrim_space(string *s)
+  {
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *p;
+    char *local_28;
+    local_28 = (char *)std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::begin(p);
+  }
+contains:
+  - "(void)((p)->begin())"
+not_contains:
+  - "(char *)"
+  - "::begin"
+compile: true
+notes: "Ghidra casts string::iterator from begin() to char*; the value is unused before erase"

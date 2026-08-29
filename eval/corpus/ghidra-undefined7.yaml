@@ -1,0 +1,17 @@
+id: ghidra-undefined7
+profile: gcc_pe_x64
+gcc_fingerprint: "invalid cast from type 'undefined7'"
+recipe: assemble
+guessed_name: mix
+ghidra_cpp: |
+  unsigned long long mix(undefined7 x, char y)
+  {
+    return CONCAT71(x, y);
+  }
+contains:
+  - "CONCAT71"
+  - "undefined7"
+not_contains:
+  - "struct undefined7"
+compile: true
+notes: "Ghidra undefined7 is a 7-byte storage unit used in CONCAT71; typedef like undefined8"

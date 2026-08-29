@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.analysis.ghidra_cpp import (
     extract_named_function,
+    named_function_span,
     sanitize_ghidra_cpp,
     _match_forward,
     _split_top_args,
@@ -55,7 +56,7 @@ _KNOWN_TYPE_HEADS = frozenset({
     "std", "size_t", "size_type", "string", "wstring",
     "mpz_t", "mpz_ptr", "mpz_srcptr", "mpf_t", "mpq_t",
     "byte", "uchar", "ushort", "uint", "ulong", "ulonglong", "longlong",
-    "undefined", "undefined1", "undefined2", "undefined4", "undefined8",
+    "undefined", "undefined1", "undefined2", "undefined4", "undefined7", "undefined8",
     "int1", "int2", "int4", "int8", "uint1", "uint2", "uint4", "uint8",
     "int8_t", "int16_t", "int32_t", "int64_t",
     "uint8_t", "uint16_t", "uint32_t", "uint64_t",
@@ -67,6 +68,7 @@ _KNOWN_TYPE_HEADS = frozenset({
     "ostream", "ofstream", "istream", "ifstream",
     "duration", "ratio", "rep",
     "value_type", "value_type_conflict", "reference", "iterator",
+    "const_iterator", "__const_iterator", "const_reference", "__node_type",
     "key_type", "mapped_type", "first_type", "allocator_type",
 })
 
@@ -240,14 +242,11 @@ def _prototype(name: str, code: str) -> Optional[str]:
     if not name or not code:
         return None
     blob = RE_INCLUDE.sub("", code)
-    pat = re.compile(
-        r"(?:^|\n)([^\n;{}]*?\b" + re.escape(name) + r"\s*\([^;{}]*\))\s*(?:const)?\s*\{",
-        re.DOTALL,
-    )
-    m = pat.search(blob)
-    if not m:
+    span = named_function_span(blob, name, skip_qualified=True)
+    if not span:
         return None
-    sig = re.sub(r"\s+", " ", m.group(1)).strip()
+    t0, close, _end = span
+    sig = re.sub(r"\s+", " ", blob[t0:close + 1]).strip()
     sig = sanitize_ghidra_cpp(sig)
     if not sig.endswith(";"):
         sig += ";"

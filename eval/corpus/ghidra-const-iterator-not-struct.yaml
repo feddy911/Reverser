@@ -1,0 +1,19 @@
+id: ghidra-const-iterator-not-struct
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*erase\\(__const_iterator"
+recipe: assemble
+guessed_name: ltrim_space
+ghidra_cpp: |
+  void ltrim_space(string *s)
+  {
+    __const_iterator in_stack_ffffffffffffffb0;
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *p;
+    std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::erase
+              (p,in_stack_ffffffffffffffb0);
+  }
+contains:
+  - "->erase(in_stack_ffffffffffffffb0)"
+not_contains:
+  - "struct __const_iterator"
+compile: true
+notes: "Ghidra string::erase(begin) uses a __const_iterator local; do not infer a struct"

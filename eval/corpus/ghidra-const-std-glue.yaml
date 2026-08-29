@@ -1,0 +1,13 @@
+id: ghidra-const-std-glue
+profile: gcc_pe_x64
+gcc_fingerprint: "'conststd' was not declared in this scope"
+recipe: sanitize
+ghidra_cpp: |
+  int n_str_keys(std::allocator<std::pair<const_std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>, int> > *m);
+contains:
+  - "const std::basic_string"
+not_contains:
+  - "conststd"
+  - "const_std::"
+compile: false
+notes: "Ghidra map<string,T> pair key is const_std::; stripping _std:: must not glue conststd"

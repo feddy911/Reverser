@@ -1,0 +1,24 @@
+id: ghidra-string-front-ref
+profile: gcc_pe_x64
+gcc_fingerprint: "invalid conversion from.*to 'reference'"
+recipe: sanitize
+ghidra_cpp: |
+  void rtrim_space(string *s)
+  {
+    reference pvVar2;
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *p;
+    pvVar2 = std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::back(p);
+    if (*pvVar2 != ' ') {
+      return;
+    }
+    std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::pop_back(p);
+  }
+contains:
+  - "->back()"
+  - "pvVar2 != ' '"
+  - "->pop_back()"
+not_contains:
+  - "*pvVar2"
+  - "::back"
+compile: true
+notes: "Ghidra types string::front/back (char&) as pointer reference and star-derefs"

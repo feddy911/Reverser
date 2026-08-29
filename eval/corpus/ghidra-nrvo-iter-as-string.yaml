@@ -1,0 +1,19 @@
+id: ghidra-nrvo-iter-as-string
+profile: gcc_pe_x64
+gcc_fingerprint: "invalid cast from type '__const_iterator'.*to type 'std::__cxx11::basic_string"
+recipe: sanitize
+ghidra_cpp: |
+  void ret_s(void)
+  {
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *p;
+    __const_iterator it;
+    std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string
+              (p, (basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *)
+               it._M_current);
+  }
+contains:
+  - "(void)0"
+not_contains:
+  - "new ("
+compile: true
+notes: "Ghidra NRVO copy-ctors string from (string*)(const_iterator._M_current); drop the glue, do not invent a copy"

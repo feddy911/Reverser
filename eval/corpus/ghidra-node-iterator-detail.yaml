@@ -1,0 +1,25 @@
+id: ghidra-node-iterator-detail
+profile: gcc_pe_x64
+gcc_fingerprint: "'_Node_iterator' was not declared|'_Node_const_iterator' was not declared"
+recipe: sanitize
+ghidra_cpp: |
+  _Node_iterator<std::pair<int,int>,_false,_true> *it;
+  _Node_const_iterator<std::pair<int,int>,_false,_true> *cit;
+  bVar1 = std::__detail::operator!=(it, cit);
+  std::__detail::
+  _Node_iterator<std::pair<int,int>,_false,_true>
+  ::operator*(it);
+  std::__detail::
+  _Node_iterator<std::pair<int,int>,_false,_true>
+  ::operator++(it);
+contains:
+  - "std::__detail::_Node_iterator<"
+  - "std::__detail::_Node_const_iterator<"
+  - "->operator*()"
+  - "->operator++()"
+not_contains:
+  - "std::__detail::std::__detail::"
+  - "::operator*"
+  - "::operator++"
+compile: false
+notes: "Ghidra leaves hashtable iterators unqualified; member operator*/++ take this*"

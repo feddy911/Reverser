@@ -1,0 +1,18 @@
+# Lexical Ghidra-dialect rewrites (find/replace). Applied by sanitize_ghidra_cpp.
+# Fixture in eval/corpus first; then add a row here. Not from a user exe.
+# `when` slots into src/analysis/ghidra_cpp.py _types().
+
+steps:
+  - when: before_underscore_std
+    replacements:
+      - find: "const_std::"
+        replace: "const std::"
+        notes: "before _std:: → std:: or the token becomes conststd"
+  - when: after_templates
+    regex:
+      - pattern: "\\b([A-Za-z_]\\w*)\\s*\\.\\s*_M_cur\\b"
+        replace: "(\\1)"
+        notes: "hashtable iterator cursor"
+      - pattern: "\\b([A-Za-z_]\\w*)\\s*\\.\\s*_M_current\\b"
+        replace: "(\\1)"
+        notes: "string/vector iterator current"

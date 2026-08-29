@@ -1,0 +1,22 @@
+id: ghidra-string-index-ref
+profile: gcc_pe_x64
+gcc_fingerprint: "no match for 'operator\\*' \\(operand type is 'const_reference'"
+recipe: sanitize
+ghidra_cpp: |
+  void is_hash(string *p)
+  {
+    const_reference pvVar2;
+    pvVar2 = std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::operator[]
+                      (p, 0);
+    if (*pvVar2 != '#') {
+      return;
+    }
+  }
+contains:
+  - "[0]"
+  - "pvVar2 != '#'"
+not_contains:
+  - "*pvVar2"
+  - "::operator[]"
+compile: true
+notes: "Ghidra types string::operator[] (char&) as const_reference pointer and star-derefs"

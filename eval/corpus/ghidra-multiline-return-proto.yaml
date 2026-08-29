@@ -1,0 +1,18 @@
+id: ghidra-multiline-return-proto
+profile: gcc_pe_x64
+gcc_fingerprint: "expected constructor, destructor, or type conversion before ';'|cannot convert 'std::unordered_map.*\\*' to 'int\\*'"
+recipe: assemble
+guessed_name: collect
+ghidra_cpp: |
+  unordered_map<int,_int,_std::less<int>,_std::allocator<std::pair<int_const,_int>_>_>
+  * collect(unordered_map<int,_int,_std::less<int>,_std::allocator<std::pair<int_const,_int>_>_> *m)
+  {
+    return m;
+  }
+contains:
+  - "std::unordered_map<int,int"
+  - " * collect("
+not_contains:
+  - "prototypes ----\n* collect"
+compile: true
+notes: "Ghidra wraps long template return types; prototype must keep the type, not '* name('"

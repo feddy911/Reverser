@@ -62,6 +62,15 @@ _PROTECTED_EXTRA = frozenset({
     "swap", "length", "pop_back", "c_str", "strcmp", "strcpy", "memmove",
     "capacity", "printf", "puts", "strncpy", "sprintf", "atoi",
     "reserve", "second", "strcat", "snprintf", "log", "exp", "round",
+    "conststd",
+    "const_std",
+    "_false",
+    "_true",
+    "_const",
+    "__const_iterator",
+    "const_iterator",
+    "const_reference",
+    "pointer",
 
     "ofstream", "ifstream", "optional", "sort", "min", "max",
     "sqrt", "pow", "fabs", "hypot", "sin", "cos", "tan",
@@ -364,6 +373,66 @@ int main() {
 """,
     ),
     MiniProgram(
+        id="umap_collect",
+        dialect="unordered_map",
+        source="""#include <unordered_map>
+std::unordered_map<int, int> * collect(std::unordered_map<int, int> *m) {
+  return m;
+}
+int main() {
+  std::unordered_map<int, int> m;
+  m.emplace(1, 2);
+  return collect(&m)->size() == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="umap_show_val",
+        dialect="unordered_map",
+        source="""#include <iostream>
+#include <string>
+#include <unordered_map>
+void show_val(std::unordered_map<std::string, std::string> *m) {
+  auto it = m->find("a");
+  if (it != m->end()) {
+    std::cout << it->second;
+  }
+}
+int main() {
+  std::unordered_map<std::string, std::string> m;
+  m.emplace("a", "x");
+  show_val(&m);
+  return 0;
+}
+""",
+    ),
+    MiniProgram(
+        id="umap_str_walk",
+        dialect="unordered_map",
+        source="""#include <string>
+#include <unordered_map>
+int sum_vals(std::unordered_map<std::string, std::string> *m) {
+  int n = 0;
+  for (const auto& kv : *m) {
+    n += (int)kv.second.size();
+  }
+  return n;
+}
+int has_a(std::unordered_map<std::string, std::string> *m) {
+  const auto it = m->find("a");
+  if (it == m->end()) {
+    return 0;
+  }
+  return it->second.size() ? 1 : 0;
+}
+int main() {
+  std::unordered_map<std::string, std::string> m;
+  m.emplace("a", "bb");
+  return (sum_vals(&m) == 2 && has_a(&m)) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
         id="string_substr",
         dialect="string",
         source="""#include <string>
@@ -538,6 +607,59 @@ int main() {
   std::string a("ab");
   drop_first(&a);
   return a.size() == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_trim_ws",
+        dialect="string",
+        source="""#include <string>
+void ltrim_space(std::string *s) {
+  while (!s->empty() && s->front() == ' ') {
+    s->erase(s->begin());
+  }
+}
+void rtrim_space(std::string *s) {
+  while (!s->empty() && s->back() == ' ') {
+    s->pop_back();
+  }
+}
+int main() {
+  std::string a(" x ");
+  ltrim_space(&a);
+  rtrim_space(&a);
+  return a == "x" ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_ret_ws",
+        dialect="string",
+        source="""#include <string>
+std::string trim_copy(std::string s) {
+  while (!s.empty() && (s.front() == ' ' || s.front() == '\\t')) {
+    s.erase(s.begin());
+  }
+  while (!s.empty() && s.back() == ' ') {
+    s.pop_back();
+  }
+  return s;
+}
+int main() {
+  return trim_copy(" x") == "x" ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_at0",
+        dialect="string",
+        source="""#include <string>
+int is_hash(const std::string *s) {
+  return (!s->empty() && (*s)[0] == '#') ? 1 : 0;
+}
+int main() {
+  std::string a("#x");
+  return is_hash(&a) ? 0 : 1;
 }
 """,
     ),
@@ -1047,6 +1169,21 @@ int main() {
   std::map<int, int> m;
   m.emplace(1, 2);
   return n_keys(&m) == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="map_str_size",
+        dialect="map",
+        source="""#include <map>
+#include <string>
+int n_str_keys(std::map<std::string, std::string> *m) {
+  return (int)m->size();
+}
+int main() {
+  std::map<std::string, std::string> m;
+  m.emplace("a", "b");
+  return n_str_keys(&m) == 1 ? 0 : 1;
 }
 """,
     ),

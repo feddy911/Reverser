@@ -294,6 +294,31 @@ class TestAssemblerDomain(unittest.TestCase):
         body = text[funcs_at:]
         self.assertNotIn("#include <vector>", body)
 
+    def test_multiline_templated_return_prototype(self):
+        restored = [
+            {
+                "classification": "user_code",
+                "address": "0x1",
+                "guessed_name": "collect",
+                "ghidra_name": "collect",
+                "cpp_code": (
+                    "unordered_map<int,_int,_std::less<int>,"
+                    "_std::allocator<std::pair<int_const,_int>_>_>\n"
+                    "* collect(unordered_map<int,_int> *m)\n"
+                    "{\n  return m;\n}\n"
+                ),
+            },
+        ]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        proto = text[text.find("// ---- prototypes ----"):text.find("// ---- functions ----")]
+        self.assertIn("std::unordered_map<int,int", proto)
+        self.assertIn(" * collect(", proto)
+        self.assertNotIn("\n* collect(", proto)
+        funcs = text[text.find("// ---- functions ----"):]
+        self.assertIn("std::unordered_map<int,int", funcs)
+        self.assertIn("* collect(", funcs)
+
 
 class TestFidelitySmoke(unittest.TestCase):
     def test_literal_present_as_c_escape(self):
