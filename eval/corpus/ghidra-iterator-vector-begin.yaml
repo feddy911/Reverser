@@ -1,0 +1,22 @@
+id: ghidra-iterator-vector-begin
+profile: gcc_pe_x64
+gcc_fingerprint: "cannot convert 'std::vector<.*>::iterator' to 'iterator'"
+gcc_probe:
+  - "cannot convert 'std::vector<unsigned char, std::allocator<unsigned char> >::iterator' to 'iterator' {aka 'ghidra_word*'} in assignment"
+recipe: sanitize
+ghidra_cpp: |
+  void bump_n(void)
+  {
+    iterator iVar1;
+    vector<unsigned char,_std::allocator<unsigned char>_> *p;
+    iterator __for_begin;
+    __for_begin = (p)->begin();
+    iVar1 = p->end();
+  }
+contains:
+  - "(iterator)(p)"
+not_contains:
+  - "->begin()"
+  - "->end()"
+compile: true
+notes: "Ghidra range-for on a mutable vector uses iterator as a placeholder, including recv->begin() without extra parens"

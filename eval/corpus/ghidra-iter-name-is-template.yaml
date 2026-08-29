@@ -1,0 +1,31 @@
+id: ghidra-iter-name-is-template
+profile: gcc_pe_x64
+gcc_fingerprint: "'_Rb_tree_const_iterator' \\{aka 'ghidra_word'\\} is not a template|'__normal_iterator' \\{aka 'ghidra_word'\\} is not a template"
+gcc_probe:
+  - "'_Rb_tree_const_iterator' {aka 'ghidra_word'} is not a template"
+  - "'__normal_iterator' {aka 'ghidra_word'} is not a template"
+recipe: sanitize
+guessed_name: walk_it
+ghidra_cpp: |
+  void walk_it(void)
+  {
+    bool bVar1;
+    _Rb_tree_const_iterator<std::pair<int_const,_int>_> *pit;
+    _Rb_tree_const_iterator<std::pair<int_const,_int>_> *qid;
+    __normal_iterator<int *,vector<int,_std::allocator<int>_> > *vit;
+    bVar1 = std::operator!=(pit, qid);
+    (void)pit;
+    (void)vit;
+    (void)bVar1;
+  }
+contains:
+  - "_Rb_tree_const_iterator *pit"
+  - "__normal_iterator *vit"
+  - "*(pit) != *(qid)"
+not_contains:
+  - "_Rb_tree_const_iterator<"
+  - "__normal_iterator<"
+  - "std::operator!="
+  - "__gnu_cxx::__normal_iterator"
+compile: true
+notes: "Ghidra uses _Rb_tree_const_iterator<T>/__normal_iterator<T> as templates (map_walk_n dump); strip args, keep opaque aliases — do not use real libstdc++ iterators"

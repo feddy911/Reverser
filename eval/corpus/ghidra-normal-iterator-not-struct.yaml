@@ -1,0 +1,19 @@
+id: ghidra-normal-iterator-not-struct
+profile: gcc_pe_x64
+gcc_fingerprint: "'__normal_iterator' was not declared"
+gcc_probe:
+  - "'__normal_iterator' was not declared in this scope"
+recipe: assemble
+guessed_name: walk
+ghidra_cpp: |
+  void walk(void)
+  {
+    __normal_iterator local;
+    (void)local;
+  }
+contains:
+  - "__normal_iterator local"
+not_contains:
+  - "struct __normal_iterator"
+compile: true
+notes: "Ghidra names vector iterators __normal_iterator; do not infer a struct"

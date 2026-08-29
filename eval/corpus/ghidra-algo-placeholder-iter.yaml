@@ -1,0 +1,22 @@
+id: ghidra-algo-placeholder-iter
+profile: gcc_pe_x64
+gcc_fingerprint: "iterator_traits<ghidra_word>|__iterator_category\\(ghidra_word"
+gcc_probe:
+  - "no type named 'iterator_category' in 'struct std::iterator_traits<ghidra_word>'"
+  - "no matching function for call to '__iterator_category(ghidra_word&)'"
+recipe: sanitize
+ghidra_cpp: |
+  void flip_n(void)
+  {
+    __normal_iterator a;
+    __normal_iterator b;
+    std::
+    reverse<__normal_iterator>
+              (a, b);
+  }
+contains:
+  - "reverse<__normal_iterator"
+not_contains:
+  - "begin()"
+compile: false
+notes: "Ghidra calls reverse/sort with opaque __normal_iterator (ghidra_word); do not invent iterator_traits"

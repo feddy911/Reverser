@@ -69,7 +69,7 @@ py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json
 
 Новые rewrite в `ghidra_cpp.py` / `assembler.py` не добавляются по итогам одного exe.
 Сначала фикстура в `eval/corpus/<id>.yaml` (сниппет + recipe + contains / not_contains), затем рецепт.
-Схема полей: `eval/corpus/_schema.yaml`. Сейчас **134** загружаемых фикстур.
+Схема полей: `eval/corpus/_schema.yaml`. Сейчас **159** загружаемых фикстур.
 
 ```bash
 py -m src.analysis.eval_corpus
@@ -100,8 +100,9 @@ py -m src.analysis.gen_corpus --ghidra --config config.yaml
 
 Q3b (план, не restore): тот же цикл unknown→мини→фикстура можно крутить офлайн (`dialect_loop`) —
 очередь нормализованных диагностик, каталог мини, Ghidra, YAML до рецепта. Лексика — таблица замен;
-структурный патч без автомержа; семантика красной восьмёрки (`T&` vs `T*`, `ios::good()` без объекта) —
-skip-forever. Live `main.py` только применяет корпус и пишет `corpus_proposals`.
+структурный патч без автомержа; семантика красной восьмёрки (`T&` vs `T*`, `ios::good()` без объекта)
+и placeholder-итераторы / ключи (`sort<__normal_iterator`, `key_type` как `ghidra_word`) —
+skip-forever. Live `match_errors` то же правило: без LLM. `main.py` не патчит sanitizer.
 
 ```bash
 py -m src.analysis.dialect_loop --from-report output/apply_inimini_report.json
@@ -126,10 +127,12 @@ py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-
 Compiler agent классифицирует gcc-диагностики по `gcc_fingerprint` корпуса
 (`src/agents/compiler.py` `match_errors`). Это и есть P3: детерминированный
 gcc→recipe_id, уже включён в per-fn и TU compile-fix. Известный класс — без LLM.
-Неизвестный — один LLM-проход и YAML-черновик (не патч sanitizer).
+Skip-forever (красная восьмёрка, placeholder-итераторы, `this` как локаль) тоже
+без LLM: не чинить и не звать compile-fix. Неизвестный — один LLM-проход и
+YAML-черновик (не патч sanitizer).
 Scoring ML (`train_scorer`) не используется как compile-oracle.
 
-Из 134 фикстур 68 с `gcc_fingerprint` (классификатор), остальные — compile-ok
+Из 159 фикстур 93 с `gcc_fingerprint` (классификатор), остальные — compile-ok
 регрессия рецепта. Гейт синтезирует probe из regex или берёт явный `gcc_probe`
 (реалистичное gcc-сообщение, когда `.*` / усечённый alt врёт синтез) и
 проверяет, что `match_errors` попадает в свой id. Коллизия ostream

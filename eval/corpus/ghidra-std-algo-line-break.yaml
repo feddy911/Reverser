@@ -1,0 +1,17 @@
+id: ghidra-std-algo-line-break
+profile: gcc_pe_x64
+gcc_fingerprint: "'sort' is not a member of 'std'"
+gcc_probe:
+  - "'sort' is not a member of 'std'; did you mean 'qsort'?"
+recipe: assemble
+guessed_name: order2
+ghidra_cpp: |
+  void order2(int *p)
+  {
+    std::
+    sort<int*>(p, p + 2);
+  }
+contains:
+  - "#include <algorithm>"
+compile: true
+notes: "Ghidra breaks std:: and sort< across lines; include scan must allow whitespace"

@@ -3,6 +3,7 @@ from __future__ import annotations
 """Compiler agent: classify gcc diagnostics against the corpus.
 
 Match fingerprint → known recipe (already applied by sanitizer/assembler).
+Skip-forever (invent-semantics) → no LLM, no catalog mini.
 Miss → at most one LLM compile-fix. Success → draft YAML, not a sanitizer patch.
 Never writes the restore cache.
 """
@@ -15,6 +16,72 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from src.analysis.corpus import CorpusCase, load_corpus
 
+# Invent-semantics: do not call LLM compile-fix. Shared with dialect_loop.
+SKIP_FOREVER: Sequence[tuple[str, str]] = (
+    (r"ios::good|std::ios.*::good", "ios::good without object"),
+    (r"remove_cv", "libstdc++ remove_cv_t"),
+    (r"__fill_a1", "libstdc++ __fill_a1"),
+    (
+        r"invalid initialization of non-const reference of type '.*mapped_type",
+        "operator[] T& vs T*",
+    ),
+    (
+        r"invalid conversion from '.*mapped_type'.*to 'mapped_type\s*\*'",
+        "operator[] T& vs T*",
+    ),
+    (r"'this' was not declared in this scope", "this in STL signature"),
+    (
+        r"expected unqualified-id before 'this'|invalid use of 'this' in non-member",
+        "this as Ghidra local",
+    ),
+    (
+        r"invalid conversion from 'const char\*' to 'char\*'",
+        "c_str const char*",
+    ),
+    (r"::<lambda", "ghidra lambda type in template"),
+    (
+        r"no matching function for call to 'sort<__normal_iterator",
+        "ghidra sort placeholder iterators",
+    ),
+    (
+        r"iterator_traits<ghidra_word>|iterator_category.*ghidra_word",
+        "ghidra algo placeholder iterators",
+    ),
+    (
+        r"no match for 'operator\[\]' \(operand types are 'std::(?:map|unordered_map).+' and '(?:key_type|__normal_iterator)'",
+        "assoc [] placeholder key",
+    ),
+    (
+        r"no match for 'operator!=' \(operand types are 'std::__cxx11::basic_string<char>' and 'char'|"
+        r"operator!=<char, std::char_traits<char>, std::allocator<char> >\(std::__cxx11::basic_string<char>\*&",
+        "string vs char compare",
+    ),
+    (
+        r"no match for 'operator\*' \(operand type is '__normal_iterator'",
+        "opaque iterator dereference",
+    ),
+    (
+        r"to 'std::string\*' \{aka 'std::__cxx11::basic_string<char>\*'\} in assignment",
+        "string value vs string*",
+    ),
+    (
+        r"invalid conversion from 'const void\*' to 'pointer'",
+        "const void* vs pointer",
+    ),
+    (
+        r"cannot convert 'ghidra_word\*' to 'std::vector<",
+        "ghidra_word* vs vector*",
+    ),
+    (
+        r"base operand of '->' has non-pointer type '.*value_type' \{aka 'std::pair",
+        "arrow on pair value",
+    ),
+    (
+        r"comparison between distinct pointer types 'std::__detail::_Node_const_iterator",
+        "hashtable iterator* vs ghidra_word*",
+    ),
+)
+
 
 @dataclass
 class DiagnosticHit:
@@ -23,9 +90,16 @@ class DiagnosticHit:
 
 
 @dataclass
+class SkipForeverHit:
+    message: str
+    reason: str
+
+
+@dataclass
 class CompilerDecision:
     known: List[DiagnosticHit] = field(default_factory=list)
     unknown: List[str] = field(default_factory=list)
+    skip_forever: List[SkipForeverHit] = field(default_factory=list)
     need_llm: bool = False
 
     @property
@@ -37,6 +111,14 @@ class CompilerDecision:
                     ids.append(cid)
         return ids
 
+    @property
+    def skip_forever_reasons(self) -> List[str]:
+        out: List[str] = []
+        for hit in self.skip_forever:
+            if hit.reason not in out:
+                out.append(hit.reason)
+        return out
+
 
 def _safe_search(pattern: str, text: str) -> bool:
     if not pattern or not text:
@@ -45,6 +127,14 @@ def _safe_search(pattern: str, text: str) -> bool:
         return bool(re.search(pattern, text, re.DOTALL))
     except re.error:
         return pattern in text
+
+
+def skip_forever_reason(msg: str) -> Optional[str]:
+    """Invent-semantics gcc: do not LLM-fix and do not catalog a mini."""
+    for pat, reason in SKIP_FOREVER:
+        if _safe_search(pat, msg):
+            return reason
+    return None
 
 
 def match_errors(
@@ -61,8 +151,12 @@ def match_errors(
         hits = [c.id for c in with_fp if _safe_search(c.gcc_fingerprint, msg)]
         if hits:
             decision.known.append(DiagnosticHit(message=msg, case_ids=hits))
-        else:
-            decision.unknown.append(msg)
+            continue
+        forever = skip_forever_reason(msg)
+        if forever:
+            decision.skip_forever.append(SkipForeverHit(message=msg, reason=forever))
+            continue
+        decision.unknown.append(msg)
     decision.need_llm = bool(decision.unknown)
     return decision
 

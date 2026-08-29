@@ -16,24 +16,12 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from src.agents.compiler import _safe_search, match_errors
+from src.agents.compiler import _safe_search, match_errors, skip_forever_reason
 from src.analysis.corpus import load_corpus
 from src.analysis.eval_heldout import FROZEN_TOKENS
 from src.analysis.gen_corpus import MINI_PROGRAMS
 
 ROOT = Path(__file__).resolve().parents[2]
-
-# Red-eight / invent-semantics: never propose a mini that would "fix" these.
-SKIP_FOREVER: Sequence[tuple[str, str]] = (
-    (r"ios::good|std::ios.*::good", "ios::good without object"),
-    (r"remove_cv", "libstdc++ remove_cv_t"),
-    (r"__fill_a1", "libstdc++ __fill_a1"),
-    (
-        r"invalid initialization of non-const reference of type '.*mapped_type",
-        "operator[] T& vs T*",
-    ),
-    (r"'this' was not declared in this scope", "this in STL signature"),
-)
 
 # Honest Q3 minis: gcc text → generator id + Ghidra token to require in a dump.
 CATALOG: Sequence[tuple[str, str, str]] = (
@@ -59,6 +47,49 @@ CATALOG: Sequence[tuple[str, str, str]] = (
         "string_ret_ws",
         "_M_current",
     ),
+    (
+        r"base operand of '->' has non-pointer type 'const_reference'|"
+        r"no match for 'operator=' \(operand types are 'const_reference'",
+        "vec_field_n",
+        "const_reference",
+    ),
+    (
+        r"'_Rb_tree_const_iterator' was not declared|"
+        r"'_Rb_tree_const_iterator'.*is not a template",
+        "map_walk_n",
+        "_Rb_tree_const_iterator",
+    ),
+    (
+        r"'__normal_iterator' was not declared|"
+        r"'__normal_iterator'.*is not a template",
+        "vec_sum_n",
+        "__normal_iterator",
+    ),
+    (
+        r"no match for 'operator=' \(operand types are 'const_iterator'",
+        "vec_sum_n",
+        "const_iterator",
+    ),
+    (
+        r"'_bool_' was not declared",
+        "vec_sort_n",
+        "_bool_",
+    ),
+    (
+        r"'sort' is not a member of 'std'",
+        "vec_sort_n",
+        "sort<",
+    ),
+    (
+        r"::vector\(.*value_type_conflict",
+        "vec_fill_n",
+        "value_type_conflict",
+    ),
+    (
+        r"'time_point' was not declared",
+        "chrono_now",
+        "time_point",
+    ),
 )
 
 
@@ -66,7 +97,7 @@ _RE_PATH = re.compile(r"(?:[A-Za-z]:)?(?:[\\/][^\s:'\"]+)+")
 _RE_AKA = re.compile(r"\s*\{aka\s+'[^']*'\}")
 _REFUSE_MINI = (
     "heldout", "pointcloud", "echofilter", "mycollatz", "xorcipher",
-    "inimini", "parse_ini", "taskboard", "netpath",
+    "inimini", "parse_ini", "taskboard", "netpath", "fibtimer",
 )
 
 
@@ -99,10 +130,7 @@ def _refuse_mini(mini_id: str, source: str) -> Optional[str]:
 
 
 def _skip_forever_reason(msg: str) -> Optional[str]:
-    for pat, reason in SKIP_FOREVER:
-        if _safe_search(pat, msg):
-            return reason
-    return None
+    return skip_forever_reason(msg)
 
 
 def _catalog_hit(msg: str) -> Optional[tuple[str, str]]:

@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # Generator held-out / sample names: drafts only, never eval/corpus.
 _REFUSE_ID_SUBSTR = (
     "heldout", "pointcloud", "echofilter", "mycollatz", "xorcipher",
-    "inimini", "taskboard", "netpath",
+    "inimini", "taskboard", "netpath", "fibtimer",
 )
 
 

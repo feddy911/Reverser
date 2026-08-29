@@ -57,6 +57,29 @@ class TestDialectLoop(unittest.TestCase):
         self.assertEqual(prop["mini_id"], "string_ret_ws")
         self.assertTrue(prop["in_budget"])
 
+    def test_catalog_proposes_vec_field_n(self):
+        rec = plan_messages(
+            [
+                "no match for 'operator=' (operand types are 'const_reference' "
+                "{aka 'ghidra_word'} and 'Rec')"
+            ],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertEqual(rec["emit"], ["vec_field_n"])
+
+    def test_catalog_proposes_vec_sum_n_const_iterator(self):
+        rec = plan_messages(
+            [
+                "no match for 'operator=' (operand types are 'const_iterator' "
+                "{aka 'std::__cxx11::basic_string<char>::const_iterator'} "
+                "and 'std::vector<int, std::allocator<int> >::iterator')"
+            ],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertEqual(rec["emit"], ["vec_sum_n"])
+
     def test_budget_caps_emit(self):
         msgs = [
             "invalid cast from type '__const_iterator' to type 'std::__cxx11::basic_string<char>*'",
@@ -77,6 +100,72 @@ class TestDialectLoop(unittest.TestCase):
         self.assertTrue(
             any(c["action"] == "skip_forever" for c in rec["clusters"])
         )
+
+    def test_skip_forever_mapped_type_star(self):
+        rec = plan_messages(
+            [
+                "invalid conversion from 'std::map<int, int>::mapped_type' "
+                "{aka 'int'} to 'mapped_type*' {aka 'ghidra_word*'}"
+            ],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertEqual(rec["emit"], [])
+        self.assertTrue(
+            any(c["action"] == "skip_forever" for c in rec["clusters"])
+        )
+
+    def test_skip_forever_sort_placeholder(self):
+        rec = plan_messages(
+            [
+                "no matching function for call to 'sort<__normal_iterator, "
+                "bool (*)(const Rec&, const Rec&)>(__normal_iterator&, "
+                "__normal_iterator&, _func_bool_Rec_ptr_Rec_ptr*&)'"
+            ],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertEqual(rec["emit"], [])
+        self.assertTrue(
+            any(c["action"] == "skip_forever" for c in rec["clusters"])
+        )
+
+    def test_skip_forever_string_ne_char(self):
+        rec = plan_messages(
+            [
+                "no match for 'operator!=' (operand types are "
+                "'std::__cxx11::basic_string<char>' and 'char')"
+            ],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertEqual(rec["emit"], [])
+        self.assertTrue(
+            any(c["action"] == "skip_forever" for c in rec["clusters"])
+        )
+
+    def test_catalog_proposes_vec_fill_n(self):
+        rec = plan_messages(
+            [
+                "no matching function for call to 'std::vector<char, "
+                "std::allocator<char> >::vector(long long unsigned int, "
+                "value_type_conflict*&, allocator_type*&)'"
+            ],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertEqual(rec["emit"], ["vec_fill_n"])
+
+    def test_catalog_proposes_chrono_now(self):
+        rec = plan_messages(
+            [
+                "'time_point' was not declared in this scope; "
+                "did you mean 'std::chrono::time_point'?"
+            ],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertEqual(rec["emit"], ["chrono_now"])
 
     def test_no_catalog_does_not_emit(self):
         rec = plan_messages(

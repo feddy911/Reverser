@@ -1,0 +1,16 @@
+id: ghidra-pair-value-arrow
+profile: gcc_pe_x64
+gcc_fingerprint: "base operand of '->' has non-pointer type '.*value_type' \\{aka 'std::pair"
+gcc_probe:
+  - "base operand of '->' has non-pointer type '__gnu_cxx::__alloc_traits<std::allocator<std::pair<std::__cxx11::basic_string<char>, int> >, std::pair<std::__cxx11::basic_string<char>, int> >::value_type' {aka 'std::pair<std::__cxx11::basic_string<char>, int>'}"
+recipe: sanitize
+ghidra_cpp: |
+  void show_n(void)
+  {
+    value_type rec;
+    (void)rec->first;
+  }
+contains:
+  - "rec->first"
+compile: false
+notes: "Ghidra uses arrow on a pair value (value_type); do not rewrite every arrow on a non-pointer"

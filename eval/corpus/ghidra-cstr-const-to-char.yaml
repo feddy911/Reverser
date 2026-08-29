@@ -1,0 +1,18 @@
+id: ghidra-cstr-const-to-char
+profile: gcc_pe_x64
+gcc_fingerprint: "invalid conversion from 'const char\\*' to 'char\\*'"
+gcc_probe:
+  - "invalid conversion from 'const char*' to 'char*' [-fpermissive]"
+recipe: sanitize
+ghidra_cpp: |
+  void say_s(string *s)
+  {
+    char *p;
+    p = (s)->c_str();
+  }
+contains:
+  - "->c_str()"
+not_contains:
+  - "const_cast"
+compile: false
+notes: "Ghidra assigns string::c_str() (const char*) to char*; do not invent const_cast"

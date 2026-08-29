@@ -69,6 +69,7 @@ _KNOWN_TYPE_HEADS = frozenset({
     "duration", "ratio", "rep",
     "value_type", "value_type_conflict", "reference", "iterator",
     "const_iterator", "__const_iterator", "const_reference", "__node_type",
+    "__normal_iterator", "_Rb_tree_const_iterator", "__iterator",
     "key_type", "mapped_type", "first_type", "allocator_type",
 })
 

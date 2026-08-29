@@ -1,0 +1,17 @@
+id: ghidra-node-iter-ptr-cmp
+profile: gcc_pe_x64
+gcc_fingerprint: "comparison between distinct pointer types 'std::__detail::_Node_const_iterator"
+gcc_probe:
+  - "comparison between distinct pointer types 'std::__detail::_Node_const_iterator<std::pair<const std::__cxx11::basic_string<char>, std::__cxx11::basic_string<char> >, false, true>*' and 'ghidra_word*' lacks a cast"
+recipe: sanitize
+ghidra_cpp: |
+  void walk_n(_Node_const_iterator *a, ghidra_word *b)
+  {
+    if (a == b) {
+      return;
+    }
+  }
+contains:
+  - "a == b"
+compile: false
+notes: "Ghidra compares hashtable iterator* to ghidra_word*; do not invent a cast"

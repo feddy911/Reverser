@@ -146,6 +146,26 @@ class TestCompilerAgent(unittest.TestCase):
             self.assertTrue(path.exists())
             self.assertIn("auto-proposed", path.read_text(encoding="utf-8"))
 
+    def test_skip_forever_does_not_need_llm(self):
+        decision = match_errors(
+            [{"message": "'std::ios::good' was not declared in this scope"}],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertEqual(decision.unknown, [])
+        self.assertEqual(decision.known_ids, [])
+        self.assertIn("ios::good without object", decision.skip_forever_reasons)
+        mixed = match_errors(
+            [
+                {"message": "'std::ios::good' was not declared in this scope"},
+                {"message": "wholly_new_ghidra_token was not declared in this scope"},
+            ],
+            cases=[],
+        )
+        self.assertTrue(mixed.need_llm)
+        self.assertEqual(len(mixed.unknown), 1)
+        self.assertEqual(len(mixed.skip_forever), 1)
+
 
 class TestCritic(unittest.TestCase):
     def test_rejects_starts_with_replaced_by_sort(self):
@@ -170,6 +190,29 @@ class TestCritic(unittest.TestCase):
         self.assertFalse(verdict.identity_ok)
         self.assertIn("std::sort", verdict.unexpected_algos)
         self.assertFalse(verdict.accept)
+
+    def test_mangled_sort_in_dump_allows_std_sort(self):
+        entry = {
+            "address": "0x1",
+            "guessed_name": "rank_n",
+            "ghidra_name": "FUN_1",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": (
+                "void FUN_1(vector<Rec> *v) {\n"
+                "  sort<__gnu_cxx::__normal_iterator<Rec*, vector<Rec> >, "
+                "bool (*)(Rec const&, Rec const&)>(v->begin(), v->end(), cmp);\n"
+                "}\n"
+            ),
+        }
+        code = (
+            "void rank_n(std::vector<int>* v) {\n"
+            "  std::sort(v->begin(), v->end());\n"
+            "}\n"
+        )
+        verdict = review_function(entry, code, [])
+        self.assertTrue(verdict.identity_ok)
+        self.assertEqual(verdict.unexpected_algos, [])
 
     def test_accepts_prefix_check(self):
         entry = {

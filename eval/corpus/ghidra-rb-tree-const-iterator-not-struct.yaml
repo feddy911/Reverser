@@ -1,0 +1,19 @@
+id: ghidra-rb-tree-const-iterator-not-struct
+profile: gcc_pe_x64
+gcc_fingerprint: "'_Rb_tree_const_iterator' was not declared"
+gcc_probe:
+  - "'_Rb_tree_const_iterator' was not declared in this scope"
+recipe: assemble
+guessed_name: walk_keys
+ghidra_cpp: |
+  void walk_keys(void)
+  {
+    _Rb_tree_const_iterator local;
+    (void)local;
+  }
+contains:
+  - "_Rb_tree_const_iterator local"
+not_contains:
+  - "struct _Rb_tree_const_iterator"
+compile: true
+notes: "Ghidra names map iterators _Rb_tree_const_iterator; do not infer a struct"

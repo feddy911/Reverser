@@ -1,0 +1,25 @@
+id: ghidra-ctor-nested-std
+profile: gcc_pe_x64
+gcc_fingerprint: ">::std' has not been declared"
+gcc_probe:
+  - "'std::vector<unsigned char, std::allocator<unsigned char> >::std' has not been declared"
+  - "'std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::std' has not been declared"
+recipe: sanitize
+ghidra_cpp: |
+  void from_it(void)
+  {
+    vector<unsigned char,_std::allocator<unsigned char>_> *p;
+    __normal_iterator a;
+    __normal_iterator b;
+    allocator_type *al;
+    std::vector<unsigned char,_std::allocator<unsigned char>_>::
+    std::vector<__normal_iterator>
+              (p, a, b, al);
+  }
+contains:
+  - "new ("
+not_contains:
+  - ">::std"
+  - "*(a)"
+compile: false
+notes: "Ghidra repeats std::Type after Type:: and a line break (range ctor vector<It>); drop extra std::, do not deref iterator extras"

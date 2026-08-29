@@ -1,0 +1,22 @@
+id: ghidra-vector-fill-ctor-deref
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to 'std::vector<char.*::vector\\(.*value_type_conflict"
+gcc_probe:
+  - "no matching function for call to 'std::vector<char, std::allocator<char> >::vector(long long unsigned int, value_type_conflict*&, allocator_type*&)'"
+recipe: sanitize
+ghidra_cpp: |
+  void fill_n(void)
+  {
+    vector<char,_std::allocator<char>_> *p;
+    size_type n;
+    value_type_conflict *val;
+    allocator_type *a;
+    std::vector<char,_std::allocator<char>_>::vector(p, n, val, a);
+  }
+contains:
+  - "new ("
+  - "*(val)"
+not_contains:
+  - ">::vector("
+compile: true
+notes: "Ghidra vector fill ctor (this, n, T*, alloc*) — deref T* like push_back; drop allocator*"

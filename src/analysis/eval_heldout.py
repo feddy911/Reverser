@@ -212,6 +212,8 @@ def eval_heldout_entry(
         decision = match_errors(crep.errors, cases)
         result["known_ids"] = decision.known_ids
         result["n_unknown"] = len(decision.unknown)
+        result["n_skip_forever"] = len(decision.skip_forever)
+        result["skip_forever"] = decision.skip_forever_reasons
         result["need_llm"] = decision.need_llm
         result["unknown_messages"] = decision.unknown[:12]
         if decision.need_llm and proposal_dir is not None:

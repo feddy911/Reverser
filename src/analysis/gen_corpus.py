@@ -70,6 +70,10 @@ _PROTECTED_EXTRA = frozenset({
     "__const_iterator",
     "const_iterator",
     "const_reference",
+    "__normal_iterator",
+    "_Rb_tree_const_iterator",
+    "__iterator",
+    "ghidra_ref",
     "pointer",
 
     "ofstream", "ifstream", "optional", "sort", "min", "max",
@@ -237,6 +241,18 @@ long long to_us(std::chrono::steady_clock::duration d) {
   return std::chrono::duration_cast<std::chrono::microseconds>(d).count();
 }
 int main() { return to_us(std::chrono::microseconds{1}) == 1 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="chrono_now",
+        dialect="chrono",
+        source="""#include <chrono>
+long long elapsed_us() {
+  auto t0 = std::chrono::steady_clock::now();
+  auto t1 = std::chrono::steady_clock::now();
+  return std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+}
+int main() { return elapsed_us() >= 0 ? 0 : 1; }
 """,
     ),
     MiniProgram(
@@ -660,6 +676,100 @@ int is_hash(const std::string *s) {
 int main() {
   std::string a("#x");
   return is_hash(&a) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vec_sum_n",
+        dialect="vector",
+        source="""#include <vector>
+int sum_n(const std::vector<int> *v) {
+  int n = 0;
+  for (int x : *v) {
+    n += x;
+  }
+  return n;
+}
+int main() {
+  std::vector<int> v;
+  v.push_back(1);
+  v.push_back(2);
+  return sum_n(&v) == 3 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="map_walk_n",
+        dialect="map",
+        source="""#include <map>
+int sum_keys(const std::map<int, int> *m) {
+  int n = 0;
+  for (std::map<int, int>::const_iterator it = m->begin(); it != m->end(); ++it) {
+    n += it->first;
+  }
+  return n;
+}
+int main() {
+  std::map<int, int> m;
+  m[1] = 0;
+  m[2] = 0;
+  return sum_keys(&m) == 3 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vec_field_n",
+        dialect="vector",
+        source="""#include <vector>
+struct Rec {
+  int n;
+};
+int first_n(const std::vector<Rec> *v) {
+  return v->empty() ? 0 : (*v)[0].n;
+}
+int main() {
+  std::vector<Rec> v;
+  Rec r;
+  r.n = 4;
+  v.push_back(r);
+  return first_n(&v) == 4 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vec_sort_n",
+        dialect="algorithm",
+        source="""#include <algorithm>
+#include <vector>
+struct Rec {
+  int n;
+};
+void order_n(std::vector<Rec> *v) {
+  std::sort(v->begin(), v->end(), [](Rec a, Rec b) { return a.n < b.n; });
+}
+int main() {
+  std::vector<Rec> v;
+  Rec r;
+  r.n = 2;
+  v.push_back(r);
+  r.n = 1;
+  v.push_back(r);
+  order_n(&v);
+  return v[0].n == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vec_fill_n",
+        dialect="vector",
+        source="""#include <vector>
+void fill_n(std::vector<char> *v, int n) {
+  *v = std::vector<char>((std::size_t)n, 'a');
+}
+int main() {
+  std::vector<char> v;
+  fill_n(&v, 3);
+  return (int)v.size() == 3 ? 0 : 1;
 }
 """,
     ),

@@ -1,0 +1,19 @@
+id: ghidra-this-as-ident
+profile: gcc_pe_x64
+gcc_fingerprint: "expected unqualified-id before 'this'|invalid use of 'this' in non-member function"
+gcc_probe:
+  - "expected unqualified-id before 'this'"
+  - "invalid use of 'this' in non-member function"
+recipe: sanitize
+ghidra_cpp: |
+  void put_n(void)
+  {
+    std::ostream *this;
+    this = &std::cout;
+  }
+contains:
+  - "ostream *this"
+not_contains:
+  - "this_"
+compile: false
+notes: "Ghidra names an ostream* local this; do not rename this globally"

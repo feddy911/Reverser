@@ -1,0 +1,15 @@
+id: ghidra-iter-star-placeholder
+profile: gcc_pe_x64
+gcc_fingerprint: "no match for 'operator\\*' \\(operand type is '__normal_iterator'"
+gcc_probe:
+  - "no match for 'operator*' (operand type is '__normal_iterator' {aka 'ghidra_word'})"
+recipe: sanitize
+ghidra_cpp: |
+  void take_n(__normal_iterator it)
+  {
+    (void)*it;
+  }
+contains:
+  - "*it"
+compile: false
+notes: "Opaque __normal_iterator is ghidra_word; do not invent operator* that returns a container element"

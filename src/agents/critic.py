@@ -52,11 +52,28 @@ def _haystacks(entry: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _algo_attested_in_dump(algo: str, blob: str) -> bool:
+    """True if the dump already names this algorithm (including Ghidra mangling).
+
+    Restore may print ``std::sort`` while Ghidra printed ``sort<Item*>``.
+    A bare substring ``sort`` is not enough (too many false friends).
+    """
+    b = (blob or "").lower()
+    if not algo:
+        return False
+    if algo.lower() in b:
+        return True
+    tail = algo.rsplit("::", 1)[-1].lower()
+    if not tail:
+        return False
+    return f"{tail}<" in b or f"::{tail}(" in b or f"::{tail}<" in b
+
+
 def unexpected_algos(code: str, allowed_blob: str) -> List[str]:
-    blob = (allowed_blob or "").lower()
+    blob = allowed_blob or ""
     found = []
     for algo in FAMOUS_ALGOS:
-        if algo in (code or "") and algo.lower() not in blob:
+        if algo in (code or "") and not _algo_attested_in_dump(algo, blob):
             found.append(algo)
     return found
 

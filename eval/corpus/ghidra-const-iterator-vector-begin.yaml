@@ -1,0 +1,34 @@
+id: ghidra-const-iterator-vector-begin
+profile: gcc_pe_x64
+gcc_fingerprint: "no match for 'operator=' \\(operand types are 'const_iterator'"
+gcc_probe:
+  - "no match for 'operator=' (operand types are 'const_iterator' {aka 'std::__cxx11::basic_string<char>::const_iterator'} and 'std::vector<int, std::allocator<int> >::iterator')"
+recipe: sanitize
+guessed_name: sum_n
+ghidra_cpp: |
+  int sum_n(void)
+  {
+    const_iterator cVar1;
+    vector<int,_std::allocator<int>_> *p;
+    const_iterator __for_begin;
+    int n;
+    n = 0;
+    __for_begin = std::vector<int,_std::allocator<int>_>::begin(p);
+    cVar1 = std::vector<int,_std::allocator<int>_>::end(p);
+    if (__for_begin._M_current == cVar1._M_current) {
+      return n;
+    }
+    n = n + *__for_begin._M_current;
+    __for_begin._M_current = __for_begin._M_current + 1;
+    return n;
+  }
+contains:
+  - "(const_iterator)(p)"
+  - "*(__for_begin)"
+  - "(__for_begin) = (__for_begin) + 1"
+not_contains:
+  - "_M_current"
+  - "->begin()"
+  - "->end()"
+compile: true
+notes: "Ghidra range-for on vector uses const_iterator as a placeholder (vec_sum_n dump); not string::const_iterator"

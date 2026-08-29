@@ -1,0 +1,19 @@
+id: ghidra-assoc-index-placeholder-key
+profile: gcc_pe_x64
+gcc_fingerprint: "no match for 'operator\\[\\]' \\(operand types are 'std::(?:map|unordered_map).+' and '(?:key_type|__normal_iterator)'"
+gcc_probe:
+  - "no match for 'operator[]' (operand types are 'std::map<std::__cxx11::basic_string<char>, int, std::less<std::__cxx11::basic_string<char> >, std::allocator<std::pair<const std::__cxx11::basic_string<char>, int> > >' and 'key_type' {aka 'ghidra_word'})"
+  - "no match for 'operator[]' (operand types are 'std::unordered_map<std::__cxx11::basic_string<char>, int, std::hash<std::__cxx11::basic_string<char> >, std::equal_to<std::__cxx11::basic_string<char> >, std::allocator<std::pair<const std::__cxx11::basic_string<char>, int> > >' and '__normal_iterator' {aka 'ghidra_word'})"
+recipe: sanitize
+ghidra_cpp: |
+  void put_n(map<string,int,_std::less<string>,_std::allocator<std::pair<string_const,int>_>_> *m)
+  {
+    key_type *k;
+    (void)std::map<string,int,_std::less<string>,_std::allocator<std::pair<string_const,int>_>_>::operator[](m, k);
+  }
+contains:
+  - "[*(k)]"
+not_contains:
+  - "::operator[]"
+compile: false
+notes: "Ghidra indexes map/umap with key_type / iterator placeholder (ghidra_word); do not invent string() or wrap every []"

@@ -52,6 +52,7 @@ _BARE_TEMPLATE = (
     (re.compile(r"(?<![:\w])less\s*<"), "std::less<"),
     (re.compile(r"(?<![:\w])pair\s*<"), "std::pair<"),
     (re.compile(r"(?<![:\w])duration\s*<"), "std::chrono::duration<"),
+    (re.compile(r"(?<![:\w])time_point\s*<"), "std::chrono::time_point<"),
     (re.compile(r"(?<![:\w])_?ratio\s*<"), "std::ratio<"),
 )
 # Ghidra already prints std::__detail:: on the line before a hashtable iterator.
@@ -64,7 +65,7 @@ _BARE_NODE_ITER = (
     (re.compile(r"(?<![:\w])_Node_iterator\s*<"), "std::__detail::_Node_iterator<"),
 )
 _OPERATOR_TAILS = (
-    "+=", "!=", "==", "<=", ">=", "->", "++", "--", "[]", "=", "*",
+    "+=", "!=", "==", "<=", ">=", "->", "++", "--", "[]", "=", "*", "-",
 )
 
 _BARE_IOS = re.compile(
@@ -90,7 +91,7 @@ _KNOWN_CLASSES = frozenset({
     "vector", "basic_string", "string", "allocator", "__new_allocator",
     "unordered_map", "unordered_set", "map", "set", "multiset", "list", "deque", "array",
     "__normal_iterator", "_Node_iterator", "_Node_const_iterator",
-    "_Node_iterator_base",
+    "_Node_iterator_base", "_Rb_tree_const_iterator", "_Rb_tree_iterator",
     "char_traits", "optional", "pair",
     "initializer_list", "map", "less", "ostream", "ofstream",
     "duration", "ratio",
@@ -125,6 +126,42 @@ def _match_forward(s: str, i: int, open_ch: str, close_ch: str) -> int:
             if depth == 0:
                 return j
     return -1
+
+
+_GHIDRA_ITER_TEMPLATE = re.compile(
+    r"(?:(?:std|__gnu_cxx)::\s*)*"
+    r"(__normal_iterator|_Rb_tree_const_iterator|_Rb_tree_iterator|__iterator)\b"
+)
+
+
+def _strip_ghidra_iter_templates(s: str) -> str:
+    """Drop iterator <...> so preamble aliases (ghidra_word) stay non-templates.
+
+    Real __gnu_cxx / std::_Rb_tree types reject Ghidra's iterator-to-T* casts.
+    """
+    blob = s or ""
+    n = len(blob)
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while i < n:
+        m = _GHIDRA_ITER_TEMPLATE.search(blob, i)
+        if not m:
+            break
+        k = m.end()
+        while k < n and blob[k] in " \t\n\r":
+            k += 1
+        if k < n and blob[k] == "<":
+            close = _match_forward(blob, k, "<", ">")
+            if close >= 0:
+                out.append(blob[copied:m.start()])
+                out.append(m.group(1))
+                copied = close + 1
+                i = copied
+                continue
+        i = m.end()
+    out.append(blob[copied:])
+    return "".join(out)
 
 
 def _match_angle_back(s: str, i: int) -> int:
@@ -293,7 +330,14 @@ _ASSOC_INDEX = frozenset({
 _RE_PTR_CAST = re.compile(r"^\(\s*[^()]*\*\s*\)")
 
 
-def _rewrite_one_call(typ: str, meth: str, dtor: bool, args: list[str]) -> str | None:
+def _rewrite_one_call(
+    typ: str,
+    meth: str,
+    dtor: bool,
+    args: list[str],
+    *,
+    had_targs: bool = False,
+) -> str | None:
     last = _last_type_ident(typ)
     if not last:
         return None
@@ -326,14 +370,19 @@ def _rewrite_one_call(typ: str, meth: str, dtor: bool, args: list[str]) -> str |
         if meth == "operator++":
             return f"({recv})->operator++()"
         return f"({recv})->operator--()"
-    if (
-        meth in {"operator==", "operator!="}
-        and len(args) >= 2
-        and last == "__detail"
-    ):
-        # Ghidra: std::__detail::operator==(it, end) — not a member of __detail.
+    if meth in {"operator==", "operator!="} and len(args) >= 2:
         op = "==" if meth == "operator==" else "!="
-        return f"(({args[0]}) {op} ({args[1]}))"
+        if last == "__detail":
+            # Ghidra: std::__detail::operator==(it, end) — not a member of __detail.
+            return f"(({args[0]}) {op} ({args[1]}))"
+        if last == "std":
+            # Bare std::operator!=(iter*, iter*) — libstdc++ takes refs.
+            # Templated std::operator==<char,...> is string compare; keep it.
+            if had_targs:
+                return None
+            return f"(*({args[0]}) {op} *({args[1]}))"
+    if meth == "operator-" and last == "chrono" and len(args) >= 2:
+        return f"(*({args[0]}) - *({args[1]}))"
     if meth.startswith("operator"):
         return None
     if not args:
@@ -363,10 +412,10 @@ def _rewrite_one_call(typ: str, meth: str, dtor: bool, args: list[str]) -> str |
         if dtor:
             return f"({recv})->~{last}()"
         if last in {"basic_string", "string"}:
-            # C-string ctor is (this, char*, Allocator const&) — only the
-            # allocator extra is T*; do not deref the char* ident.
-            if extra:
-                extra = list(extra)
+            extra = list(extra)
+            if had_targs and len(extra) >= 3:
+                extra = extra[:2]
+            elif extra:
                 extra[-1] = _deref_if_ident(extra[-1])
             rest = ", ".join(extra)
             rest = re.sub(
@@ -376,6 +425,17 @@ def _rewrite_one_call(typ: str, meth: str, dtor: bool, args: list[str]) -> str |
             )
         if last == "duration":
             extra = [_deref_ptrish(a) for a in extra]
+            rest = ", ".join(extra)
+        if last == "vector" and extra:
+            extra = list(extra)
+            if had_targs:
+                if len(extra) >= 3:
+                    extra = extra[:2]
+            elif len(extra) >= 3:
+                extra[1] = _deref_if_ident(extra[1])
+                extra = extra[:2]
+            elif len(extra) == 2 and re.fullmatch(r"\d+", extra[0].strip()):
+                extra[1] = _deref_if_ident(extra[1])
             rest = ", ".join(extra)
         if rest:
             return f"new ({recv}) {typ}({rest})"
@@ -421,9 +481,11 @@ def rewrite_ghidra_member_calls(code: str) -> str:
                     k += len(op)
                     break
         t = k
+        had_targs = False
         if t < n and s[t] == "<":
             close_a = _match_forward(s, t, "<", ">")
             if close_a >= 0:
+                had_targs = True
                 t = close_a + 1
         while t < n and s[t] in " \t\n\r":
             t += 1
@@ -439,7 +501,9 @@ def rewrite_ghidra_member_calls(code: str) -> str:
             i += 1
             continue
         typ = s[t0:i].strip()
-        rewritten = _rewrite_one_call(typ, meth, dtor, _split_top_args(s[t + 1:close_p]))
+        rewritten = _rewrite_one_call(
+            typ, meth, dtor, _split_top_args(s[t + 1:close_p]), had_targs=had_targs
+        )
         if rewritten is None:
             i += 1
             continue
@@ -467,6 +531,64 @@ def _rewrite_string_ref_deref(code: str) -> str:
     ids.update(re.findall(r"\b(?:const_)?reference\s+(\w+)\s*;", t))
     for ident in ids:
         t = re.sub(rf"(?<!\*)\*{ident}\b", ident, t)
+    return t
+
+
+_RE_CONST_REF_DECL = re.compile(r"\bconst_reference\s+(\w+)\s*;")
+
+
+def _rewrite_const_ref_arrow(code: str) -> str:
+    """Ghidra types vector/map element refs as const_reference then uses ->field.
+
+    String operator[] keeps const_reference as a scalar (star-deref rewrite).
+    Do not invent a named struct from a user binary; assembler infers fields
+    on the placeholder type ghidra_ref. Assignment from T (operator[]) is
+    taken by address so the placeholder is a pointer, not ghidra_word = T.
+    """
+    t = code or ""
+    ids = []
+    for m in _RE_CONST_REF_DECL.finditer(t):
+        ident = m.group(1)
+        if re.search(rf"\b{re.escape(ident)}\s*->", t):
+            ids.append(ident)
+    for ident in ids:
+        t = re.sub(
+            rf"\bconst_reference\s+{re.escape(ident)}\s*;",
+            f"ghidra_ref *{ident};",
+            t,
+        )
+        t = re.sub(
+            rf"\b{re.escape(ident)}\s*=\s*(?!\(ghidra_ref\s*\*\s*\)\s*&)([^;]+);",
+            rf"{ident} = (ghidra_ref *)&(\1);",
+            t,
+        )
+    return t
+
+
+_RE_PLACEHOLDER_ITER_DECL = re.compile(r"\b(const_iterator|iterator)\s+(\w+)\s*;")
+
+
+def _rewrite_const_iter_begin_assign(code: str) -> str:
+    """Ghidra types vector range-for as iterator/const_iterator then assigns begin/end.
+
+    Preamble iterator aliases are placeholder pointers, not string::iterator.
+    Keep the container address as the cursor; do not invent a zero iterator.
+    """
+    t = code or ""
+    ids = [(m.group(1), m.group(2)) for m in _RE_PLACEHOLDER_ITER_DECL.finditer(t)]
+    for kind, ident in ids:
+        t = re.sub(
+            rf"\b{re.escape(ident)}\s*=\s*\(([^()]+)\)\s*->"
+            rf"(?:begin|end|cbegin|cend)\s*\(\s*\)\s*;",
+            rf"{ident} = ({kind})(\1);",
+            t,
+        )
+        t = re.sub(
+            rf"\b{re.escape(ident)}\s*=\s*([A-Za-z_]\w*)\s*->"
+            rf"(?:begin|end|cbegin|cend)\s*\(\s*\)\s*;",
+            rf"{ident} = ({kind})(\1);",
+            t,
+        )
     return t
 
 
@@ -831,19 +953,41 @@ def sanitize_ghidra_cpp(code: str) -> str:
         chunk = re.sub(r"_+(?=>)", "", chunk)
         for old, new in _UNDERSCORE_TYPES:
             chunk = chunk.replace(old, new)
+        # Ghidra NTTP: `_bool_,` — trailing `_` is part of the ident, so
+        # `\b_(bool)\b` does not match. Strip both-sided `_prim_` first.
+        chunk = re.sub(
+            r"\b_((?:int|char|bool|void|float|double|short|long|const|false|true))_\b",
+            r"\1",
+            chunk,
+        )
         # Ghidra: pair<int,_int> / map<int,_int,…> — '_' before a primitive targ.
         chunk = re.sub(
             r"\b_(int|char|bool|void|float|double|short|long|const|false|true)\b",
             r"\1",
             chunk,
         )
+        # Ghidra: const_Rec / _const_Rec / Rec_const (user struct, not const_iterator).
+        chunk = re.sub(r"\b_const_([A-Z][A-Za-z0-9]*)\b", r"const \1", chunk)
+        chunk = re.sub(r"\bconst_([A-Z][A-Za-z0-9]*)\b", r"const \1", chunk)
+        chunk = re.sub(r"\b([A-Z][A-Za-z0-9]*)_const\b", r"\1 const", chunk)
         chunk = _RE_DETAIL_NODE.sub(r"std::__detail::\1", chunk)
         for rx, repl in _BARE_NODE_ITER:
             chunk = rx.sub(repl, chunk)
         for rx, repl in _BARE_TEMPLATE:
             chunk = rx.sub(repl, chunk)
+        chunk = _strip_ghidra_iter_templates(chunk)
         chunk = re.sub(r"\bstd::\s+std::", "std::", chunk)
-        chunk = re.sub(r"::\s+std::chrono::duration\s*<", "::duration<", chunk)
+        chunk = re.sub(r"\bstd::chrono::_V2::", "std::chrono::", chunk)
+        chunk = re.sub(
+            r"::\s+std::(?:__cxx11::|chrono::|__gnu_cxx::)*([A-Za-z_]\w+)\s*<",
+            r"::\1<",
+            chunk,
+        )
+        chunk = re.sub(
+            r"::\s+std::(?:__cxx11::|chrono::|__gnu_cxx::)*([A-Za-z_]\w+)\s*\(",
+            r"::\1(",
+            chunk,
+        )
         chunk = re.sub(r"\b([A-Za-z_]\w*)\s*\.\s*__r\b", r"(&\1)", chunk)
         chunk = apply_lexical(chunk, "after_templates")
         chunk = re.sub(r"\(__node_type\s*\*\)", "", chunk)
@@ -864,7 +1008,9 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _USING_STD.sub("", t)
     t = _strip_invalid_using(t)
     t = rewrite_ghidra_member_calls(t)
+    t = _rewrite_const_iter_begin_assign(t)
     t = _rewrite_string_ref_deref(t)
+    t = _rewrite_const_ref_arrow(t)
     t = _rewrite_iter_char_cast(t)
     t = _rewrite_pointer_pair_fields(t)
     t = _rewrite_nrvo_iter_as_string(t)

@@ -1,0 +1,20 @@
+id: ghidra-string-ne-char
+profile: gcc_pe_x64
+gcc_fingerprint: "operator!=<char, std::char_traits<char>, std::allocator<char> >\\(std::__cxx11::basic_string<char>\\*&|no match for 'operator!=' \\(operand types are 'std::__cxx11::basic_string<char>' and 'char'"
+gcc_probe:
+  - "no matching function for call to 'operator!=<char, std::char_traits<char>, std::allocator<char> >(std::__cxx11::basic_string<char>*&, char*)'"
+  - "no match for 'operator!=' (operand types are 'std::__cxx11::basic_string<char>' and 'char')"
+recipe: sanitize
+ghidra_cpp: |
+  void check_n(string *s, char *p)
+  {
+    if (std::operator!=<char,_std::char_traits<char>,_std::allocator<char>_>(s, p)) {
+      return;
+    }
+  }
+contains:
+  - "std::operator!="
+not_contains:
+  - "[0]"
+compile: false
+notes: "Ghidra std::operator!=<char,...>(string*, char*); keep the templated call, do not invent [0] or string(1, c)"

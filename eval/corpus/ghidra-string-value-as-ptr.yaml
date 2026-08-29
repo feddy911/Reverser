@@ -1,0 +1,15 @@
+id: ghidra-string-value-as-ptr
+profile: gcc_pe_x64
+gcc_fingerprint: "to 'std::string\\*' \\{aka 'std::__cxx11::basic_string<char>\\*'\\} in assignment"
+gcc_probe:
+  - "cannot convert '__gnu_cxx::__alloc_traits<std::allocator<std::__cxx11::basic_string<char> >, std::__cxx11::basic_string<char> >::value_type' {aka 'std::__cxx11::basic_string<char>'} to 'std::string*' {aka 'std::__cxx11::basic_string<char>*'} in assignment"
+recipe: sanitize
+ghidra_cpp: |
+  void take_s(string **dst, string src)
+  {
+    *dst = src;
+  }
+contains:
+  - "*dst = src"
+compile: false
+notes: "Ghidra assigns string value where a string* slot is declared; do not invent &src"

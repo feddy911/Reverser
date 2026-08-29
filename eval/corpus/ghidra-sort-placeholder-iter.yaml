@@ -1,0 +1,22 @@
+id: ghidra-sort-placeholder-iter
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to 'sort<__normal_iterator"
+gcc_probe:
+  - "no matching function for call to 'sort<__normal_iterator, bool (*)(const Rec&, const Rec&)>(__normal_iterator&, __normal_iterator&, _func_bool_Rec_ptr_Rec_ptr*&)'"
+recipe: sanitize
+ghidra_cpp: |
+  void order_n(void)
+  {
+    __normal_iterator a;
+    __normal_iterator b;
+    _func_bool_Rec_ptr_Rec_ptr *cmp;
+    std::
+    sort<__normal_iterator,bool(*)(const Rec&,const Rec&)>
+              (a, b, cmp);
+  }
+contains:
+  - "sort<__normal_iterator"
+not_contains:
+  - "begin()"
+compile: false
+notes: "Ghidra calls sort with placeholder iterators and a function-pointer type; do not invent begin/end or a comparator"

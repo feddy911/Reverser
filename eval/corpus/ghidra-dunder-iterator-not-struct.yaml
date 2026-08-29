@@ -1,0 +1,19 @@
+id: ghidra-dunder-iterator-not-struct
+profile: gcc_pe_x64
+gcc_fingerprint: "'__iterator' was not declared"
+gcc_probe:
+  - "'__iterator' was not declared in this scope"
+recipe: assemble
+guessed_name: step
+ghidra_cpp: |
+  void step(void)
+  {
+    __iterator local;
+    (void)local;
+  }
+contains:
+  - "__iterator local"
+not_contains:
+  - "struct __iterator"
+compile: true
+notes: "Ghidra leftover __iterator token; do not infer a struct"

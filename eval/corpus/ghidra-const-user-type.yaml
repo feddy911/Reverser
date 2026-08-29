@@ -1,0 +1,38 @@
+id: ghidra-const-user-type
+profile: gcc_pe_x64
+gcc_fingerprint: "'const_Rec' was not declared|'_const_Rec' was not declared|'Rec_const' was not declared"
+gcc_probe:
+  - "'const_Rec' was not declared in this scope"
+  - "'_const_Rec' was not declared in this scope"
+  - "'Rec_const' was not declared in this scope"
+recipe: sanitize_then_assemble
+guessed_name: take_n
+ghidra_cpp: |
+  int take_n(const_Rec *p)
+  {
+    return p->n;
+  }
+extra_functions:
+  - name: take_n2
+    cpp: |
+      int take_n2(_const_Rec *q)
+      {
+        return q->n;
+      }
+  - name: take_n3
+    cpp: |
+      int take_n3(Rec_const *r)
+      {
+        return r->n;
+      }
+contains:
+  - "const Rec *p"
+  - "const Rec *q"
+  - "Rec const *r"
+  - "struct Rec"
+not_contains:
+  - "const_Rec"
+  - "_const_Rec"
+  - "Rec_const"
+compile: true
+notes: "Ghidra spells const T as const_Rec / _const_Rec / Rec_const; not const_iterator"

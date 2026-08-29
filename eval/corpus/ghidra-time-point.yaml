@@ -1,0 +1,25 @@
+id: ghidra-time-point
+profile: gcc_pe_x64
+gcc_fingerprint: "'time_point' was not declared"
+gcc_probe:
+  - "'time_point' was not declared in this scope; did you mean 'std::chrono::time_point'?"
+recipe: sanitize
+ghidra_cpp: |
+  void mark_n(void)
+  {
+    time_point<std::chrono::_V2::steady_clock,std::chrono::duration<long_long_int,_std::ratio<1,_1000000000>_> > t0;
+    time_point<std::chrono::_V2::steady_clock,std::chrono::duration<long_long_int,_std::ratio<1,_1000000000>_> > *a;
+    time_point<std::chrono::_V2::steady_clock,std::chrono::duration<long_long_int,_std::ratio<1,_1000000000>_> > *b;
+    std::chrono::
+    operator-<std::chrono::_V2::steady_clock,std::chrono::duration<long long,std::ratio<1,1000000000>>,std::chrono::duration<long long,std::ratio<1,1000000000>>>
+              (a, b);
+    (void)t0;
+  }
+contains:
+  - "std::chrono::time_point<std::chrono::steady_clock"
+  - "*(a) - *(b)"
+not_contains:
+  - "_V2"
+  - "operator-<"
+compile: true
+notes: "Ghidra prints bare time_point< and std::chrono::_V2::steady_clock; operator- on time_point* is *(a)-*(b)"

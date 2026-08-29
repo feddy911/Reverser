@@ -1,0 +1,15 @@
+id: ghidra-word-star-to-vector-star
+profile: gcc_pe_x64
+gcc_fingerprint: "cannot convert 'ghidra_word\\*' to 'std::vector<.*\\*'.*in assignment"
+gcc_probe:
+  - "cannot convert 'ghidra_word*' to 'std::vector<std::pair<std::__cxx11::basic_string<char>, int>, std::allocator<std::pair<std::__cxx11::basic_string<char>, int> > >*' in assignment"
+recipe: sanitize
+ghidra_cpp: |
+  void set_v(vector<int> **dst, ghidra_word *src)
+  {
+    *dst = src;
+  }
+contains:
+  - "*dst = src"
+compile: false
+notes: "Ghidra types a vector* slot as ghidra_word*; do not invent a vector* cast"

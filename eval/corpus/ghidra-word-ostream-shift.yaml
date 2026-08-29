@@ -1,0 +1,17 @@
+id: ghidra-word-ostream-shift
+profile: gcc_pe_x64
+gcc_fingerprint: "ambiguous overload for 'operator<<' \\(operand types are 'std::ostream'.*'ghidra_word'"
+gcc_probe:
+  - "ambiguous overload for 'operator<<' (operand types are 'std::ostream' {aka 'std::basic_ostream<char>'} and 'ghidra_word')"
+recipe: assemble
+guessed_name: show_w
+ghidra_cpp: |
+  void show_w(void)
+  {
+    ghidra_word w;
+    std::cout << w;
+  }
+contains:
+  - "std::cout << w"
+compile: true
+notes: "ghidra_word converts to ull, T*, and bool so ostream shift is ambiguous without a dedicated operator"

@@ -80,7 +80,7 @@ def includes_from_dlls(dlls: Iterable[str]) -> Set[str]:
 
 
 _CODE_INCLUDE_RULES: List[tuple] = [
-    (re.compile(r"\bstd::(sort|stable_sort|partial_sort|equal|find|copy|fill|min|max|swap|reverse|count)\b"),
+    (re.compile(r"\bstd::\s*(sort|stable_sort|partial_sort|equal|find|copy|fill|min|max|swap|reverse|count)\b"),
      "#include <algorithm>"),
     (re.compile(r"\b(?:std::)?swap\s*\("), "#include <utility>"),
     (re.compile(r"\b(?:memcpy|memmove|memset|memcmp|strlen|strcpy|strncpy|strcmp|strcat)\s*\("),

@@ -127,9 +127,14 @@ def _per_function_compile(
             f"    -> known dialect {', '.join(decision.known_ids[:4])}",
             flush=True,
         )
+    if decision.skip_forever_reasons:
+        print(
+            f"    -> skip-forever {', '.join(decision.skip_forever_reasons[:4])}",
+            flush=True,
+        )
     if not decision.need_llm:
         metrics.compile_known_skip += 1
-        print("    -> Compiler agent: skip LLM (all errors in corpus)", flush=True)
+        print("    -> Compiler agent: skip LLM (corpus or skip-forever)", flush=True)
         return
     try:
         write_proposal(
@@ -777,6 +782,8 @@ def run(config: AppConfig) -> int:
                         payload["compiler_agent"] = {
                             "known_ids": decision.known_ids,
                             "n_unknown": len(decision.unknown),
+                            "n_skip_forever": len(decision.skip_forever),
+                            "skip_forever": decision.skip_forever_reasons,
                             "need_llm": decision.need_llm,
                         }
                         if decision.known_ids:
@@ -785,10 +792,17 @@ def run(config: AppConfig) -> int:
                                 + ", ".join(decision.known_ids[:6]),
                                 flush=True,
                             )
+                        if decision.skip_forever_reasons:
+                            print(
+                                "  skip-forever: "
+                                + ", ".join(decision.skip_forever_reasons[:4]),
+                                flush=True,
+                            )
                         if not decision.need_llm:
                             metrics.compile_known_skip += 1
+                            why = "corpus or skip-forever"
                             print(
-                                "  Compiler agent: skip LLM (all errors in corpus)",
+                                f"  Compiler agent: skip LLM ({why})",
                                 flush=True,
                             )
                         else:

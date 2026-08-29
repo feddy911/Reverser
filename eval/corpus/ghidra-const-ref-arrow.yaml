@@ -1,0 +1,27 @@
+id: ghidra-const-ref-arrow
+profile: gcc_pe_x64
+gcc_fingerprint: "base operand of '->' has non-pointer type 'const_reference'|no match for 'operator=' \\(operand types are 'const_reference'"
+gcc_probe:
+  - "base operand of '->' has non-pointer type 'const_reference'"
+  - "no match for 'operator=' (operand types are 'const_reference' {aka 'ghidra_word'} and 'Rec')"
+recipe: assemble
+guessed_name: show_n
+ghidra_cpp: |
+  void show_n(void)
+  {
+    const_reference rec;
+    Rec *p;
+    size_type i;
+    rec = (*((std::vector<Rec> *)p))[(size_type)i];
+    (void)rec->n;
+  }
+contains:
+  - "ghidra_ref *rec"
+  - "rec = (ghidra_ref *)&("
+  - "rec->n"
+  - "struct ghidra_ref"
+not_contains:
+  - "const_reference rec"
+  - "struct const_reference"
+compile: true
+notes: "Ghidra types vector/map element as const_reference, assigns T, then ->field; not the string [] scalar case"

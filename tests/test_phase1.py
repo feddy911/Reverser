@@ -141,6 +141,8 @@ class TestIncludes(unittest.TestCase):
 
         got = includes_from_source("std::sort(v.begin(), v.end()); std::equal(a, b, c);")
         self.assertIn("#include <algorithm>", got)
+        broken = includes_from_source("std::\n    sort<int*>(p, p + 2);")
+        self.assertIn("#include <algorithm>", broken)
 
     def test_includes_from_source_initializer_list_and_sqrt(self):
         from src.analysis.includes import includes_from_source
@@ -312,6 +314,58 @@ class TestGhidraCppSanitize(unittest.TestCase):
         self.assertNotIn("_std::", got)
         self.assertNotIn("_>", got)
 
+    def test_const_ref_arrow_not_string_star(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        arrow = sanitize_ghidra_cpp(
+            "void show_n(void) { const_reference rec; rec = (*((std::vector<Rec> *)p))[i]; (void)rec->n; }"
+        )
+        self.assertIn("ghidra_ref *rec", arrow)
+        self.assertIn("rec = (ghidra_ref *)&(", arrow)
+        self.assertNotIn("const_reference rec", arrow)
+        star = sanitize_ghidra_cpp(
+            "void is_hash(void) { const_reference pvVar2; if (*pvVar2 != '#') return; }"
+        )
+        self.assertIn("const_reference pvVar2", star)
+        self.assertNotIn("ghidra_ref", star)
+
+    def test_iter_name_template_args_stripped(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "void walk_it(void) {\n"
+            "  _Rb_tree_const_iterator<std::pair<int_const,_int>_> *pit;\n"
+            "  _Rb_tree_const_iterator<std::pair<int_const,_int>_> *qid;\n"
+            "  __normal_iterator<int *,vector<int,_std::allocator<int>_> > *vit;\n"
+            "  bVar1 = std::operator!=(pit, qid);\n"
+            "  (void)vit;\n"
+            "}"
+        )
+        self.assertIn("_Rb_tree_const_iterator *pit", got)
+        self.assertIn("__normal_iterator *vit", got)
+        self.assertIn("*(pit) != *(qid)", got)
+        self.assertNotIn("_Rb_tree_const_iterator<", got)
+        self.assertNotIn("__normal_iterator<", got)
+        self.assertNotIn("std::operator!=", got)
+        self.assertNotIn("__gnu_cxx::__normal_iterator", got)
+
+    def test_const_iterator_begin_is_placeholder(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "int sum_n(void) {\n"
+            "  const_iterator cVar1;\n"
+            "  vector<int,_std::allocator<int>_> *p;\n"
+            "  const_iterator __for_begin;\n"
+            "  __for_begin = std::vector<int,_std::allocator<int>_>::begin(p);\n"
+            "  cVar1 = std::vector<int,_std::allocator<int>_>::end(p);\n"
+            "  n = n + *__for_begin._M_current;\n"
+            "}"
+        )
+        self.assertIn("(const_iterator)(p)", got)
+        self.assertNotIn("->begin()", got)
+        self.assertNotIn("_M_current", got)
+
     def test_long_long_unsigned_int(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 
@@ -340,6 +394,43 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         )
         self.assertIn("->c_str()", br)
         self.assertNotIn("::c_str", br)
+        nested = sanitize_ghidra_cpp(
+            "std::vector<unsigned char>::\n"
+            "std::vector<__normal_iterator>(p, a, b, al);\n"
+        )
+        self.assertIn("new (", nested)
+        self.assertNotIn(">::std", nested)
+        self.assertNotIn("*(a)", nested)
+        self.assertNotIn("*(b)", nested)
+
+    def test_time_point_and_chrono_sub(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "time_point<std::chrono::_V2::steady_clock,"
+            "std::chrono::duration<long_long_int,_std::ratio<1,_1000000000>_> > t0;\n"
+            "std::chrono::\n"
+            "operator-<std::chrono::_V2::steady_clock,"
+            "std::chrono::duration<long long,std::ratio<1,1000000000>>,"
+            "std::chrono::duration<long long,std::ratio<1,1000000000>>>(a, b);\n"
+        )
+        self.assertIn("std::chrono::time_point<std::chrono::steady_clock", got)
+        self.assertNotIn("_V2", got)
+        self.assertIn("*(a) - *(b)", got)
+
+    def test_iterator_begin_without_extra_parens(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "iterator iVar1;\n"
+            "iterator __for_begin;\n"
+            "vector<unsigned char> *p;\n"
+            "__for_begin = (p)->begin();\n"
+            "iVar1 = p->end();\n"
+        )
+        self.assertIn("(iterator)(p)", got)
+        self.assertNotIn("->begin()", got)
+        self.assertNotIn("->end()", got)
 
     def test_duration_cast_not_rewritten(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -558,11 +649,31 @@ int main(int argc, char **argv) { return 0; }
 
         got = sanitize_ghidra_cpp(
             "_Node_iterator<std::pair<int,int>,_false,_true> *it;\n"
+            "_Node_iterator<std::pair<int,int>,_bool_,_true> *flag;\n"
         )
         self.assertIn(",false,true>", got)
+        self.assertIn(",bool,true>", got)
         self.assertNotIn("_false", got)
+        self.assertNotIn("_bool_", got)
         self.assertNotIn("_true", got)
         self.assertIn("std::__detail::_Node_iterator<", got)
+
+    def test_const_user_type_not_iterator(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "int take_n(const_Rec *p) { return p->n; }\n"
+            "int take_n2(_const_Rec *q) { return q->n; }\n"
+            "int take_n3(Rec_const *r) { return r->n; }\n"
+            "const_iterator it;\n"
+        )
+        self.assertIn("const Rec *p", got)
+        self.assertIn("const Rec *q", got)
+        self.assertIn("Rec const *r", got)
+        self.assertIn("const_iterator it", got)
+        self.assertNotIn("const_Rec", got)
+        self.assertNotIn("_const_Rec", got)
+        self.assertNotIn("Rec_const", got)
 
     def test_node_iterator_member_star(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -706,6 +817,18 @@ int main(int argc, char **argv) { return 0; }
         )
         self.assertIn("->count(*(key))", count_got)
         self.assertNotIn("::count", count_got)
+        fill_got = sanitize_ghidra_cpp(
+            "std::vector<char>::vector(p, n, val, a);\n"
+        )
+        self.assertIn("new (", fill_got)
+        self.assertIn("*(val)", fill_got)
+        self.assertNotIn("*(n)", fill_got)
+        self.assertNotIn(", a)", fill_got)
+        self.assertNotIn(">::vector(", fill_got)
+        range_ctor = sanitize_ghidra_cpp(
+            "std::vector<int>::vector(p, first, last);\n"
+        )
+        self.assertNotIn("*(last)", range_ctor)
 
     def test_free_std_operator_lshift(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp

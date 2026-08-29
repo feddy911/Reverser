@@ -1,0 +1,15 @@
+id: ghidra-const-void-to-pointer
+profile: gcc_pe_x64
+gcc_fingerprint: "invalid conversion from 'const void\\*' to 'pointer'"
+gcc_probe:
+  - "invalid conversion from 'const void*' to 'pointer' {aka 'void*'} [-fpermissive]"
+recipe: sanitize
+ghidra_cpp: |
+  void set_p(pointer *dst, const void *src)
+  {
+    *dst = src;
+  }
+contains:
+  - "*dst = src"
+compile: false
+notes: "Ghidra stores const void* into pointer (void*); do not strip const from every void*"
