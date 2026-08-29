@@ -1,0 +1,4 @@
+{
+  "name": "Reverser",
+  "install": "if [ -f requirements.txt ]; then python3 -m pip install -r requirements.txt; else echo 'requirements.txt not found; skipping dependency install'; fi"
+}
