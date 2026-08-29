@@ -1,0 +1,20 @@
+id: ghidra-cmath_log-ln1
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\ndouble ln1(double x)\r\
+  \n\r\n{\r\n  double in_XMM0_Qa;\r\n  double dVar1;\r\n  \r\n  dVar1 = log(in_XMM0_Qa);\r\
+  \n  return dVar1;\r\n}"
+guessed_name: ln1
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Globals starting with '_' overlap smaller symbols at the same\
+    \ address */\r\n/* WARNING: Unknown calling convention -- yet parameter storage\
+    \ is locked */\r\n\r\nint main(void)\r\n\r\n{\r\n  double dVar1;\r\n  double in_stack_ffffffffffffffd8;\r\
+    \n  \r\n  __main();\r\n  dVar1 = ln1(in_stack_ffffffffffffffd8);\r\n  return (int)(dVar1\
+    \ <= _DAT_140004008);\r\n}"
+contains:
+- ln1
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cmath_log; review before accept
+gcc_fingerprint: ''

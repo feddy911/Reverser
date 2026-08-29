@@ -46,15 +46,25 @@ class TestCorpusEval(unittest.TestCase):
             "\n".join(f"{r['id']}: {r.get('errors')}" for r in fails),
         )
 
-    def test_classifier_no_duplicate_fingerprints(self):
-        from src.analysis.eval_classifier import eval_classifier
+    def test_classifier_probes_self_hit(self):
+        from src.analysis.eval_classifier import eval_classifier, regex_to_probe
 
+        self.assertEqual(
+            regex_to_probe("'[A-Z][A-Za-z0-9]*' was not declared in this scope"),
+            "'C' was not declared in this scope",
+        )
+        self.assertEqual(
+            regex_to_probe("cannot convert 'ghidra_word\\*' to 'undefined\\*'"),
+            "cannot convert 'ghidra_word*' to 'undefined*'",
+        )
         report = eval_classifier()
         self.assertGreaterEqual(report["n_with_fp"], 50)
-        self.assertTrue(
-            report["ok"],
-            f"invalid={report['invalid_regex']} dup={report['duplicate_fingerprints']}",
+        self.assertEqual(
+            report["n_self_miss"],
+            0,
+            report["self_miss"],
         )
+        self.assertTrue(report["ok"], report)
 
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):

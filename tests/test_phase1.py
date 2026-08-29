@@ -165,6 +165,10 @@ class TestIncludes(unittest.TestCase):
         )
         self.assertIn("#include <cstring>", includes_from_calls(["memmove"]))
         self.assertIn(
+            "#include <cstring>",
+            includes_from_source("strcat(d, \"b\");"),
+        )
+        self.assertIn(
             "#include <utility>",
             includes_from_source("std::swap(a, b);"),
         )
@@ -548,6 +552,11 @@ int main(int argc, char **argv) { return 0; }
         )
         self.assertIn("->push_back(*(item))", push_got)
         self.assertNotIn("::push_back", push_got)
+        str_push = sanitize_ghidra_cpp(
+            "std::basic_string<char>::push_back(s, ch);\n"
+        )
+        self.assertIn("->push_back(ch)", str_push)
+        self.assertNotIn("*(ch)", str_push)
         count_got = sanitize_ghidra_cpp(
             "std::map<int, int>::count(m, key);\n"
         )

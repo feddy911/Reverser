@@ -61,7 +61,7 @@ _PROTECTED_EXTRA = frozenset({
     "resize", "fabs", "multiset", "memcpy", "memcmp", "memset", "strlen",
     "swap", "length", "pop_back", "c_str", "strcmp", "strcpy", "memmove",
     "capacity", "printf", "puts", "strncpy", "sprintf", "atoi",
-    "reserve", "second",
+    "reserve", "second", "strcat", "snprintf", "log", "exp", "round",
 
     "ofstream", "ifstream", "optional", "sort", "min", "max",
     "sqrt", "pow", "fabs", "hypot", "sin", "cos", "tan",
@@ -951,6 +951,131 @@ int no_vals(std::set<int> *s) {
 int main() {
   std::set<int> s;
   return no_vals(&s) ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cmath_log",
+        dialect="cmath",
+        source="""#include <cmath>
+double ln1(double x) {
+  return std::log(x);
+}
+int main() { return ln1(1.0) > -0.1 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="cmath_exp",
+        dialect="cmath",
+        source="""#include <cmath>
+double e1(double x) {
+  return std::exp(x);
+}
+int main() { return e1(0.0) > 0.5 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="cmath_round",
+        dialect="cmath",
+        source="""#include <cmath>
+int near1(double x) {
+  return (int)std::round(x);
+}
+int main() { return near1(1.6) == 2 ? 0 : 1; }
+""",
+    ),
+    MiniProgram(
+        id="cstring_strcat",
+        dialect="cstring",
+        source="""#include <cstring>
+void cat_b(char *d) {
+  strcat(d, "b");
+}
+int main() {
+  char a[4] = {'a', 0, 0, 0};
+  cat_b(a);
+  return a[1] == 'b' ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="cstdio_puts",
+        dialect="cstdio",
+        source="""#include <cstdio>
+int say_hi() {
+  puts("hi");
+  return 0;
+}
+int main() { return say_hi(); }
+""",
+    ),
+    MiniProgram(
+        id="cstdio_snprintf",
+        dialect="cstdio",
+        source="""#include <cstdio>
+int fmt16(char *buf, int n) {
+  return snprintf(buf, 16, "%d", n);
+}
+int main() {
+  char b[16];
+  return fmt16(b, 1) == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="string_push_back",
+        dialect="string",
+        source="""#include <string>
+void add_x(std::string *s) {
+  s->push_back('x');
+}
+int main() {
+  std::string a;
+  add_x(&a);
+  return a.size() == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="map_size",
+        dialect="map",
+        source="""#include <map>
+int n_keys(std::map<int, int> *m) {
+  return (int)m->size();
+}
+int main() {
+  std::map<int, int> m;
+  m.emplace(1, 2);
+  return n_keys(&m) == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="set_size",
+        dialect="set",
+        source="""#include <set>
+int n_vals(std::set<int> *s) {
+  return (int)s->size();
+}
+int main() {
+  std::set<int> s;
+  s.insert(1);
+  return n_vals(&s) == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="list_clear",
+        dialect="list",
+        source="""#include <list>
+void wipe_l(std::list<int> *l) {
+  l->clear();
+}
+int main() {
+  std::list<int> l;
+  l.push_back(1);
+  wipe_l(&l);
+  return l.empty() ? 0 : 1;
 }
 """,
     ),

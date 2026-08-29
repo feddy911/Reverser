@@ -1,0 +1,20 @@
+id: ghidra-cstring_strcat-cat_b
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid cat_b(char *d)\r\
+  \n\r\n{\r\n  size_t sVar1;\r\n  char *in_RCX;\r\n  \r\n  sVar1 = strlen(in_RCX);\r\
+  \n  (in_RCX + sVar1)[0] = 'b';\r\n  (in_RCX + sVar1)[1] = '\\0';\r\n  return;\r\n\
+  }"
+guessed_name: cat_b
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  char *in_stack_ffffffffffffffc8;\r\n\
+    \  char a [4];\r\n  \r\n  __main();\r\n  cat_b(in_stack_ffffffffffffffc8);\r\n\
+    \  return 1;\r\n}"
+contains:
+- cat_b
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump cstring_strcat; review before accept
+gcc_fingerprint: ''

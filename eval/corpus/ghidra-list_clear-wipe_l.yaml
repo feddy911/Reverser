@@ -1,0 +1,24 @@
+id: ghidra-list_clear-wipe_l
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid wipe_l(list<int,_std::allocator<int>_>\
+  \ *l)\r\n\r\n{\r\n  list<int,_std::allocator<int>_> *in_stack_ffffffffffffffd8;\r\
+  \n  \r\n  std::__cxx11::list<int,_std::allocator<int>_>::clear(in_stack_ffffffffffffffd8);\r\
+  \n  return;\r\n}"
+guessed_name: wipe_l
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  bool bVar1;\r\n  list<int,_std::allocator<int>_>\
+    \ *in_stack_ffffffffffffffa8;\r\n  value_type_conflict *in_stack_ffffffffffffffb0;\r\
+    \n  list<int,_std::allocator<int>_> l;\r\n  \r\n  __main();\r\n  std::__cxx11::list<int,_std::allocator<int>_>::list(in_stack_ffffffffffffffa8);\r\
+    \n  std::__cxx11::list<int,_std::allocator<int>_>::push_back\r\n            (in_stack_ffffffffffffffa8,in_stack_ffffffffffffffb0);\r\
+    \n  wipe_l(in_stack_ffffffffffffffa8);\r\n  bVar1 = std::__cxx11::list<int,_std::allocator<int>_>::empty(in_stack_ffffffffffffffa8);\r\
+    \n  std::__cxx11::list<int,_std::allocator<int>_>::~list(in_stack_ffffffffffffffa8);\r\
+    \n  return (uint)!bVar1;\r\n}"
+contains:
+- wipe_l
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump list_clear; review before accept
+gcc_fingerprint: ''

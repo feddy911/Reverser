@@ -1,0 +1,25 @@
+id: ghidra-string_push_back-add_x
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nvoid add_x(string *s)\r\
+  \n\r\n{\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *in_stack_ffffffffffffffd8;\r\
+  \n  char in_stack_ffffffffffffffe0;\r\n  \r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::push_back\r\
+  \n            (in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);\r\n  return;\r\
+  \n}"
+guessed_name: add_x
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  size_type sVar1;\r\n  basic_string<char,_std::char_traits<char>,_std::allocator<char>_>\
+    \ *in_stack_ffffffffffffffa8;\r\n  string a;\r\n  \r\n  __main();\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::basic_string\r\
+    \n            (in_stack_ffffffffffffffa8);\r\n  add_x(in_stack_ffffffffffffffa8);\r\
+    \n  sVar1 = std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::size\r\
+    \n                    (in_stack_ffffffffffffffa8);\r\n  std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::~basic_string\r\
+    \n            (in_stack_ffffffffffffffa8);\r\n  return (uint)(sVar1 != 1);\r\n\
+    }"
+contains:
+- add_x
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump string_push_back; review before accept
+gcc_fingerprint: ''

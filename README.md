@@ -66,7 +66,7 @@ py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json
 
 Новые rewrite в `ghidra_cpp.py` / `assembler.py` не добавляются по итогам одного exe.
 Сначала фикстура в `eval/corpus/<id>.yaml` (сниппет + recipe + contains / not_contains), затем рецепт.
-Схема полей: `eval/corpus/_schema.yaml`. Сейчас **110** загружаемых фикстур.
+Схема полей: `eval/corpus/_schema.yaml`. Сейчас **121** загружаемых фикстур.
 
 ```bash
 py -m src.analysis.eval_corpus
@@ -90,6 +90,10 @@ py -m src.analysis.gen_corpus --ghidra --config config.yaml
 
 `--vary` переименовывает идентификаторы в фикстурах: рецепт не должен быть приклеен к `prefixPtr`.
 
+Правило наполнения (Q1): дамп принимают в корпус, если он зелёный **без нового regex**, либо есть честный
+`gcc_fingerprint` и фикстура **до** рецепта. Не плодить compile-ok YAML с пустым отпечатком ради счётчика.
+Красные generator-дампы ниже не чинить.
+
 Librarian собирает черновик YAML из дампа и принимает его в `eval/corpus/` только после зелёного `eval_case`.
 Имена held-out / сэмплов (`heldout`, `pointcloud`, `echofilter`, `mycollatz`, …) отклоняются.
 
@@ -98,7 +102,7 @@ py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-
 py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-dir output/librarian_draft --accept-compiled
 ```
 
-Целиком зелёные generator-дампы (assemble + gcc, без held-out): `hypot_sqrt`, `mingw_main`, `vector_reserve`, `iostream_shift`, `string_assign`, `string_find`, `set_count`, `algo_sort`, `chrono_cast`, `pair_first`, `string_substr`, `umap_count`, `vector_empty`, `string_compare`, `list_size`, `map_emplace`, `algo_reverse`, `string_append`, `vector_clear`, `cmath_fabs`, `string_erase`, `vector_resize`, `cstring_memcpy`, `cstring_memcmp`, `string_length`, `vector_pop_back`, `utility_swap`, `cstring_strlen`, `cstring_memset`, `string_c_str`, `vector_size`, `cmath_pow`, `cstring_strcmp`, `cstring_memmove`, `cstring_strcpy`, `string_clear`, `string_data`, `string_empty`, `vector_capacity`, `cmath_floor`, `cmath_sin`, `cstdio_printf`, `cmath_ceil`, `cmath_cos`, `cstring_strncpy`, `cstdio_sprintf`, `cstdlib_atoi`, `string_resize`, `string_reserve`, `pair_second`, `list_empty`, `set_empty`.
+Целиком зелёные generator-дампы (assemble + gcc, без held-out): `hypot_sqrt`, `mingw_main`, `vector_reserve`, `iostream_shift`, `string_assign`, `string_find`, `set_count`, `algo_sort`, `chrono_cast`, `pair_first`, `string_substr`, `umap_count`, `vector_empty`, `string_compare`, `list_size`, `map_emplace`, `algo_reverse`, `string_append`, `vector_clear`, `cmath_fabs`, `string_erase`, `vector_resize`, `cstring_memcpy`, `cstring_memcmp`, `string_length`, `vector_pop_back`, `utility_swap`, `cstring_strlen`, `cstring_memset`, `string_c_str`, `vector_size`, `cmath_pow`, `cstring_strcmp`, `cstring_memmove`, `cstring_strcpy`, `string_clear`, `string_data`, `string_empty`, `vector_capacity`, `cmath_floor`, `cmath_sin`, `cstdio_printf`, `cmath_ceil`, `cmath_cos`, `cstring_strncpy`, `cstdio_sprintf`, `cstdlib_atoi`, `string_resize`, `string_reserve`, `pair_second`, `list_empty`, `set_empty`, `cmath_log`, `cmath_exp`, `cmath_round`, `cstring_strcat`, `cstdio_puts`, `cstdio_snprintf`, `string_push_back`, `map_size`, `set_size`, `list_clear`.
 
 Compiler agent классифицирует gcc-диагностики по `gcc_fingerprint` корпуса
 (`src/agents/compiler.py` `match_errors`). Это и есть P3: детерминированный
@@ -106,9 +110,9 @@ gcc→recipe_id, уже включён в per-fn и TU compile-fix. Извест
 Неизвестный — один LLM-проход и YAML-черновик (не патч sanitizer).
 Scoring ML (`train_scorer`) не используется как compile-oracle.
 
-Из 110 фикстур около половины — compile-ok дампы генератора с пустым fingerprint
-(регрессия рецепта). В классификатор входят только классы с непустым
-`gcc_fingerprint`. Гейт классификатора: `py -m src.analysis.eval_classifier`.
+Из 121 фикстур 55 с `gcc_fingerprint` (классификатор), остальные — compile-ok
+регрессия рецепта. Гейт классификатора синтезирует probe-сообщение из regex
+(или берёт `gcc_probe`) и проверяет, что `match_errors` попадает в свой id.
 
 Critic (`critic.json`) принимает прогон только при compile ∧ fidelity ∧ identity:
 подмена `starts_with` на `std::sort` — reject, даже если TU зелёный.
@@ -176,8 +180,8 @@ tests/
 - Не запускайте недоверенные бинарники без изоляции: Ghidra загружает файл целиком.
 - Полный multi-binary ML-датасет (5–10 labeled) — следующий шаг: наполните `eval/` и переобучите scorer.
 - Generator-дампы, которые ещё не собираются целиком (очередь корпуса, не PointCloud):
-  `map_count` (Ghidra пишет `mapped_type*` для `operator[]`, это `T&`),
+  `map_count` (`mapped_type*` для `operator[]`, это `T&`),
   `init_list_vector` (`reference` как `T&`, не `T*`),
-  `chrono_cast` (лишние template-аргументы `duration_cast`, приватный `__r`, ctor из `int*`),
+  `deque_push` / `uset_count` / `mset_count` (`this` в сигнатуре),
   `fstream_write` (`ios::good()` без объекта — без честного receiver не чинить),
-  `optional_value` (Ghidra печатает внутренности `remove_cv_t`, не user-API).
+  `optional_value` / `algo_fill` (внутренности `remove_cv_t` / `__fill_a1`).

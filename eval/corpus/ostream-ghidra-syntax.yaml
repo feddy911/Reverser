@@ -13,4 +13,6 @@ not_contains:
   - "*)std::cout"
   - "::operator<<"
 compile: false
+gcc_probe:
+  - "cannot convert 'std::basic_ostream<char>' to 'std::basic_ostream<char>*' in assignment"
 notes: Ghidra iostream this-pointer + operator<<

@@ -254,7 +254,9 @@ def _rewrite_one_call(typ: str, meth: str, dtor: bool, args: list[str]) -> str |
     }:
         a0 = extra[0]
         if re.fullmatch(r"[A-Za-z_]\w*", a0):
-            extra[0] = f"*({a0})"
+            # string::push_back takes char by value; vector::push_back gets T*.
+            if not (meth == "push_back" and last in {"basic_string", "string"}):
+                extra[0] = f"*({a0})"
     if extra and meth == "insert" and last in _ASSOC_INDEX:
         a0 = extra[0]
         if re.fullmatch(r"[A-Za-z_]\w*", a0):

@@ -8,6 +8,7 @@ is `py -m src.analysis.eval_corpus`, not a green TU on the last sample.
 YAML fields:
   id, profile, recipe, ghidra_cpp
   gcc_fingerprint   optional regex (Compiler agent match_errors)
+  gcc_probe         optional gcc message(s) used by eval_classifier
   contains / not_contains
   compile           syntax-check the recipe output (skipped if no compiler)
   requires          e.g. [gmp] — skip compile if the header is missing
@@ -39,6 +40,7 @@ class CorpusCase:
     ghidra_cpp: str
     path: Path
     gcc_fingerprint: str = ""
+    gcc_probe: List[str] = field(default_factory=list)
     contains: List[str] = field(default_factory=list)
     not_contains: List[str] = field(default_factory=list)
     compile: bool = False
@@ -80,6 +82,7 @@ def load_case(path: Path) -> CorpusCase:
         ghidra_cpp=cpp,
         path=path,
         gcc_fingerprint=str(data.get("gcc_fingerprint") or ""),
+        gcc_probe=_as_str_list(data.get("gcc_probe") or data.get("gcc_probes")),
         contains=_as_str_list(data.get("contains")),
         not_contains=_as_str_list(data.get("not_contains")),
         compile=bool(data.get("compile", False)),

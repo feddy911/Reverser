@@ -94,6 +94,27 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertIn("member-call-rewrite", vec.known_ids)
         self.assertNotIn("optional-value-or", vec.known_ids)
 
+    def test_thunk_dat_and_word_fingerprints_split(self):
+        cases = load_corpus()
+        thunk = match_errors(
+            [{"message": "'thunk_FUN_140010000' was not declared in this scope"}],
+            cases,
+        )
+        dat = match_errors(
+            [{"message": "'DAT_14002db14' was not declared in this scope"}],
+            cases,
+        )
+        conv = match_errors(
+            [{"message": "cannot convert 'ghidra_word*' to 'undefined*'"}],
+            cases,
+        )
+        self.assertIn("ghidra-word-thunk", thunk.known_ids)
+        self.assertNotIn("thunk-dat-stubs", thunk.known_ids)
+        self.assertIn("thunk-dat-stubs", dat.known_ids)
+        self.assertNotIn("ghidra-word-thunk", dat.known_ids)
+        self.assertIn("dat-addr-as-byte-ptr", conv.known_ids)
+        self.assertNotIn("ghidra-word-thunk", conv.known_ids)
+
     def test_unknown_diagnostic_needs_llm_and_proposal(self):
         cases = load_corpus()
         decision = match_errors(

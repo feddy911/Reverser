@@ -3,6 +3,8 @@
 # id: string
 # profile: msvc_x64_debug | gcc_pe_x64 | gcc_elf_x64 | generic | ...
 # gcc_fingerprint: optional regex of a gcc diagnostic this class produces
+# gcc_probe: optional message or list; eval_classifier uses these instead of
+#            synthesizing a probe from the regex
 # recipe: sanitize | assemble | sanitize_then_assemble
 # ghidra_cpp: |  snippet as Ghidra printed it
 # contains / not_contains: strings that must (not) appear after the recipe

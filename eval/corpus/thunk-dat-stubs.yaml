@@ -1,6 +1,6 @@
 id: thunk-dat-stubs
 profile: msvc_x64_debug
-gcc_fingerprint: "'thunk_FUN_.*' was not declared|'DAT_.*' was not declared"
+gcc_fingerprint: "'DAT_.*' was not declared"
 recipe: assemble
 guessed_name: go
 ghidra_cpp: |

@@ -1,0 +1,19 @@
+id: ghidra-string-push-char
+profile: generic
+gcc_fingerprint: "invalid type argument of unary '\\*' \\(have 'char'\\)"
+recipe: sanitize
+ghidra_cpp: |
+  void add_x(string *s)
+  {
+    basic_string<char,_std::char_traits<char>,_std::allocator<char>_> *in_stack_ffffffffffffffd8;
+    char in_stack_ffffffffffffffe0;
+    std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>::push_back
+              (in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);
+  }
+contains:
+  - "->push_back(in_stack_ffffffffffffffe0)"
+not_contains:
+  - "*(in_stack_ffffffffffffffe0)"
+  - "::push_back"
+compile: true
+notes: "Ghidra string::push_back(this, char) is by value; do not deref like vector T*"

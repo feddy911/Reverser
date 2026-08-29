@@ -1,6 +1,6 @@
 id: ghidra-word-thunk
 profile: gcc_pe_x64
-gcc_fingerprint: "'thunk_FUN_.*' was not declared|cannot convert.*ghidra_word"
+gcc_fingerprint: "'thunk_FUN_.*' was not declared"
 recipe: assemble
 guessed_name: go
 ghidra_cpp: |

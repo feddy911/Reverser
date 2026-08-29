@@ -7,8 +7,9 @@ from __future__ import annotations
 
 Cases with an empty fingerprint are compile-ok regressions and are not
 classified. Duplicate fingerprint strings fail. Invalid regex fails.
-Pairwise overlaps are reported; they do not fail the gate (several
-diagnostics can share a skip-LLM hit).
+Each synthesized (or explicit gcc_probe) message must hit its own case.
+Probe collisions are reported; they do not fail the default gate — related
+recipes may share a skip-LLM diagnostic (e.g. ostream sanitize vs assemble).
 """
 
 import argparse
@@ -16,14 +17,123 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
-from src.agents.compiler import match_errors
+from src.agents.compiler import _safe_search, match_errors
 from src.analysis.corpus import CorpusCase, DEFAULT_CORPUS_DIR, load_corpus
 
 
 def _with_fp(cases: Sequence[CorpusCase]) -> List[CorpusCase]:
     return [c for c in cases if (c.gcc_fingerprint or "").strip()]
+
+
+def split_alts(pattern: str) -> List[str]:
+    """Split a fingerprint on top-level unescaped ``|`` (not inside ``[]``)."""
+    parts: List[str] = []
+    buf: List[str] = []
+    in_class = False
+    escaped = False
+    for ch in pattern or "":
+        if escaped:
+            buf.append(ch)
+            escaped = False
+            continue
+        if ch == "\\":
+            buf.append(ch)
+            escaped = True
+            continue
+        if ch == "[" and not in_class:
+            in_class = True
+            buf.append(ch)
+            continue
+        if ch == "]" and in_class:
+            in_class = False
+            buf.append(ch)
+            continue
+        if ch == "|" and not in_class:
+            parts.append("".join(buf))
+            buf = []
+            continue
+        buf.append(ch)
+    parts.append("".join(buf))
+    return [p for p in parts if p]
+
+
+def _class_token(cls: str) -> str:
+    body = cls[1:] if cls.startswith("^") else cls
+    if "0-9" in body and "A-Z" not in body and "a-z" not in body:
+        return "0"
+    if "A-Z" in body:
+        return "C"
+    if "a-z" in body:
+        return "a"
+    return "A"
+
+
+def regex_to_probe(pattern: str) -> str:
+    """Build a gcc-like string that ``pattern`` should match.
+
+    Fingerprints in this corpus are diagnostic regexes, not arbitrary REs.
+    ``.*`` becomes a space; character classes become one representative char.
+    """
+    s = pattern or ""
+    out: List[str] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if ch == "\\" and i + 1 < n:
+            out.append(s[i + 1])
+            i += 2
+            continue
+        if ch == "[":
+            j = i + 1
+            if j < n and s[j] == "^":
+                j += 1
+            while j < n and s[j] != "]":
+                if s[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                j += 1
+            cls = s[i + 1 : j]
+            token = _class_token(cls)
+            i = j + 1 if j < n else n
+            if i < n and s[i] in "*+?":
+                q = s[i]
+                i += 1
+                if q == "+":
+                    out.append(token)
+            else:
+                out.append(token)
+            continue
+        if ch == "." and i + 1 < n and s[i + 1] == "*":
+            out.append(" ")
+            i += 2
+            continue
+        if ch == "." and i + 1 < n and s[i + 1] == "+":
+            out.append("X")
+            i += 2
+            continue
+        if ch == ".":
+            out.append("X")
+            i += 1
+            continue
+        if ch in "*+?":
+            i += 1
+            continue
+        if ch in "()":
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def probes_for_case(case: CorpusCase) -> List[str]:
+    explicit = [p.strip() for p in (case.gcc_probe or []) if str(p).strip()]
+    if explicit:
+        return explicit
+    return [regex_to_probe(alt) for alt in split_alts(case.gcc_fingerprint)]
 
 
 def _regex_error(pattern: str) -> Optional[str]:
@@ -39,21 +149,6 @@ def _duplicate_groups(cases: Sequence[CorpusCase]) -> List[List[str]]:
     for c in cases:
         buckets.setdefault(c.gcc_fingerprint.strip(), []).append(c.id)
     return [ids for ids in buckets.values() if len(ids) > 1]
-
-
-def _pairwise_overlaps(cases: Sequence[CorpusCase]) -> List[Tuple[str, str]]:
-    """Pattern A matches pattern-string B (or vice versa)."""
-    from src.agents.compiler import _safe_search
-
-    out: List[Tuple[str, str]] = []
-    items = list(cases)
-    for i, a in enumerate(items):
-        for b in items[i + 1 :]:
-            if _safe_search(a.gcc_fingerprint, b.gcc_fingerprint) or _safe_search(
-                b.gcc_fingerprint, a.gcc_fingerprint
-            ):
-                out.append((a.id, b.id))
-    return out
 
 
 def eval_classifier(
@@ -72,15 +167,42 @@ def eval_classifier(
         if _regex_error(c.gcc_fingerprint)
     ]
     duplicates = _duplicate_groups(labeled)
-    overlaps = _pairwise_overlaps(labeled)
-    self_miss = []
-    from src.agents.compiler import _safe_search
 
-    for c in labeled:
-        if not _safe_search(c.gcc_fingerprint, c.gcc_fingerprint):
-            self_miss.append(c.id)
+    self_miss: List[Dict[str, Any]] = []
+    collisions: List[Dict[str, Any]] = []
+    seen_pairs = set()
+    for case in labeled:
+        probes = probes_for_case(case)
+        if not probes:
+            self_miss.append({"id": case.id, "probe": "", "hits": []})
+            continue
+        for probe in probes:
+            if not _safe_search(case.gcc_fingerprint, probe):
+                self_miss.append({
+                    "id": case.id,
+                    "probe": probe,
+                    "hits": [],
+                    "reason": "fingerprint does not match synthesized probe",
+                })
+                continue
+            decision = match_errors([{"message": probe}], labeled)
+            hits = decision.known_ids
+            if case.id not in hits:
+                self_miss.append({"id": case.id, "probe": probe, "hits": hits})
+                continue
+            extra = [h for h in hits if h != case.id]
+            for other in extra:
+                pair = tuple(sorted((case.id, other)))
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                collisions.append({
+                    "a": case.id,
+                    "b": other,
+                    "probe": probe,
+                })
 
-    n_fail = int(bool(invalid) or bool(duplicates))
+    n_fail = int(bool(invalid) or bool(duplicates) or bool(self_miss))
     return {
         "n_cases": len(cases),
         "n_with_fp": len(labeled),
@@ -89,10 +211,10 @@ def eval_classifier(
         "invalid_regex": invalid,
         "n_duplicate_groups": len(duplicates),
         "duplicate_fingerprints": duplicates,
-        "n_overlaps": len(overlaps),
-        "overlaps": [{"a": a, "b": b} for a, b in overlaps],
         "n_self_miss": len(self_miss),
         "self_miss": self_miss,
+        "n_overlaps": len(collisions),
+        "overlaps": collisions,
         "ok": n_fail == 0,
     }
 
@@ -104,44 +226,36 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--dir", default=str(DEFAULT_CORPUS_DIR))
     parser.add_argument("--out", default="output/classifier_report.json")
     parser.add_argument("--id", action="append", dest="ids")
+    parser.add_argument(
+        "--fail-on-overlap",
+        action="store_true",
+        help="Also fail when a probe hits more than one recipe_id",
+    )
     args = parser.parse_args(argv)
 
     report = eval_classifier(Path(args.dir), ids=args.ids)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
-    status = "OK" if report["ok"] else "FAIL"
+    ok = report["ok"] and not (args.fail_on_overlap and report["n_overlaps"])
+    status = "OK" if ok else "FAIL"
     print(
         f"{status}: classifier fp={report['n_with_fp']}/{report['n_cases']} "
-        f"dup={report['n_duplicate_groups']} overlaps={report['n_overlaps']} "
-        f"-> {out}"
+        f"self_miss={report['n_self_miss']} dup={report['n_duplicate_groups']} "
+        f"overlaps={report['n_overlaps']} -> {out}"
     )
     for item in report["invalid_regex"]:
         print(f"  INVALID {item['id']}: {item['error']}")
     for group in report["duplicate_fingerprints"]:
         print(f"  DUP  {', '.join(group)}")
+    for miss in report["self_miss"]:
+        print(
+            f"  MISS {miss['id']}: probe={miss.get('probe')!r} "
+            f"hits={miss.get('hits')} {miss.get('reason') or ''}"
+        )
     for pair in report["overlaps"]:
-        print(f"  OVER {pair['a']} ~ {pair['b']}")
-    if report["self_miss"]:
-        print("  self-miss (pattern does not match its own text):")
-        for cid in report["self_miss"]:
-            print(f"    {cid}")
-
-    # Smoke: known ostream message still classified.
-    decision = match_errors(
-        [{
-            "message": (
-                "cannot convert 'std::basic_ostream<char>' to "
-                "'std::basic_ostream<char>*' in assignment"
-            )
-        }],
-        load_corpus(Path(args.dir)),
-    )
-    if "ostream-ghidra-syntax" not in decision.known_ids:
-        print("FAIL  smoke: ostream-ghidra-syntax missed")
-        return 1
-    print("  OK   smoke ostream-ghidra-syntax")
-    return 0 if report["ok"] else 1
+        print(f"  OVER {pair['a']} ~ {pair['b']}  probe={pair['probe']!r}")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

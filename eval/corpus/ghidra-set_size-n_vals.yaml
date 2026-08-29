@@ -1,0 +1,26 @@
+id: ghidra-set_size-n_vals
+profile: generic
+recipe: assemble
+ghidra_cpp: "/* WARNING: Unknown calling convention */\r\n\r\nint n_vals(set<int,_std::less<int>,_std::allocator<int>_>\
+  \ *s)\r\n\r\n{\r\n  size_type sVar1;\r\n  set<int,_std::less<int>,_std::allocator<int>_>\
+  \ *in_stack_ffffffffffffffd8;\r\n  \r\n  sVar1 = std::set<int,_std::less<int>,_std::allocator<int>_>::size(in_stack_ffffffffffffffd8);\r\
+  \n  return (int)sVar1;\r\n}"
+guessed_name: n_vals
+extra_functions:
+- name: main
+  cpp: "/* WARNING: Unknown calling convention -- yet parameter storage is locked\
+    \ */\r\n\r\nint main(void)\r\n\r\n{\r\n  int iVar1;\r\n  set<int,_std::less<int>,_std::allocator<int>_>\
+    \ *in_stack_ffffffffffffff78;\r\n  set<int,_std::less<int>,_std::allocator<int>_>\
+    \ *in_stack_ffffffffffffff80;\r\n  value_type_conflict *in_stack_ffffffffffffff88;\r\
+    \n  set<int,_std::less<int>,_std::allocator<int>_> s;\r\n  \r\n  __main();\r\n\
+    \  std::set<int,_std::less<int>,_std::allocator<int>_>::set(in_stack_ffffffffffffff78);\r\
+    \n  std::set<int,_std::less<int>,_std::allocator<int>_>::insert\r\n          \
+    \  (in_stack_ffffffffffffff80,in_stack_ffffffffffffff88);\r\n  iVar1 = n_vals(in_stack_ffffffffffffff78);\r\
+    \n  std::set<int,_std::less<int>,_std::allocator<int>_>::~set(in_stack_ffffffffffffff78);\r\
+    \n  return (uint)(iVar1 != 1);\r\n}"
+contains:
+- n_vals
+not_contains: []
+compile: true
+notes: librarian candidate from generator dump set_size; review before accept
+gcc_fingerprint: ''
