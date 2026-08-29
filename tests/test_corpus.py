@@ -46,6 +46,16 @@ class TestCorpusEval(unittest.TestCase):
             "\n".join(f"{r['id']}: {r.get('errors')}" for r in fails),
         )
 
+    def test_classifier_no_duplicate_fingerprints(self):
+        from src.analysis.eval_classifier import eval_classifier
+
+        report = eval_classifier()
+        self.assertGreaterEqual(report["n_with_fp"], 50)
+        self.assertTrue(
+            report["ok"],
+            f"invalid={report['invalid_regex']} dup={report['duplicate_fingerprints']}",
+        )
+
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):
     def test_restore_body_and_cache_stay_put(self):

@@ -71,6 +71,7 @@ py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json
 ```bash
 py -m src.analysis.eval_corpus
 py -m src.analysis.eval_corpus --dir eval/corpus --out output/corpus_report.json
+py -m src.analysis.eval_classifier
 ```
 
 Заморозка: не писать имена PointCloud / EchoFilter / MyCollatz / `starts_with` в sanitizer или assembler.

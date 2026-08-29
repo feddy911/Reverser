@@ -65,6 +65,35 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertFalse(decision.need_llm)
         self.assertIn("ostream-ghidra-syntax", decision.known_ids)
 
+    def test_undeclared_struct_does_not_eat_lowercase_idents(self):
+        cases = load_corpus()
+        decision = match_errors(
+            [{"message": "'deque' was not declared in this scope"}],
+            cases,
+        )
+        self.assertNotIn("undeclared-struct-type", decision.known_ids)
+        self.assertIn("bare-deque-template", decision.known_ids)
+        cloud = match_errors(
+            [{"message": "'CloudPt' was not declared in this scope"}],
+            cases,
+        )
+        self.assertIn("undeclared-struct-type", cloud.known_ids)
+
+    def test_optional_and_vector_member_fingerprints_split(self):
+        cases = load_corpus()
+        opt = match_errors(
+            [{"message": "'value_or' is not a member of 'std::optional<int>'"}],
+            cases,
+        )
+        vec = match_errors(
+            [{"message": "'reserve' is not a member of 'std::vector<int>'"}],
+            cases,
+        )
+        self.assertIn("optional-value-or", opt.known_ids)
+        self.assertNotIn("member-call-rewrite", opt.known_ids)
+        self.assertIn("member-call-rewrite", vec.known_ids)
+        self.assertNotIn("optional-value-or", vec.known_ids)
+
     def test_unknown_diagnostic_needs_llm_and_proposal(self):
         cases = load_corpus()
         decision = match_errors(

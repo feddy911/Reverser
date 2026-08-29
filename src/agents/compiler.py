@@ -42,9 +42,9 @@ def _safe_search(pattern: str, text: str) -> bool:
     if not pattern or not text:
         return False
     try:
-        return bool(re.search(pattern, text, re.IGNORECASE | re.DOTALL))
+        return bool(re.search(pattern, text, re.DOTALL))
     except re.error:
-        return pattern.lower() in text.lower()
+        return pattern in text
 
 
 def match_errors(

@@ -1,6 +1,6 @@
 id: optional-value-or
 profile: gcc_pe_x64
-gcc_fingerprint: "is not a member of"
+gcc_fingerprint: "is not a member of.*optional|'value_or' is not a member"
 recipe: sanitize
 ghidra_cpp: |
   int or_zero(optional<int> *p)

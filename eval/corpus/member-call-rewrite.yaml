@@ -1,6 +1,6 @@
 id: member-call-rewrite
 profile: gcc_pe_x64
-gcc_fingerprint: "is not a member of"
+gcc_fingerprint: "is not a member of.*vector|'reserve' is not a member"
 recipe: sanitize
 ghidra_cpp: |
   std::vector<unsigned long long>::reserve
