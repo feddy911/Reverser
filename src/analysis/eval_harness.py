@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-"""
-Eval harness (Phase 1): scoring-only прогон по манифесту бинарников/дампов.
+"""Scoring-only eval (Q6). Not the compile-gate.
 
-Примеры:
-  py -m src.analysis.eval_harness --manifest eval/manifest.example.yaml
+  py -m src.analysis.eval_harness --manifest eval/manifest.yaml
   py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json --name mini
+
+Missing ghidra_json paths are skipped (CI without output/cache).
+Does not assemble, compile, or write corpus recipes.
 """
 
 import argparse
@@ -152,37 +153,79 @@ def eval_entry(
     }
 
 
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_path(p: Optional[Path], manifest_path: Path) -> Optional[Path]:
+    if p is None:
+        return None
+    if p.is_absolute():
+        return p
+    for base in (manifest_path.parent, manifest_path.parent.parent, Path.cwd(), ROOT):
+        cand = (base / p).resolve()
+        if cand.exists():
+            return cand
+    return (ROOT / p).resolve()
+
+
+def _mean(values: List[Optional[float]]) -> Optional[float]:
+    nums = [float(v) for v in values if v is not None]
+    if not nums:
+        return None
+    return round(sum(nums) / len(nums), 3)
+
+
+def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    skipped = [r for r in results if r.get("skipped")]
+    failed = [r for r in results if r.get("error") and not r.get("skipped")]
+    scored = [
+        r for r in results
+        if not r.get("skipped") and not r.get("error")
+    ]
+    return {
+        "track": "scoring",
+        "not_compile_gate": True,
+        "n_scored": len(scored),
+        "n_skip": len(skipped),
+        "n_fail": len(failed),
+        "mean_recall_at_k_names": _mean(
+            [(r.get("metrics") or {}).get("recall_at_k_names") for r in scored]
+        ),
+        "mean_recall_at_k_names_filtered": _mean(
+            [
+                (r.get("metrics") or {}).get("recall_at_k_names_filtered")
+                for r in scored
+            ]
+        ),
+        "scored_names": [r.get("name") for r in scored],
+        "skipped_names": [r.get("name") for r in skipped],
+    }
+
+
 def run_manifest(manifest_path: Path, out_path: Path) -> Dict[str, Any]:
     data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
     entries = data.get("entries") or []
-    results = []
-    root = manifest_path.parent
+    results: List[Dict[str, Any]] = []
     for e in entries:
         name = str(e.get("name") or f"entry_{len(results)}")
         binary = Path(e["binary"]) if e.get("binary") else None
         ghidra_json = Path(e["ghidra_json"]) if e.get("ghidra_json") else None
         labels = Path(e["labels"]) if e.get("labels") else None
-        # resolve relative to manifest dir or repo root
-        for p in (binary, ghidra_json, labels):
-            pass
-        def _resolve(p: Optional[Path]) -> Optional[Path]:
-            if p is None:
-                return None
-            if p.is_absolute() and p.exists():
-                return p
-            for base in (root, Path.cwd()):
-                cand = (base / p).resolve()
-                if cand.exists():
-                    return cand
-            return (Path.cwd() / p).resolve()
-
+        gj = _resolve_path(ghidra_json, manifest_path)
+        if gj is None or not gj.exists():
+            results.append({
+                "name": name,
+                "skipped": True,
+                "reason": f"missing ghidra_json: {ghidra_json}",
+            })
+            continue
         try:
             results.append(
                 eval_entry(
                     name,
-                    binary=_resolve(binary),
-                    ghidra_json=_resolve(ghidra_json),
-                    labels_path=_resolve(labels),
+                    binary=_resolve_path(binary, manifest_path),
+                    ghidra_json=gj,
+                    labels_path=_resolve_path(labels, manifest_path),
                     user_names=list(e.get("user_names") or []) or None,
                     top_k=int(e.get("top_k") or data.get("top_k") or 15),
                 )
@@ -190,10 +233,14 @@ def run_manifest(manifest_path: Path, out_path: Path) -> Dict[str, Any]:
         except Exception as exc:
             results.append({"name": name, "error": str(exc)})
 
+    summary = summarize(results)
     report = {
         "manifest": str(manifest_path),
         "n_entries": len(results),
-        "n_ok": sum(1 for r in results if "error" not in r),
+        "n_ok": summary["n_scored"],
+        "n_skip": summary["n_skip"],
+        "n_fail": summary["n_fail"],
+        "summary": summary,
         "results": results,
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -202,7 +249,9 @@ def run_manifest(manifest_path: Path, out_path: Path) -> Dict[str, Any]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Reverser Phase-1 scoring eval harness")
+    parser = argparse.ArgumentParser(
+        description="Scoring-only eval (Q6). Not compile-gate."
+    )
     parser.add_argument("--manifest", help="YAML manifest with entries[]")
     parser.add_argument("--fixture", help="Single ghidra JSON fixture")
     parser.add_argument("--name", default="fixture", help="Name for --fixture run")
@@ -225,9 +274,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.error("Provide --manifest or --fixture")
         return 2
 
-    print(f"OK: eval {report.get('n_ok')}/{report.get('n_entries')} -> {out}")
+    print(
+        f"OK: scoring {report.get('n_ok')}/{report.get('n_entries')} "
+        f"skip={report.get('n_skip', 0)} fail={report.get('n_fail', 0)} -> {out}"
+    )
+    summary = report.get("summary") or {}
+    if summary.get("mean_recall_at_k_names_filtered") is not None:
+        print(
+            f"  mean filtered recall@k="
+            f"{summary['mean_recall_at_k_names_filtered']} "
+            f"(raw names={summary.get('mean_recall_at_k_names')})"
+        )
     for r in report.get("results") or []:
-        if "error" in r:
+        if r.get("skipped"):
+            print(f"  SKIP {r['name']}: {r.get('reason')}")
+        elif r.get("error"):
             print(f"  FAIL {r['name']}: {r['error']}")
         else:
             m = r.get("metrics") or {}
@@ -243,7 +304,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     else ""
                 )
             )
-    return 0 if report.get("n_ok") == report.get("n_entries") else 1
+    return 0 if int(report.get("n_fail") or 0) == 0 else 1
 
 
 if __name__ == "__main__":

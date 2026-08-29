@@ -1,6 +1,9 @@
 id: ghidra-multiline-return-proto
 profile: gcc_pe_x64
 gcc_fingerprint: "expected constructor, destructor, or type conversion before ';'|cannot convert 'std::unordered_map.*\\*' to 'int\\*'"
+gcc_probe:
+  - "expected constructor, destructor, or type conversion before ';' token"
+  - "cannot convert 'std::unordered_map<int, int>*' to 'int*' in return"
 recipe: assemble
 guessed_name: collect
 ghidra_cpp: |

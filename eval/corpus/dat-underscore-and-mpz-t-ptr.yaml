@@ -1,6 +1,9 @@
 id: dat-underscore-and-mpz-t-ptr
 profile: msvc_x64_debug
 gcc_fingerprint: "mpz_t was not declared|_DAT_"
+gcc_probe:
+  - "mpz_t was not declared in this scope"
+  - "'_DAT_14002e018' was not declared in this scope"
 recipe: sanitize
 ghidra_cpp: |
   void f(mpz_t *x) { (void)_DAT_14002e018; }

@@ -22,6 +22,12 @@ from typing import Any, Dict, List, Optional, Sequence
 from src.agents.compiler import _safe_search, match_errors
 from src.analysis.corpus import CorpusCase, DEFAULT_CORPUS_DIR, load_corpus
 
+# One gcc diagnostic, two recipes (sanitize vs assemble). Default gate stays
+# green; --fail-on-overlap ignores this pair only.
+EXPECTED_OVERLAP_PAIRS = {
+    frozenset({"ghidra-ostream-assemble", "ostream-ghidra-syntax"}),
+}
+
 
 def _with_fp(cases: Sequence[CorpusCase]) -> List[CorpusCase]:
     return [c for c in cases if (c.gcc_fingerprint or "").strip()]
@@ -151,6 +157,17 @@ def _duplicate_groups(cases: Sequence[CorpusCase]) -> List[List[str]]:
     return [ids for ids in buckets.values() if len(ids) > 1]
 
 
+def unexpected_overlaps(collisions: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Overlaps that are not the known ostream sanitize/assemble pair."""
+    out: List[Dict[str, Any]] = []
+    for item in collisions or []:
+        pair = frozenset((item.get("a"), item.get("b")))
+        if pair in EXPECTED_OVERLAP_PAIRS:
+            continue
+        out.append(dict(item))
+    return out
+
+
 def eval_classifier(
     directory: Optional[Path] = None,
     *,
@@ -202,11 +219,14 @@ def eval_classifier(
                     "probe": probe,
                 })
 
+    n_explicit = sum(1 for c in labeled if any(str(p).strip() for p in (c.gcc_probe or [])))
     n_fail = int(bool(invalid) or bool(duplicates) or bool(self_miss))
+    unexpected = unexpected_overlaps(collisions)
     return {
         "n_cases": len(cases),
         "n_with_fp": len(labeled),
         "n_empty_fp": len(cases) - len(labeled),
+        "n_explicit_probe": n_explicit,
         "n_invalid_regex": len(invalid),
         "invalid_regex": invalid,
         "n_duplicate_groups": len(duplicates),
@@ -215,6 +235,8 @@ def eval_classifier(
         "self_miss": self_miss,
         "n_overlaps": len(collisions),
         "overlaps": collisions,
+        "n_unexpected_overlaps": len(unexpected),
+        "unexpected_overlaps": unexpected,
         "ok": n_fail == 0,
     }
 
@@ -229,7 +251,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--fail-on-overlap",
         action="store_true",
-        help="Also fail when a probe hits more than one recipe_id",
+        help=(
+            "Fail on unexpected probe collisions. The ostream sanitize/assemble "
+            "pair is allowlisted (one gcc, two recipes). Not the default gate."
+        ),
+    )
+    parser.add_argument(
+        "--list-probes",
+        action="store_true",
+        help="Print each fingerprint class probe (explicit gcc_probe or synthesized)",
     )
     args = parser.parse_args(argv)
 
@@ -237,12 +267,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
-    ok = report["ok"] and not (args.fail_on_overlap and report["n_overlaps"])
+    overlap_fail = bool(args.fail_on_overlap and report["n_unexpected_overlaps"])
+    ok = report["ok"] and not overlap_fail
     status = "OK" if ok else "FAIL"
     print(
         f"{status}: classifier fp={report['n_with_fp']}/{report['n_cases']} "
         f"self_miss={report['n_self_miss']} dup={report['n_duplicate_groups']} "
-        f"overlaps={report['n_overlaps']} -> {out}"
+        f"overlaps={report['n_overlaps']} unexpected={report['n_unexpected_overlaps']} "
+        f"explicit_probe={report['n_explicit_probe']} -> {out}"
     )
     for item in report["invalid_regex"]:
         print(f"  INVALID {item['id']}: {item['error']}")
@@ -254,7 +286,25 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"hits={miss.get('hits')} {miss.get('reason') or ''}"
         )
     for pair in report["overlaps"]:
-        print(f"  OVER {pair['a']} ~ {pair['b']}  probe={pair['probe']!r}")
+        tag = (
+            "expected"
+            if frozenset((pair["a"], pair["b"])) in EXPECTED_OVERLAP_PAIRS
+            else "unexpected"
+        )
+        print(f"  OVER [{tag}] {pair['a']} ~ {pair['b']}  probe={pair['probe']!r}")
+    if args.list_probes:
+        cases = load_corpus(Path(args.dir))
+        if args.ids:
+            want = set(args.ids)
+            cases = [c for c in cases if c.id in want]
+        for case in _with_fp(cases):
+            src = (
+                "explicit"
+                if any(str(p).strip() for p in (case.gcc_probe or []))
+                else "synth"
+            )
+            for probe in probes_for_case(case):
+                print(f"  PROBE {case.id} [{src}] {probe!r}")
     return 0 if ok else 1
 
 

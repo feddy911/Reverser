@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.analysis.includes import collect_dynamic_includes, includes_from_calls, includes_from_dlls
-from src.analysis.prompts import PROFILES, system_prompt_for
+from src.analysis.prompts import PROFILES, system_prompt_for, toolchain_rules_for
 from src.analysis.triage import BinaryTriage, select_profile, triage_binary
 from src.ghidra.headless import find_analyze_headless, GhidraError
 
@@ -117,6 +117,9 @@ class TestPrompts(unittest.TestCase):
             system_prompt_for("___missing___"),
             system_prompt_for("generic"),
         )
+        rules = toolchain_rules_for("gcc_pe_x64")
+        self.assertIn("литералы", rules)
+        self.assertIn("ярлык", rules)
 
 
 class TestIncludes(unittest.TestCase):
@@ -259,6 +262,23 @@ class TestRuntimeNoise(unittest.TestCase):
         names = [s["name"] for s in top]
         self.assertEqual(names, ["main", "path_length", "collect_matches"])
         self.assertGreaterEqual(n_filt, 5)
+
+    def test_scoring_manifest_skips_missing_dumps(self):
+        from src.analysis.eval_harness import run_manifest
+
+        man = ROOT / "eval" / "manifest.yaml"
+        text = man.read_text(encoding="utf-8")
+        self.assertGreaterEqual(text.count("user_names:"), 8)
+        self.assertIn("taskboard", text)
+        self.assertIn("netpath", text)
+        with tempfile.TemporaryDirectory() as td:
+            report = run_manifest(man, Path(td) / "score.json")
+        self.assertEqual(report.get("n_fail"), 0)
+        self.assertGreaterEqual(report.get("n_ok") or 0, 1)
+        self.assertTrue((report.get("summary") or {}).get("not_compile_gate"))
+        src = (ROOT / "src" / "analysis" / "eval_harness.py").read_text(encoding="utf-8")
+        self.assertNotIn("compile_verify", src)
+        self.assertNotIn("ghidra_cpp", src)
 
     def test_eval_user_names_and_filter(self):
         from src.analysis.eval_harness import eval_entry

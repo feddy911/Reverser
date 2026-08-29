@@ -66,7 +66,7 @@ _RE_PATH = re.compile(r"(?:[A-Za-z]:)?(?:[\\/][^\s:'\"]+)+")
 _RE_AKA = re.compile(r"\s*\{aka\s+'[^']*'\}")
 _REFUSE_MINI = (
     "heldout", "pointcloud", "echofilter", "mycollatz", "xorcipher",
-    "inimini", "parse_ini",
+    "inimini", "parse_ini", "taskboard", "netpath",
 )
 
 

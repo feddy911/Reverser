@@ -21,7 +21,7 @@ from src.pipeline.metrics import RunMetrics
 logger = logging.getLogger("revllm.pipeline")
 GHIDRA_CACHE_KEY = "ghidra_full_v6"
 # Bump when restorer/polisher prompts or fidelity contract change.
-LLM_PROMPT_VER = "p3"
+LLM_PROMPT_VER = "p4"
 
 
 def _save_json(path: Path, data: Any) -> None:

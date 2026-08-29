@@ -59,12 +59,34 @@ class TestCorpusEval(unittest.TestCase):
         )
         report = eval_classifier()
         self.assertGreaterEqual(report["n_with_fp"], 50)
+        self.assertGreaterEqual(report["n_explicit_probe"], 10)
         self.assertEqual(
             report["n_self_miss"],
             0,
             report["self_miss"],
         )
+        self.assertEqual(
+            report["n_unexpected_overlaps"],
+            0,
+            report["unexpected_overlaps"],
+        )
         self.assertTrue(report["ok"], report)
+        pairs = {frozenset((o["a"], o["b"])) for o in report["overlaps"]}
+        self.assertIn(
+            frozenset({"ghidra-ostream-assemble", "ostream-ghidra-syntax"}),
+            pairs,
+        )
+
+    def test_explicit_gcc_probe_beats_synth(self):
+        from src.analysis.corpus import load_corpus
+        from src.analysis.eval_classifier import probes_for_case
+
+        cases = {c.id: c for c in load_corpus()}
+        ht = cases["ghidra-hashtable-priv-cur"]
+        probes = probes_for_case(ht)
+        self.assertEqual(len(probes), 3)
+        self.assertTrue(any("_M_current" in p for p in probes))
+        self.assertTrue(all("is protected" in p or "was not declared" in p for p in probes))
 
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):

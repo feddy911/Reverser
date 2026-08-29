@@ -51,16 +51,19 @@ Restorer берёт system/user rules из `src/analysis/prompts.py` по это
 py -m src.analysis.train_scorer --help
 ```
 
-## Eval harness (scoring-only)
+## Eval harness (scoring-only, Q6)
 
-Манифест: `eval/manifest.example.yaml`. Добавляйте бинарники + `ghidra_json` + labels.
+Отдельный трек от compile-gate. Манифест: `eval/manifest.yaml` — 9 помеченных
+бинарников (`user_names` / `labels_MyCollatz.json`). Нет дампа в `output/cache/` —
+запись пропускается (CI без Ghidra). Не assemble, не gcc, не рецепты.
 
 ```bash
-py -m src.analysis.eval_harness --manifest eval/manifest.example.yaml
+py -m src.analysis.eval_harness --manifest eval/manifest.yaml
 py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json
 ```
 
-Отчёт: `output/eval_report.json` (precision/recall@k при наличии labels).
+Отчёт: `output/eval_report.json` (recall@k по именам, в т.ч. после CRT-фильтра).
+`train_scorer` не является compile-oracle и не учится на gcc-диагностиках.
 
 ## Корпус диалекта Ghidra (compile-gate)
 
@@ -74,7 +77,8 @@ py -m src.analysis.eval_corpus --dir eval/corpus --out output/corpus_report.json
 py -m src.analysis.eval_classifier
 ```
 
-Заморозка: не писать имена PointCloud / EchoFilter / MyCollatz / `starts_with` в sanitizer или assembler.
+Заморозка: не писать имена PointCloud / EchoFilter / MyCollatz / IniMini /
+TaskBoard / NetPath / `starts_with` в sanitizer или assembler.
 Per-function compile-fix пишет `compile_fn/*_fix.cpp` и кэш `kind=compile_fn_fix`.
 Он **не** перезаписывает restore-кэш и не подменяет `cpp_code` для assemble.
 
@@ -126,12 +130,18 @@ gcc→recipe_id, уже включён в per-fn и TU compile-fix. Извест
 Scoring ML (`train_scorer`) не используется как compile-oracle.
 
 Из 134 фикстур 68 с `gcc_fingerprint` (классификатор), остальные — compile-ok
-регрессия рецепта. Гейт классификатора синтезирует probe-сообщение из regex
-(или берёт `gcc_probe`) и проверяет, что `match_errors` попадает в свой id.
+регрессия рецепта. Гейт синтезирует probe из regex или берёт явный `gcc_probe`
+(реалистичное gcc-сообщение, когда `.*` / усечённый alt врёт синтез) и
+проверяет, что `match_errors` попадает в свой id. Коллизия ostream
+sanitize/assemble — один gcc, два рецепта: гейт по умолчанию зелёный;
+`--fail-on-overlap` падает только на unexpected (ostream-пара в allowlist).
+`--list-probes` печатает explicit vs synth. Не учить RF/sklearn на диагностиках.
 
-Critic (`critic.json`) принимает прогон только при compile ∧ fidelity ∧ identity:
-подмена `starts_with` на `std::sort` — reject, даже если TU зелёный.
-`compile_ok` считается по собранному TU, не по compile-fix.
+Critic (`critic.json`) принимает прогон только при compile ∧ fidelity ∧ identity.
+Fidelity не маскирует пропуск литерала или `ext_calls` средним score ≥ 0.85 —
+это факты дампа. Identity ловит подмену `starts_with` на `std::sort`.
+Critic не требует угадать исходное имя из репозитория. `compile_ok` — собранный
+TU, не compile-fix. Restore-кэш: `LLM_PROMPT_VER=p4`.
 
 ## Held-out (P2)
 

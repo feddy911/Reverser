@@ -1,6 +1,8 @@
 id: ghidra-pointer-pair-fields
 profile: gcc_pe_x64
 gcc_fingerprint: "'pointer' \\{aka 'void\\*'\\} is not a pointer-to-object type"
+gcc_probe:
+  - "'pointer' {aka 'void*'} is not a pointer-to-object type"
 recipe: sanitize
 ghidra_cpp: |
   void show_val(void)

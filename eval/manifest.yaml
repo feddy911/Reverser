@@ -1,0 +1,88 @@
+# Scoring-only eval. Not the compile-gate (that is eval/corpus + eval_heldout).
+# Labels are user_names (and optional address JSON). Missing ghidra_json → skip.
+# Do not write sanitizer recipes from these binaries.
+
+top_k: 15
+
+entries:
+  - name: mini_fixture
+    ghidra_json: tests/fixtures/mini_ghidra.json
+    user_names:
+      - FUN_140001000
+
+  - name: mycollatz
+    binary: samples/MyCollatz.exe
+    ghidra_json: output/cache/71a68905d387ebeb8b06d6b66b0bf0ca/ghidra_full_v6.json
+    labels: labels_MyCollatz.json
+    user_names:
+      - main
+
+  - name: echofilter
+    binary: samples/EchoFilter.exe
+    ghidra_json: output/cache/e5be6940ebcc0a2624768b7cfc79b83c/ghidra_full_v6.json
+    user_names:
+      - main
+      - print_report
+      - collect_matches
+      - starts_with
+
+  - name: pointcloud
+    binary: samples/PointCloud.exe
+    ghidra_json: output/cache/288b2c2990f4a6006f2ad54df43d32b0/ghidra_full_v6.json
+    user_names:
+      - main
+      - nearest_index
+      - path_length
+      - distance
+      - print_point
+
+  - name: inimini
+    binary: samples/IniMini.exe
+    ghidra_json: output/cache/b1ef8079244d07cf04dc7c27732bcc06/ghidra_full_v6.json
+    user_names:
+      - main
+      - dump_map
+      - parse_line
+      - parse_ini
+      - trim
+
+  - name: xorcipher
+    binary: samples/XorCipher.exe
+    ghidra_json: output/cache/bd402e7689cc5b9cc2de7d10d4323ed6/ghidra_full_v6.json
+    user_names:
+      - main
+      - roundtrip_ok
+      - xor_inplace
+      - print_hex
+
+  - name: fibtimer
+    binary: samples/FibTimer.exe
+    ghidra_json: output/cache/a953bc689be608166c6c3a74ce143f81/ghidra_full_v6.json
+    user_names:
+      - main
+      - fib_series
+      - fib_iter
+      - print_series
+
+  - name: taskboard
+    binary: samples/TaskBoard.exe
+    ghidra_json: output/cache/97709cbd3560f8acef1d2ebfd901009d/ghidra_full_v6.json
+    user_names:
+      - main
+      - load_board
+      - rank_open
+      - tally_owners
+      - print_ranked
+      - print_tally
+      - make_item
+      - is_open
+
+  - name: netpath
+    binary: samples/NetPath.exe
+    ghidra_json: output/cache/0f8d397451548395ea9030636e47620c/ghidra_full_v6.json
+    user_names:
+      - main
+      - link_cities
+      - cheapest_path
+      - print_route
+      - collect_nodes

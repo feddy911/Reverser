@@ -1,6 +1,8 @@
 id: ghidra-string-begin-char-cast
 profile: gcc_pe_x64
 gcc_fingerprint: "invalid cast from type '.*iterator' to type 'char\\*'"
+gcc_probe:
+  - "invalid cast from type 'const_iterator' to type 'char*'"
 recipe: sanitize
 ghidra_cpp: |
   void ltrim_space(string *s)

@@ -1,6 +1,8 @@
 id: ghidra-const-iterator-not-struct
 profile: gcc_pe_x64
 gcc_fingerprint: "no matching function for call to.*erase\\(__const_iterator"
+gcc_probe:
+  - "no matching function for call to 'std::__cxx11::basic_string<char>::erase(__const_iterator)'"
 recipe: assemble
 guessed_name: ltrim_space
 ghidra_cpp: |

@@ -1,6 +1,8 @@
 id: ghidra-ostream-assemble
 profile: gcc_pe_x64
 gcc_fingerprint: "cannot convert.*basic_ostream"
+gcc_probe:
+  - "cannot convert 'std::basic_ostream<char>*' to 'std::basic_ostream<char>' in assignment"
 recipe: assemble
 guessed_name: go
 ghidra_cpp: |

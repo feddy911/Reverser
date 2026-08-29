@@ -9,6 +9,8 @@ Built with MinGW (`samples/build_samples.ps1`): `-std=c++17 -O0 -g`.
 | `IniMini.exe` | parsing, maps, branching |
 | `XorCipher.exe` | byte loops, buffers |
 | `FibTimer.exe` | numeric loops, chrono |
+| `TaskBoard.exe` | structs, vector, map, sort (apply-only; рецепты по нему не пишут) |
+| `NetPath.exe` | граф, pair, unordered_map (apply-only; рецепты по нему не пишут) |
 | `MyCollatz.exe` | legacy GMP/MSVC Debug эталон |
 
 Rebuild:

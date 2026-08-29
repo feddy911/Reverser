@@ -1,4 +1,4 @@
-"""Run Reverser pipeline on all samples/*.exe except MyCollatz (optional include)."""
+"""Run Reverser pipeline on samples/*.exe except MyCollatz (optional include)."""
 from __future__ import annotations
 
 import json
@@ -17,6 +17,8 @@ SAMPLES = [
     "IniMini.exe",
     "XorCipher.exe",
     "FibTimer.exe",
+    "TaskBoard.exe",
+    "NetPath.exe",
 ]
 
 

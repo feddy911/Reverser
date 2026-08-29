@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from src.agents.assembler import assemble
 from src.analysis.features import FEATURE_KEYS, derive_features, extract_features, FeatureIndex
-from src.analysis.fidelity import check_function
+from src.analysis.fidelity import check_function, dump_facts_ok
 from src.analysis.scorer import GhidraFunctionScorer
 from src.domains.pack import NONE_PACK
 
@@ -354,6 +354,7 @@ class TestFidelitySmoke(unittest.TestCase):
         bad = check_function(entry, 'puts("x"); // 50000', [])
         self.assertTrue(bad["drift"])
         self.assertEqual(len(bad["missing_literals"]), 2)
+        self.assertFalse(dump_facts_ok(bad))
         self.assertLess(bad["fidelity"], 1.0)
 
     def test_noise_calls_ignored(self):

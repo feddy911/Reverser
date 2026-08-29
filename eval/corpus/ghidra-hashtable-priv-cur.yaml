@@ -1,6 +1,10 @@
 id: ghidra-hashtable-priv-cur
 profile: gcc_pe_x64
-gcc_fingerprint: "'_M_cur' is protected|'__node_type' was not declared|_M_current' is protected"
+gcc_fingerprint: "'_M_cur' is protected|'__node_type' was not declared|'_M_current' is protected"
+gcc_probe:
+  - "'_M_cur' is protected within this context"
+  - "'__node_type' was not declared in this scope"
+  - "'_M_current' is protected within this context"
 recipe: sanitize
 ghidra_cpp: |
   void take_end(_Node_iterator_base<int,_true> local_28, unordered_map<int,int> *m)

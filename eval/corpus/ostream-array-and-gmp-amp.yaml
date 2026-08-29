@@ -1,6 +1,9 @@
 id: ostream-array-and-gmp-amp
 profile: msvc_x64_debug
 gcc_fingerprint: "basic_ostream.*incomplete|cannot convert mpz"
+gcc_probe:
+  - "'class std::basic_ostream<char>' is incomplete"
+  - "cannot convert mpz_srcptr to mpz_ptr"
 recipe: sanitize
 ghidra_cpp: |
   void f(mpz_srcptr p) {

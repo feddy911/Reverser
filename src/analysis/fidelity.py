@@ -156,3 +156,12 @@ def check_function(
         "missing_calls": missing_calls,
         "missing_consts": missing_consts[:10],
     }
+
+
+def dump_facts_ok(fid: Dict[str, Any]) -> bool:
+    """Literals and ext_calls from the dump must appear in restore.
+
+    The numeric score is not a substitute: many constants can keep
+    fidelity >= 0.85 while a string or import is gone.
+    """
+    return not (fid.get("missing_literals") or fid.get("missing_ext"))

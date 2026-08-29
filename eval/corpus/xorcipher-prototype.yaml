@@ -1,6 +1,9 @@
 id: xorcipher-prototype
 profile: gcc_pe_x64
 gcc_fingerprint: "vector.*was not declared|string does not name a type"
+gcc_probe:
+  - "'vector' was not declared in this scope"
+  - "string does not name a type"
 recipe: sanitize
 ghidra_cpp: |
   string * from_bytes(vector<unsigned_char,_std::allocator<unsigned_char>_> *buf);

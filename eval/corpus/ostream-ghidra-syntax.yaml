@@ -15,4 +15,5 @@ not_contains:
 compile: false
 gcc_probe:
   - "cannot convert 'std::basic_ostream<char>' to 'std::basic_ostream<char>*' in assignment"
+  - "invalid conversion from 'std::basic_ostream<char>*' to 'int'"
 notes: Ghidra iostream this-pointer + operator<<

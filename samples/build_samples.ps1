@@ -19,7 +19,9 @@ $Targets = @(
     "PointCloud",
     "IniMini",
     "XorCipher",
-    "FibTimer"
+    "FibTimer",
+    "TaskBoard",
+    "NetPath"
 )
 
 Write-Host "Compiler: $Gpp"
@@ -45,4 +47,6 @@ Write-Host "Smoke-run:"
 & (Join-Path $Samples "IniMini.exe") | Select-Object -First 6 | Out-Host
 & (Join-Path $Samples "XorCipher.exe") | Out-Host
 & (Join-Path $Samples "FibTimer.exe") 10 | Out-Host
+& (Join-Path $Samples "TaskBoard.exe") | Out-Host
+& (Join-Path $Samples "NetPath.exe") | Out-Host
 Write-Host "Done."

@@ -46,6 +46,12 @@ FROZEN_TOKENS: Sequence[str] = (
     "xor_inplace",
     "FibTimer",
     "fib_series",
+    "TaskBoard",
+    "rank_open",
+    "tally_owners",
+    "NetPath",
+    "link_cities",
+    "cheapest_path",
 )
 
 FROZEN_PATHS: Sequence[Path] = (

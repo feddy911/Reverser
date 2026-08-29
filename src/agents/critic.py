@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from src.analysis.fidelity import build_call_tokens, check_function
+from src.analysis.fidelity import build_call_tokens, check_function, dump_facts_ok
 from src.analysis.ghidra_cpp import _first_function_span
 
 FAMOUS_ALGOS: Tuple[str, ...] = (
@@ -145,9 +145,22 @@ def review_function(
     ident_reasons = identity_issues(entry, code)
     unexpected = unexpected_algos(code, _haystacks(entry))
     identity_ok = not ident_reasons
-    fidelity_ok = (not fid.get("drift")) or float(fid.get("fidelity") or 0) >= _FIDELITY_OK
+    score_ok = (not fid.get("drift")) or float(fid.get("fidelity") or 0) >= _FIDELITY_OK
+    facts_ok = dump_facts_ok(fid)
+    fidelity_ok = bool(facts_ok and score_ok)
     reasons = list(ident_reasons)
-    if not fidelity_ok:
+    if not facts_ok:
+        if fid.get("missing_literals"):
+            reasons.append(
+                "missing literals: "
+                + ", ".join(str(x) for x in (fid.get("missing_literals") or [])[:3])
+            )
+        if fid.get("missing_ext"):
+            reasons.append(
+                "missing ext_calls: "
+                + ", ".join(str(x) for x in (fid.get("missing_ext") or [])[:3])
+            )
+    elif not score_ok:
         reasons.append(
             f"fidelity {fid.get('fidelity')} drift={fid.get('drift')}"
         )

@@ -1,6 +1,8 @@
 id: stdint-not-struct
 profile: gcc_pe_x64
 gcc_fingerprint: "conflicting declaration.*uint64_t"
+gcc_probe:
+  - "conflicting declaration of C function 'uint64_t report_n()'"
 recipe: assemble
 guessed_name: report_n
 ghidra_cpp: |

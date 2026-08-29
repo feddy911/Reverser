@@ -1,6 +1,9 @@
 id: struct-infer
 profile: generic
 gcc_fingerprint: "invalid use of incomplete type|has no member named"
+gcc_probe:
+  - "invalid use of incomplete type 'struct Widget'"
+  - "'struct Widget' has no member named 'field2'"
 recipe: assemble
 guessed_name: init
 ghidra_cpp: |

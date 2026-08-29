@@ -1,6 +1,8 @@
 id: array-arg-decays-to-ptr
 profile: generic
 gcc_fingerprint: "cannot convert.*\\(\\*\\)\\[[0-9]+\\] to"
+gcc_probe:
+  - "cannot convert (*)[2] to 'CloudPt*'"
 recipe: assemble
 guessed_name: go
 ghidra_cpp: |

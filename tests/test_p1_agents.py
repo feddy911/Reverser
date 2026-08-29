@@ -204,6 +204,57 @@ class TestCritic(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(reasons)
 
+    def test_missing_literal_not_masked_by_high_score(self):
+        """Many numeric constants must not hide a dropped dump string."""
+        consts = ",".join(str(n) for n in range(100, 108))
+        entry = {
+            "address": "0x1",
+            "guessed_name": "go",
+            "ghidra_name": "FUN_1",
+            "literals": ["NEEDLE"],
+            "ext_calls": [],
+            "ghidra_code": f"void FUN_1() {{ f({consts}); puts(\"NEEDLE\"); }}",
+        }
+        code = f"void go() {{ f({consts}); }}\n"
+        verdict = review_function(entry, code, [])
+        self.assertFalse(verdict.fidelity_ok)
+        self.assertIn("NEEDLE", verdict.missing_literals)
+        self.assertFalse(verdict.accept)
+        self.assertGreaterEqual(verdict.fidelity, 0.85)
+
+    def test_missing_ext_not_masked_by_high_score(self):
+        consts = ",".join(str(n) for n in range(100, 108))
+        entry = {
+            "address": "0x1",
+            "guessed_name": "go",
+            "ghidra_name": "FUN_1",
+            "literals": [],
+            "ext_calls": ["printf"],
+            "ghidra_code": f"void FUN_1() {{ f({consts}); printf(\"%d\", 1); }}",
+        }
+        code = f"void go() {{ f({consts}); }}\n"
+        verdict = review_function(entry, code, [])
+        self.assertFalse(verdict.fidelity_ok)
+        self.assertIn("printf", verdict.missing_ext)
+        self.assertFalse(verdict.accept)
+
+    def test_guessed_name_need_not_match_source(self):
+        """Critic does not require restoring the original repository identifier."""
+        entry = {
+            "address": "0x1",
+            "guessed_name": "walk_keys",
+            "ghidra_name": "FUN_140001000",
+            "name": "FUN_140001000",
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": 'void FUN_140001000() { puts("k"); }',
+        }
+        code = 'void walk_keys() { puts("k"); }\n'
+        verdict = review_function(entry, code, [])
+        self.assertTrue(verdict.identity_ok)
+        self.assertTrue(verdict.fidelity_ok)
+        self.assertTrue(verdict.accept)
+
     def test_run_rejects_green_tu_with_swap(self):
         restored = [{
             "classification": "user_code",

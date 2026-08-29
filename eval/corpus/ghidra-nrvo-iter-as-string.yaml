@@ -1,6 +1,8 @@
 id: ghidra-nrvo-iter-as-string
 profile: gcc_pe_x64
 gcc_fingerprint: "invalid cast from type '__const_iterator'.*to type 'std::__cxx11::basic_string"
+gcc_probe:
+  - "invalid cast from type '__const_iterator' to type 'std::__cxx11::basic_string<char>*'"
 recipe: sanitize
 ghidra_cpp: |
   void ret_s(void)
