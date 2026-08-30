@@ -9,6 +9,26 @@ from src.analysis.platform import is_noise_call, is_noise_constant
 NUM_RE = re.compile(r"\b(?:0x[0-9a-fA-F]{3,}|[1-9][0-9]{2,})\b")
 GMP_PREFIX_RE = re.compile(r"^_+g?mpz_")
 
+# Ghidra lowers range-for to __for_begin / __for_end; callees still list begin/end.
+_RANGE_FOR_MARKERS = ("__for_begin", "__for_end", "__for_range")
+_RANGE_FOR_METHODS = frozenset({
+    "begin", "end", "cbegin", "cend", "rbegin", "rend",
+})
+
+
+def dump_has_range_for(ghidra_code: str) -> bool:
+    """True if Ghidra printed a lowered range-for, not a named begin() call."""
+    blob = ghidra_code or ""
+    return any(m in blob for m in _RANGE_FOR_MARKERS)
+
+
+def _call_base(name: str) -> str:
+    return (name or "").split("<", 1)[0].strip()
+
+
+def _is_range_for_method(name: str) -> bool:
+    return _call_base(name) in _RANGE_FOR_METHODS
+
 
 def _gmp_key(t: str) -> str:
     return GMP_PREFIX_RE.sub("mpz_", t)
@@ -127,10 +147,15 @@ def check_function(
         elif _gmp_key(e).lower() not in code_lc:
             missing_ext.append(e)
 
-    # пользовательские вызовы: имя ИЛИ любая thunk/FUN форма
+    skip_range = dump_has_range_for(entry.get("ghidra_code") or "")
+    required_calls = [
+        (name, toks) for name, toks in call_tokens
+        if not is_noise_call(name)
+        and not (skip_range and _is_range_for_method(name))
+    ]
     missing_calls = [
-        name for name, toks in call_tokens
-        if not is_noise_call(name) and not any(t in code for t in toks)
+        name for name, toks in required_calls
+        if not any(t in code for t in toks)
     ]
 
     gconsts = _constants(entry.get("ghidra_code") or "")
@@ -140,7 +165,7 @@ def check_function(
     total = (
         len([l for l in (entry.get("literals") or []) if l])
         + len([e for e in (entry.get("ext_calls") or []) if e and not is_noise_call(e)])
-        + len([n for n, _ in call_tokens if not is_noise_call(n)])
+        + len(required_calls)
         + len(gconsts)
     )
     missing = (

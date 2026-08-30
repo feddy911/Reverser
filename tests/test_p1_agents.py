@@ -166,6 +166,23 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertEqual(len(mixed.unknown), 1)
         self.assertEqual(len(mixed.skip_forever), 1)
 
+    def test_skip_forever_vector_const_iter_assign(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "no match for 'operator=' (operand types are "
+                    "'std::vector<std::__cxx11::basic_string<char> >::const_iterator' "
+                    "and 'const_iterator' {aka 'ghidra_word*'})"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn(
+            "opaque iterator vs vector const_iterator",
+            decision.skip_forever_reasons,
+        )
+
 
 class TestCritic(unittest.TestCase):
     def test_rejects_starts_with_replaced_by_sort(self):

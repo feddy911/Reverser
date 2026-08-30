@@ -283,7 +283,13 @@ class TestRuntimeNoise(unittest.TestCase):
         self.assertNotIn("ghidra_cpp", src)
 
     def test_eval_user_names_and_filter(self):
-        from src.analysis.eval_harness import eval_entry
+        from src.analysis.eval_harness import eval_entry, _name_matches
+
+        self.assertTrue(_name_matches("main", "main"))
+        self.assertTrue(_name_matches("starts_with<char>", "starts_with"))
+        self.assertFalse(_name_matches("__tmainCRTStartup", "main"))
+        self.assertFalse(_name_matches("WinMain", "main"))
+        self.assertFalse(_name_matches("_main", "main"))
 
         fixture = ROOT / "tests" / "fixtures" / "mini_ghidra.json"
         result = eval_entry(
@@ -431,6 +437,15 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("(iterator)(p)", got)
         self.assertNotIn("->begin()", got)
         self.assertNotIn("->end()", got)
+        nested = sanitize_ghidra_cpp(
+            "const_iterator __for_begin;\n"
+            "const_iterator cVar2;\n"
+            "__for_begin = ((std::vector<int> *)in_stack_98)->begin();\n"
+            "cVar2 = ((std::vector<int> *)in_stack_98)->end();\n"
+        )
+        self.assertIn("(const_iterator)(in_stack_98)", nested)
+        self.assertNotIn("->begin()", nested)
+        self.assertNotIn("->end()", nested)
 
     def test_duration_cast_not_rewritten(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp

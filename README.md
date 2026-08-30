@@ -49,7 +49,12 @@ Restorer берёт system/user rules из `src/analysis/prompts.py` по это
 
 ```bash
 py -m src.analysis.train_scorer --help
+py -m src.analysis.eval_scorer_l1o --manifest eval/manifest.yaml
 ```
+
+`eval_scorer_l1o` — leave-one-binary-out по `eval/manifest.yaml`: heuristic / logreg / RF /
+дерево `max_depth=4`, те же 22 `FEATURE_KEYS`. Метрика — filtered recall@15 по `user_names`
+каждого exe. Не gcc в признаках, не compile-gate.
 
 ## Eval harness (scoring-only, Q6)
 
@@ -63,13 +68,13 @@ py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json
 ```
 
 Отчёт: `output/eval_report.json` (recall@k по именам, в т.ч. после CRT-фильтра).
-`train_scorer` не является compile-oracle и не учится на gcc-диагностиках.
+L1O: `output/scorer_l1o.json`. `train_scorer` не является compile-oracle и не учится на gcc-диагностиках.
 
 ## Корпус диалекта Ghidra (compile-gate)
 
 Новые rewrite в `ghidra_cpp.py` / `assembler.py` не добавляются по итогам одного exe.
 Сначала фикстура в `eval/corpus/<id>.yaml` (сниппет + recipe + contains / not_contains), затем рецепт.
-Схема полей: `eval/corpus/_schema.yaml`. Сейчас **159** загружаемых фикстур.
+Схема полей: `eval/corpus/_schema.yaml`. Сейчас **160** загружаемых фикстур.
 
 ```bash
 py -m src.analysis.eval_corpus
@@ -132,7 +137,7 @@ Skip-forever (красная восьмёрка, placeholder-итераторы,
 YAML-черновик (не патч sanitizer).
 Scoring ML (`train_scorer`) не используется как compile-oracle.
 
-Из 159 фикстур 93 с `gcc_fingerprint` (классификатор), остальные — compile-ok
+Из 160 фикстур 94 с `gcc_fingerprint` (классификатор), остальные — compile-ok
 регрессия рецепта. Гейт синтезирует probe из regex или берёт явный `gcc_probe`
 (реалистичное gcc-сообщение, когда `.*` / усечённый alt врёт синтез) и
 проверяет, что `match_errors` попадает в свой id. Коллизия ostream

@@ -18,6 +18,17 @@ WEIGHTS: Dict[str, float] = {
     "crt_only": -20.0, "called_by_seed": 25.0,
 }
 
+# Larger than typical ML predict_proba / decision_function so CRT sinks
+# below user functions. Same policy as select_llm_targets; not a 23rd feature.
+ML_NOISE_PENALTY = 10.0
+
+
+def apply_runtime_noise_penalty(name: str, score: float) -> float:
+    """Demote CRT/STL/MinGW internals after ML score. No gcc text."""
+    if is_runtime_noise(name):
+        return float(score) - ML_NOISE_PENALTY
+    return float(score)
+
 
 class GhidraFunctionScorer:
     """Скоринг: эвристика или ML-бандл (joblib)."""
@@ -80,8 +91,10 @@ class GhidraFunctionScorer:
             x = b["scaler"].transform(x)
         m = b["model"]
         if hasattr(m, "decision_function"):
-            return float(m.decision_function(x)[0])
-        return float(m.predict_proba(x)[0][1])
+            s = float(m.decision_function(x)[0])
+        else:
+            s = float(m.predict_proba(x)[0][1])
+        return apply_runtime_noise_penalty(ft.get("name") or "", s)
 
     def score_all(self, functions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         use_ml = self.ml_bundle is not None

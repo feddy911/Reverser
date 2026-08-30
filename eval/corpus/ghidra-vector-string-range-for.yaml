@@ -1,0 +1,31 @@
+id: ghidra-vector-string-range-for
+profile: gcc_pe_x64
+gcc_fingerprint: "cannot convert 'std::vector<.*>::iterator' to 'const_iterator'"
+gcc_probe:
+  - "cannot convert 'std::vector<std::__cxx11::basic_string<char>, std::allocator<std::__cxx11::basic_string<char> > >::iterator' to 'const_iterator' {aka 'ghidra_word*'} in assignment"
+recipe: sanitize
+ghidra_cpp: |
+  int count_pref(void)
+  {
+    const_iterator cVar2;
+    string *in_stack_ffffffffffffff98;
+    const_iterator __for_begin;
+    int n;
+    n = 0;
+    __for_begin = std::
+                  vector<std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>,_std::allocator<std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>_>_>
+                  ::begin((vector<std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>,_std::allocator<std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>_>_>
+                           *)in_stack_ffffffffffffff98);
+    cVar2 = std::
+            vector<std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>,_std::allocator<std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>_>_>
+            ::end((vector<std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>,_std::allocator<std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>_>_>
+                   *)in_stack_ffffffffffffff98);
+    (void)n;
+  }
+contains:
+  - "(const_iterator)(in_stack_ffffffffffffff98)"
+not_contains:
+  - "->begin()"
+  - "->end()"
+compile: true
+notes: "Mini vec_range_for: Ghidra std::vector<string>::begin((vector*)p) becomes (p)->begin() then placeholder const_iterator cursor"

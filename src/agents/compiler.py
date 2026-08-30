@@ -61,6 +61,10 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "opaque iterator dereference",
     ),
     (
+        r"no match for 'operator=' \(operand types are 'std::vector.+' and 'const_iterator'",
+        "opaque iterator vs vector const_iterator",
+    ),
+    (
         r"to 'std::string\*' \{aka 'std::__cxx11::basic_string<char>\*'\} in assignment",
         "string value vs string*",
     ),

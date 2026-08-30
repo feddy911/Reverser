@@ -48,10 +48,29 @@ def _score_dump(
 
 
 def _name_matches(got: str, want: str) -> bool:
+    """Exact symbol or template-stripped base. Not a CRT substring of want."""
     g = (got or "").lower()
     w = (want or "").lower()
+    if not w:
+        return False
     base = g.split("<", 1)[0]
-    return w == g or w == base or base.startswith(w) or w in base
+    return w == g or w == base
+
+
+def load_address_labels(path: Optional[Path]) -> Dict[str, int]:
+    """Address → 0|1 from JSON dict or list of {address, label|y}."""
+    if path is None or not path.exists():
+        return {}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(raw, dict):
+        return {str(k): int(v) for k, v in raw.items()}
+    if isinstance(raw, list):
+        out: Dict[str, int] = {}
+        for item in raw:
+            if isinstance(item, dict) and "address" in item:
+                out[str(item["address"])] = int(item.get("label", item.get("y", 0)))
+        return out
+    return {}
 
 
 def eval_entry(
@@ -93,15 +112,8 @@ def eval_entry(
     ]
 
     labels: Dict[str, int] = {}
-    if labels_path and labels_path.exists():
-        raw = json.loads(labels_path.read_text(encoding="utf-8"))
-        # labels_MyCollatz.json: { "0x...": 0|1 } or list
-        if isinstance(raw, dict):
-            labels = {str(k): int(v) for k, v in raw.items()}
-        elif isinstance(raw, list):
-            for item in raw:
-                if isinstance(item, dict) and "address" in item:
-                    labels[str(item["address"])] = int(item.get("label", item.get("y", 0)))
+    if labels_path:
+        labels = load_address_labels(labels_path)
 
     metrics: Dict[str, Any] = {
         "functions": len(ghidra.get("functions") or []),

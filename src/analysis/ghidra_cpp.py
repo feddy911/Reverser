@@ -577,16 +577,17 @@ def _rewrite_const_iter_begin_assign(code: str) -> str:
     t = code or ""
     ids = [(m.group(1), m.group(2)) for m in _RE_PLACEHOLDER_ITER_DECL.finditer(t)]
     for kind, ident in ids:
+        def _repl(m: re.Match, *, _ident: str = ident, _kind: str = kind) -> str:
+            rhs = (m.group(1) or "").strip()
+            names = re.findall(r"[A-Za-z_]\w*", rhs)
+            if not names:
+                return m.group(0)
+            return f"{_ident} = ({_kind})({names[-1]});"
+
         t = re.sub(
-            rf"\b{re.escape(ident)}\s*=\s*\(([^()]+)\)\s*->"
+            rf"\b{re.escape(ident)}\s*=\s*([^=;]+?)->"
             rf"(?:begin|end|cbegin|cend)\s*\(\s*\)\s*;",
-            rf"{ident} = ({kind})(\1);",
-            t,
-        )
-        t = re.sub(
-            rf"\b{re.escape(ident)}\s*=\s*([A-Za-z_]\w*)\s*->"
-            rf"(?:begin|end|cbegin|cend)\s*\(\s*\)\s*;",
-            rf"{ident} = ({kind})(\1);",
+            _repl,
             t,
         )
     return t

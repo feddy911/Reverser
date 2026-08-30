@@ -167,6 +167,21 @@ class TestDialectLoop(unittest.TestCase):
         )
         self.assertEqual(rec["emit"], ["chrono_now"])
 
+    def test_vector_const_iter_assign_is_skip_forever(self):
+        rec = plan_messages(
+            [
+                "no match for 'operator=' (operand types are "
+                "'std::vector<std::__cxx11::basic_string<char> >::const_iterator' "
+                "and 'const_iterator' {aka 'ghidra_word*'})"
+            ],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertTrue(
+            any(c["action"] == "skip_forever" for c in rec["clusters"])
+        )
+        self.assertEqual(rec["emit"], [])
+
     def test_no_catalog_does_not_emit(self):
         rec = plan_messages(
             ["wholly_new_ghidra_token was not declared in this scope"],

@@ -69,6 +69,10 @@ _PROTECTED_EXTRA = frozenset({
     "_const",
     "__const_iterator",
     "const_iterator",
+    "iterator",
+    "time_point",
+    "steady_clock",
+    "system_clock",
     "const_reference",
     "__normal_iterator",
     "_Rb_tree_const_iterator",
@@ -105,7 +109,34 @@ def _is_protected(ident: str) -> bool:
     return False
 
 
+def _dialect_type_stems(idents: Sequence[str]) -> set[str]:
+    """Stems of Ghidra const-T spellings (const_Rec / Rec_const). Do not vary them."""
+    stems: set[str] = set()
+    for ident in idents:
+        if ident.startswith("_const_") and len(ident) > 7:
+            stems.add(ident[7:])
+        elif ident.startswith("const_") and ident != "const_iterator" and len(ident) > 6:
+            stems.add(ident[6:])
+        elif ident.endswith("_const") and len(ident) > 6:
+            stems.add(ident[:-6])
+    return stems
+
+
 def ident_mapping(texts: Sequence[str], *, prefix: str = "v") -> Dict[str, str]:
+    seen: List[str] = []
+    all_idents: List[str] = []
+    for text in texts:
+        for ident in _IDENT.findall(text or ""):
+            if ident not in all_idents:
+                all_idents.append(ident)
+    stems = _dialect_type_stems(all_idents)
+    for ident in all_idents:
+        if _is_protected(ident) or ident in seen or ident in stems:
+            continue
+        if ident.startswith("const_") or ident.endswith("_const"):
+            continue
+        seen.append(ident)
+    return {name: f"{prefix}{i}" for i, name in enumerate(seen)}
     seen: List[str] = []
     for text in texts:
         for ident in _IDENT.findall(text or ""):
@@ -756,6 +787,28 @@ int main() {
   v.push_back(r);
   order_n(&v);
   return v[0].n == 1 ? 0 : 1;
+}
+""",
+    ),
+    MiniProgram(
+        id="vec_range_for",
+        dialect="vector",
+        source="""#include <string>
+#include <vector>
+bool has_pref(std::string const *s, std::string const *p) {
+  return s->size() >= p->size() && s->compare(0, p->size(), *p) == 0;
+}
+int count_pref(std::vector<std::string> const *lines, std::string const *prefix) {
+  int n = 0;
+  for (std::string const &line : *lines) {
+    if (has_pref(&line, prefix)) n++;
+  }
+  return n;
+}
+int main() {
+  std::vector<std::string> v{"ab", "cd"};
+  std::string p{"a"};
+  return count_pref(&v, &p) == 1 ? 0 : 1;
 }
 """,
     ),

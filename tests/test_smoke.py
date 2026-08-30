@@ -65,6 +65,16 @@ class TestFeaturesSmoke(unittest.TestCase):
         by_name = {s["name"]: s["score"] for s in scored}
         self.assertGreater(by_name["FUN_140001000"], by_name["_RTC_CheckStackVars"])
 
+    def test_ml_noise_penalty_sinks_crt(self):
+        from src.analysis.scorer import apply_runtime_noise_penalty, ML_NOISE_PENALTY
+
+        self.assertEqual(apply_runtime_noise_penalty("main", 0.9), 0.9)
+        self.assertEqual(
+            apply_runtime_noise_penalty("_RTC_CheckStackVars", 0.9),
+            0.9 - ML_NOISE_PENALTY,
+        )
+        self.assertEqual(len(FEATURE_KEYS), 22)
+
 
 class TestAssemblerDomain(unittest.TestCase):
     def test_none_pack_no_gmp_include(self):
@@ -449,6 +459,37 @@ class TestFidelitySmoke(unittest.TestCase):
         bad = check_function(entry, "return a + b;", toks)
         self.assertTrue(bad["drift"])
         self.assertIn("hypot", bad["missing_calls"])
+
+    def test_range_for_dump_does_not_require_begin_end(self):
+        from src.analysis.fidelity import check_function, dump_facts_ok
+
+        entry = {
+            "address": "0x1",
+            "literals": ["hi"],
+            "ext_calls": [],
+            "ghidra_code": (
+                "const_iterator __for_begin;\n"
+                "const_iterator __for_end;\n"
+                "__for_begin = std::vector<int>::begin(p);\n"
+            ),
+        }
+        toks = [
+            ("begin", ["begin"]),
+            ("end", ["end"]),
+            ("print_n", ["print_n"]),
+        ]
+        restore = 'void f() { for (int x : *p) n += x; print_n("hi"); }\n'
+        rep = check_function(entry, restore, toks)
+        self.assertNotIn("begin", rep["missing_calls"])
+        self.assertNotIn("end", rep["missing_calls"])
+        self.assertEqual(rep["missing_calls"], [])
+        self.assertFalse(rep["drift"])
+        self.assertTrue(dump_facts_ok(rep))
+
+        no_marker = dict(entry, ghidra_code="n = begin(p);")
+        strict = check_function(no_marker, restore, toks)
+        self.assertIn("begin", strict["missing_calls"])
+        self.assertTrue(dump_facts_ok(strict))
 
 
 class TestExtractFeatures(unittest.TestCase):
