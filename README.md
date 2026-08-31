@@ -53,14 +53,16 @@ py -m src.analysis.eval_scorer_l1o --manifest eval/manifest.yaml
 ```
 
 `eval_scorer_l1o` is leave-one-binary-out over `eval/manifest.yaml`: heuristic / logreg / RF /
-a tree with `max_depth=4`, the same 22 `FEATURE_KEYS`. The metric is filtered recall@15 on each
-exe's `user_names`. gcc text is not a feature, and this track is not a compile-gate.
+a tree with `max_depth=4`, the same 22 `FEATURE_KEYS`. Named dumps report filtered name recall@15.
+FUN_* dumps (`mycollatz`, `fibtimer_nosym`) report address recall@15 from a labels JSON.
+A named/stripped twin shares `family` and is dropped from that fold's train set so ML cannot
+see the same functions with symbols. gcc text is not a feature, and this track is not a compile-gate.
 
 ## Eval harness (scoring-only, Q6)
 
-A separate track from the compile-gate. Manifest: `eval/manifest.yaml` — 9 labeled
-binaries (`user_names` / `labels_MyCollatz.json`). If there is no dump in `output/cache/`,
-the entry is skipped (CI without Ghidra). No assemble, no gcc, no recipes.
+A separate track from the compile-gate. Manifest: `eval/manifest.yaml` — named dumps plus
+two FUN_* dumps with address labels (`labels_MyCollatz.json`, `eval/labels_fibtimer_nosym.json`).
+If there is no dump in `output/cache/`, the entry is skipped (CI without Ghidra). No assemble, no gcc, no recipes.
 
 ```bash
 py -m src.analysis.eval_harness --manifest eval/manifest.yaml

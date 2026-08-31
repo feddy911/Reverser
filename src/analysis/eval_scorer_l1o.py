@@ -60,6 +60,7 @@ class BinaryPack:
     y: np.ndarray
     addr_positives: List[str] = field(default_factory=list)
     y_source: str = "names"
+    family: str = ""
 
 
 def _row(ft: Dict[str, Any]) -> List[float]:
@@ -75,6 +76,7 @@ def load_binary(
     ghidra_json: Path,
     user_names: Sequence[str],
     labels: Optional[Dict[str, int]] = None,
+    family: str = "",
 ) -> BinaryPack:
     ghidra = _load_ghidra(ghidra_json)
     scored = _score_dump(ghidra)
@@ -100,6 +102,7 @@ def load_binary(
         y=y,
         addr_positives=addr_pos,
         y_source=y_source,
+        family=str(family or ""),
     )
 
 
@@ -128,7 +131,13 @@ def load_manifest_packs(manifest_path: Path) -> Tuple[List[BinaryPack], List[Dic
                 "reason": "no user_names or labels",
             })
             continue
-        packs.append(load_binary(name, gj, user_names, labels=labels or None))
+        packs.append(load_binary(
+            name,
+            gj,
+            user_names,
+            labels=labels or None,
+            family=str(e.get("family") or ""),
+        ))
     return packs, skipped
 
 
@@ -243,6 +252,7 @@ def eval_held_out(
             "n_train": 0,
             "n_train_pos": 0,
             "y_source": held.y_source,
+            "family": held.family,
             "n_addr_labels": len(held.addr_positives),
             "models": per_model,
         }
@@ -285,9 +295,22 @@ def eval_held_out(
         "n_train_pos": n_pos,
         "user_names": list(held.user_names),
         "y_source": held.y_source,
+        "family": held.family,
         "n_addr_labels": len(held.addr_positives),
         "models": per_model,
     }
+
+
+def _train_packs(held: BinaryPack, packs: Sequence[BinaryPack]) -> List[BinaryPack]:
+    """Leave-one-out, and also drop a named/stripped twin of the held-out dump."""
+    out: List[BinaryPack] = []
+    for p in packs:
+        if p.name == held.name:
+            continue
+        if held.family and p.family and p.family == held.family:
+            continue
+        out.append(p)
+    return out
 
 
 def run_l1o(
@@ -300,15 +323,19 @@ def run_l1o(
     folds = [
         eval_held_out(
             held,
-            [p for p in packs if p.name != held.name],
+            _train_packs(held, packs),
             top_k=top_k,
         )
         for held in packs
     ]
 
+    named_folds = [f for f in folds if f.get("y_source") != "addresses"]
+    addr_folds = [f for f in folds if f.get("y_source") == "addresses"]
+
     means: Dict[str, Optional[float]] = {}
     means_raw: Dict[str, Optional[float]] = {}
     means_addr: Dict[str, Optional[float]] = {}
+    means_named: Dict[str, Optional[float]] = {}
     for model in MODEL_ORDER:
         means[model] = _mean([
             ((f.get("models") or {}).get(model) or {}).get("recall_at_k_names_filtered")
@@ -320,7 +347,11 @@ def run_l1o(
         ])
         means_addr[model] = _mean([
             ((f.get("models") or {}).get(model) or {}).get("recall_at_k_addr_filtered")
-            for f in folds
+            for f in addr_folds
+        ])
+        means_named[model] = _mean([
+            ((f.get("models") or {}).get(model) or {}).get("recall_at_k_names_filtered")
+            for f in named_folds
         ])
 
     table: List[Dict[str, Any]] = []
@@ -330,7 +361,9 @@ def run_l1o(
             "n_test": f["n_test"],
             "n_test_pos": f["n_test_pos"],
             "y_source": f.get("y_source"),
+            "family": f.get("family") or "",
             "n_addr_labels": f.get("n_addr_labels") or 0,
+            "n_train": f.get("n_train"),
         }
         for model in MODEL_ORDER:
             rec = (f.get("models") or {}).get(model) or {}
@@ -347,10 +380,13 @@ def run_l1o(
         "n_feature_keys": len(FEATURE_KEYS),
         "models": list(MODEL_ORDER),
         "n_binaries": len(packs),
+        "n_named_binaries": len(named_folds),
+        "n_addr_binaries": len(addr_folds),
         "n_skip": len(skipped or []),
         "skipped": skipped or [],
         "mean_filtered_recall": means,
         "mean_raw_recall": means_raw,
+        "mean_named_filtered_recall": means_named,
         "mean_addr_filtered_recall": means_addr,
         "table": table,
         "folds": folds,
@@ -370,32 +406,34 @@ def run_manifest(manifest_path: Path, out_path: Path, top_k: int = 15) -> Dict[s
 
 
 def _print_report(report: Dict[str, Any], out: Path) -> None:
-    means = report.get("mean_filtered_recall") or {}
+    named_means = report.get("mean_named_filtered_recall") or {}
+    addr_means = report.get("mean_addr_filtered_recall") or {}
     print(
         f"OK: scoring L1O binaries={report.get('n_binaries')} "
+        f"named={report.get('n_named_binaries')} "
+        f"addr={report.get('n_addr_binaries')} "
         f"skip={report.get('n_skip', 0)} keys={report.get('n_feature_keys')} "
         f"-> {out}"
     )
     print(
-        "  mean filtered recall@"
+        "  named-dump filtered recall@"
         f"{report.get('top_k')}: "
-        + "  ".join(f"{m}={means.get(m)}" for m in MODEL_ORDER)
+        + "  ".join(f"{m}={named_means.get(m)}" for m in MODEL_ORDER)
     )
-    raw_means = report.get("mean_raw_recall") or {}
     print(
-        "  mean raw recall@"
+        "  FUN_* addr filtered recall@"
         f"{report.get('top_k')}: "
-        + "  ".join(f"{m}={raw_means.get(m)}" for m in MODEL_ORDER)
+        + "  ".join(f"{m}={addr_means.get(m)}" for m in MODEL_ORDER)
     )
-    addr_means = report.get("mean_addr_filtered_recall") or {}
-    if any(v is not None for v in addr_means.values()):
-        print(
-            "  mean addr filtered recall@"
-            f"{report.get('top_k')}: "
-            + "  ".join(f"{m}={addr_means.get(m)}" for m in MODEL_ORDER)
-        )
-    header = f"{'binary':<14} {'n':>5} {'pos':>4}  " + "  ".join(
-        f"{m:>9}" for m in MODEL_ORDER
+    mixed = report.get("mean_filtered_recall") or {}
+    print(
+        "  mixed name-recall (FUN_* folds are 0): "
+        + "  ".join(f"{m}={mixed.get(m)}" for m in MODEL_ORDER)
+    )
+    header = (
+        f"{'binary':<16} {'src':<10} {'n':>5} {'pos':>4}  "
+        + "  ".join(f"{m:>9}" for m in MODEL_ORDER)
+        + "  heur_addr"
     )
     print(header)
     for row in report.get("table") or []:
@@ -403,9 +441,12 @@ def _print_report(report: Dict[str, Any], out: Path) -> None:
             f"{(row.get(m) if row.get(m) is not None else '-'):>9}"
             for m in MODEL_ORDER
         )
+        addr = row.get("heuristic_addr")
+        addr_s = f"{addr:>9}" if addr is not None else f"{'-':>9}"
         print(
-            f"{row.get('name', ''):<14} {row.get('n_test', 0):>5} "
-            f"{row.get('n_test_pos', 0):>4}  {cells}"
+            f"{row.get('name', ''):<16} {str(row.get('y_source') or ''):<10} "
+            f"{row.get('n_test', 0):>5} {row.get('n_test_pos', 0):>4}  "
+            f"{cells}  {addr_s}"
         )
 
 

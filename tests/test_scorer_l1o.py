@@ -17,6 +17,7 @@ from src.analysis.eval_scorer_l1o import (
     load_binary,
     run_l1o,
     run_manifest,
+    _train_packs,
 )
 
 
@@ -89,6 +90,28 @@ class TestScorerL1O(unittest.TestCase):
                 fold["models"]["heuristic"].get("recall_at_k_addr_filtered"),
                 1.0,
             )
+
+    def test_family_twin_dropped_from_train(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            dump = td_path / "mini.json"
+            dump.write_bytes(FIXTURE.read_bytes())
+            named = load_binary("named", dump, ["FUN_140001000"], family="mini")
+            nosym = load_binary(
+                "nosym",
+                dump,
+                ["main"],
+                labels={"0x140001000": 1},
+                family="mini",
+            )
+            other = load_binary("other", dump, ["FUN_140001000"], family="other")
+            train = _train_packs(nosym, [named, nosym, other])
+            self.assertEqual({p.name for p in train}, {"other"})
+            rec = run_l1o([named, nosym, other], top_k=15)
+            self.assertEqual(rec["n_addr_binaries"], 1)
+            nosym_fold = next(f for f in rec["folds"] if f["name"] == "nosym")
+            self.assertEqual(nosym_fold["y_source"], "addresses")
+            self.assertEqual(nosym_fold["n_train"], len(other.y))
 
     def test_manifest_skips_missing_and_runs_present(self):
         with tempfile.TemporaryDirectory() as td:

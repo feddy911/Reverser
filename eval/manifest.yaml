@@ -1,5 +1,6 @@
 # Scoring-only eval. Not the compile-gate (that is eval/corpus + eval_heldout).
 # Labels are user_names (and optional address JSON). Missing ghidra_json → skip.
+# FUN_* dumps: mycollatz, fibtimer_nosym (strip -s twin; family excludes the named dump from train).
 # Do not write sanitizer recipes from these binaries.
 
 top_k: 15
@@ -38,7 +39,7 @@ entries:
 
   - name: inimini
     binary: samples/IniMini.exe
-    ghidra_json: output/cache/b1ef8079244d07cf04dc7c27732bcc06/ghidra_full_v6.json
+    ghidra_json: output/cache/6a0d2e2b5b1516bb844210b4f7b6f6d6/ghidra_full_v6.json
     user_names:
       - main
       - dump_map
@@ -56,8 +57,20 @@ entries:
       - print_hex
 
   - name: fibtimer
+    family: fibtimer
     binary: samples/FibTimer.exe
     ghidra_json: output/cache/a953bc689be608166c6c3a74ce143f81/ghidra_full_v6.json
+    user_names:
+      - main
+      - fib_series
+      - fib_iter
+      - print_series
+
+  - name: fibtimer_nosym
+    family: fibtimer
+    binary: output/scoring_stripped/FibTimer_stripped.exe
+    ghidra_json: output/cache/9a9700454ef2c31e49f0b4967b534cbe/ghidra_full_v6.json
+    labels: eval/labels_fibtimer_nosym.json
     user_names:
       - main
       - fib_series
