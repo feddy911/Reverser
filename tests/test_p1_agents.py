@@ -183,6 +183,19 @@ class TestCompilerAgent(unittest.TestCase):
             decision.skip_forever_reasons,
         )
 
+    def test_skip_forever_ghidra_word_vs_mpz_ptr(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "invalid conversion from 'longlong' {aka 'long long int'} "
+                    "to 'mpz_ptr' {aka '__mpz_struct*'} [-fpermissive]"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ghidra word vs mpz_ptr", decision.skip_forever_reasons)
+
 
 class TestCritic(unittest.TestCase):
     def test_rejects_starts_with_replaced_by_sort(self):

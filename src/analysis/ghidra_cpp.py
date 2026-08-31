@@ -38,6 +38,7 @@ _UNDERSCORE_TYPES = tuple(
 _BARE_TEMPLATE = (
     (re.compile(r"(?<![:\w])vector\s*<"), "std::vector<"),
     (re.compile(r"(?<![:\w])basic_string\s*<"), "std::basic_string<"),
+    (re.compile(r"(?<![:\w])basic_ostream\s*<"), "std::basic_ostream<"),
     (re.compile(r"(?<![:\w])allocator\s*<"), "std::allocator<"),
     (re.compile(r"(?<![:\w])char_traits\s*<"), "std::char_traits<"),
     (re.compile(r"(?<![:\w])initializer_list\s*<"), "std::initializer_list<"),
@@ -69,7 +70,7 @@ _OPERATOR_TAILS = (
 )
 
 _BARE_IOS = re.compile(
-    r"(?<!~)(?<![:\w])\b(ostream|istream|ofstream|ifstream|iostream|ios_base|ios)\b"
+    r"(?<!~)(?<![:\w])\b(basic_ostream|ostream|istream|ofstream|ifstream|iostream|ios_base|ios)\b"
 )
 _RE_IOS_OPENMODE = (
     (re.compile(r"\b_S_out\b"), "std::ios::out"),
@@ -93,7 +94,7 @@ _KNOWN_CLASSES = frozenset({
     "__normal_iterator", "_Node_iterator", "_Node_const_iterator",
     "_Node_iterator_base", "_Rb_tree_const_iterator", "_Rb_tree_iterator",
     "char_traits", "optional", "pair",
-    "initializer_list", "map", "less", "ostream", "ofstream",
+    "initializer_list", "map", "less", "ostream", "basic_ostream", "ofstream",
     "duration", "ratio",
 })
 _KNOWN_MEMBERS = frozenset({

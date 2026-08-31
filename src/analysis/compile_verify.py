@@ -192,13 +192,21 @@ def compile_snippet(
     compiler: str = "",
     timeout_sec: int = 60,
 ) -> CompileResult:
-    """Syntax-check one function plus preamble (Phase 2 per-function gate)."""
+    """Syntax-check one function plus preamble (Phase 2 per-function gate).
+
+    Injects the same inferred struct / thunk stubs assemble() would add, so
+    undeclared-struct-type is not a translation-unit-only win.
+    """
+    from src.agents.assembler import type_stubs_for_snippet
     from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 
     work_dir.mkdir(parents=True, exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9_]+", "_", name)[:48] or "fn"
     path = work_dir / f"{safe}.cpp"
-    text = "\n".join(list(preamble_lines) + ["", sanitize_ghidra_cpp((body or "").strip()), ""])
+    body = sanitize_ghidra_cpp((body or "").strip())
+    preamble = list(preamble_lines)
+    stubs = type_stubs_for_snippet(body, "\n".join(preamble))
+    text = "\n".join(preamble + [""] + stubs + [body, ""])
     path.write_text(text, encoding="utf-8")
     return compile_cpp(path, compiler=compiler, timeout_sec=timeout_sec)
 

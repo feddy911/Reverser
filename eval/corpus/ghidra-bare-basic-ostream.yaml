@@ -1,0 +1,22 @@
+id: ghidra-bare-basic-ostream
+profile: gcc_pe_x64
+gcc_fingerprint: "'basic_ostream' was not declared"
+gcc_probe:
+  - "'basic_ostream' was not declared in this scope; did you mean 'std::basic_ostream'?"
+recipe: sanitize
+ghidra_cpp: |
+  void print_n(int n)
+  {
+    basic_ostream<char,std::char_traits<char>> *pbVar3;
+    basic_ostream<char,structstd::char_traits<char>> *pbVar4;
+    pbVar3 = (basic_ostream<char,std::char_traits<char>> *)std::cout;
+    (void)n;
+    (void)pbVar3;
+    (void)pbVar4;
+  }
+contains:
+  - "std::basic_ostream<char,std::char_traits<char>>"
+not_contains:
+  - "structstd"
+compile: true
+notes: "Ghidra may print bare basic_ostream and glue structstd::char_traits; qualify std. Not from a user exe dump."

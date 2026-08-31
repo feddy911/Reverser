@@ -64,6 +64,7 @@ _PROTECTED_EXTRA = frozenset({
     "reserve", "second", "strcat", "snprintf", "log", "exp", "round",
     "conststd",
     "const_std",
+    "structstd",
     "_false",
     "_true",
     "_const",
@@ -303,6 +304,27 @@ void init_one(mpz_t x) {
   mpz_set_ui(x, 1);
 }
 int main() { mpz_t x; init_one(x); mpz_clear(x); return 0; }
+""",
+    ),
+    MiniProgram(
+        id="gmp_clear_rec",
+        dialect="gmp",
+        requires=["gmp"],
+        source="""#include <gmp.h>
+struct NumHold {
+  mpz_t n;
+  int k;
+};
+void clear_n(NumHold *p) {
+  mpz_clear(p->n);
+}
+int main() {
+  NumHold r{};
+  mpz_init(r.n);
+  r.k = 1;
+  clear_n(&r);
+  return r.k == 1 ? 0 : 1;
+}
 """,
     ),
     MiniProgram(
@@ -1527,6 +1549,7 @@ def run_ghidra_on_programs(
     import subprocess
 
     from src.analysis.compile_verify import find_cxx_compiler
+    from src.analysis.corpus import _gmp_available
     from src.ghidra.headless import run_ghidra_decompile
 
     cxx = find_cxx_compiler()
@@ -1538,9 +1561,16 @@ def run_ghidra_on_programs(
     wanted = list(programs) if programs is not None else list(MINI_PROGRAMS) + list(
         HELDOUT_PROGRAMS
     )
+    gmp_ok = _gmp_available(cxx)
     reports = []
     for prog in wanted:
-        if prog.requires:
+        extra_link: List[str] = []
+        if "gmp" in (prog.requires or []):
+            if not gmp_ok:
+                reports.append({"id": prog.id, "skipped": "gmp.h not available"})
+                continue
+            extra_link.append("-lgmp")
+        elif prog.requires:
             continue
         src = out_dir / f"{prog.id}.cpp"
         if not src.exists():
@@ -1558,7 +1588,7 @@ def run_ghidra_on_programs(
             continue
         exe = dump_dir / f"{prog.id}.exe"
         link = subprocess.run(
-            [cxx, "-std=c++17", "-O0", "-g", str(src), "-o", str(exe)],
+            [cxx, "-std=c++17", "-O0", "-g", str(src), "-o", str(exe), *extra_link],
             capture_output=True,
             text=True,
             timeout=60,

@@ -656,8 +656,29 @@ int main(int argc, char **argv) { return 0; }
         self.assertTrue(LEXICAL_PATH.is_file())
         glued = apply_lexical("const_std::string x;", "before_underscore_std")
         self.assertEqual(glued, "const std::string x;")
+        glued2 = apply_lexical(
+            "basic_ostream<char,structstd::char_traits<char>> *p;",
+            "before_underscore_std",
+        )
+        self.assertIn("std::char_traits", glued2)
+        self.assertNotIn("structstd", glued2)
         cur = apply_lexical("it._M_cur = 0;", "after_templates")
         self.assertEqual(cur, "(it) = 0;")
+
+    def test_bare_basic_ostream_qualified(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "void print_n(int n) {\n"
+            "  basic_ostream<char,std::char_traits<char>> *pbVar3;\n"
+            "  basic_ostream<char,structstd::char_traits<char>> *pbVar4;\n"
+            "  pbVar3 = (basic_ostream<char,std::char_traits<char>> *)std::cout;\n"
+            "  (void)n; (void)pbVar3; (void)pbVar4;\n"
+            "}\n"
+        )
+        self.assertIn("std::basic_ostream<char,std::char_traits<char>>", got)
+        self.assertNotIn("structstd", got)
+        self.assertNotRegex(got, r"(?<!std::)basic_ostream")
 
     def test_underscore_false_true_nttp(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -979,6 +1000,59 @@ class TestCompileVerify(unittest.TestCase):
             self.assertTrue(bad.attempted)
             self.assertFalse(bad.ok)
             self.assertGreaterEqual(bad.n_errors, 1)
+
+    def test_compile_snippet_infers_undeclared_struct(self):
+        from src.agents.assembler import assemble, type_stubs_for_snippet
+        from src.analysis.compile_verify import compile_snippet, find_cxx_compiler
+        from src.analysis.includes import make_preamble
+
+        body = (
+            "double dist2(CloudPt *a, CloudPt *b) {\n"
+            "  CloudPt query;\n"
+            "  (void)a; (void)b; (void)query;\n"
+            "  return 0;\n"
+            "}\n"
+        )
+        stubs = type_stubs_for_snippet(body)
+        self.assertTrue(any("struct CloudPt" in ln for ln in stubs))
+        self.assertFalse(any("struct local_110" in ln for ln in stubs))
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "dist2",
+            "ghidra_name": "FUN_1",
+            "cpp_code": body,
+        }]
+        tu, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertIn("struct CloudPt", tu)
+
+        cxx = find_cxx_compiler()
+        if not cxx:
+            self.skipTest("no C++ compiler on PATH")
+        preamble = make_preamble("// per-fn", restored, [])
+        with tempfile.TemporaryDirectory() as td:
+            rep = compile_snippet(
+                body,
+                preamble_lines=preamble,
+                work_dir=Path(td),
+                name="0x1",
+                compiler=cxx,
+            )
+            self.assertTrue(rep.ok, rep.stderr)
+
+    def test_compile_snippet_does_not_infer_ghidra_locals(self):
+        from src.agents.assembler import type_stubs_for_snippet
+
+        stubs = type_stubs_for_snippet(
+            "void go() {\n"
+            "  longlong local_110;\n"
+            "  local_110 *p;\n"
+            "  p = &local_110;\n"
+            "}\n"
+        )
+        blob = "\n".join(stubs)
+        self.assertNotIn("struct local_110", blob)
 
     def test_ghidra_typedefs_compile(self):
         from src.analysis.compile_verify import compile_cpp, find_cxx_compiler

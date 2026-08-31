@@ -273,6 +273,30 @@ def _ghidra_stubs(text: str) -> List[str]:
     return lines
 
 
+_RE_STRUCT_NAME = re.compile(r"\bstruct\s+([A-Za-z_]\w*)")
+
+
+def type_stubs_for_snippet(code: str, preamble: str = "") -> List[str]:
+    """Same inferred structs + thunk/DAT stubs assemble() prepends, for one fn.
+
+    Per-function compile uses includes preamble only; without these stubs
+    known dialect undeclared-struct-type is a TU-only win.
+    """
+    blob = code or ""
+    already = set(_RE_STRUCT_NAME.findall(preamble or ""))
+    already |= set(_RE_STRUCT_NAME.findall(blob))
+    inferred = _infer_structs(blob, already)
+    lines: List[str] = []
+    names = [n for n in sorted(inferred) if n not in already]
+    if names:
+        lines.append("// ---- inferred types (per-fn) ----")
+        for name in names:
+            lines.append(_format_inferred_struct(name, inferred[name]))
+            lines.append("")
+    lines.extend(_ghidra_stubs(blob))
+    return lines
+
+
 _RE_INT_DAT = re.compile(
     r"^[ \t]*(?:extern(?:\s+\"C\")?\s+|static\s+)?(?:(?:std::)?u?int(?:8|16|32|64)_t|"
     r"undefined\d*|unsigned(?:\s+long(?:\s+long)?)?|long(?:\s+long)?|int)\s+"

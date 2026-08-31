@@ -65,6 +65,10 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "opaque iterator vs vector const_iterator",
     ),
     (
+        r"invalid conversion from '(?:longlong|undefined8)' .+ to 'mpz_(?:ptr|srcptr)'",
+        "ghidra word vs mpz_ptr",
+    ),
+    (
         r"to 'std::string\*' \{aka 'std::__cxx11::basic_string<char>\*'\} in assignment",
         "string value vs string*",
     ),

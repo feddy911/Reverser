@@ -8,6 +8,9 @@ steps:
       - find: "const_std::"
         replace: "const std::"
         notes: "before _std:: → std:: or the token becomes conststd"
+      - find: "structstd::"
+        replace: "std::"
+        notes: "Ghidra glues elaborated struct onto std:: (structstd::char_traits)"
   - when: after_templates
     regex:
       - pattern: "\\b([A-Za-z_]\\w*)\\s*\\.\\s*_M_cur\\b"

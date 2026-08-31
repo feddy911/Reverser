@@ -1,80 +1,80 @@
 # Reverser
 
-Мультистадийный пайплайн восстановления C++ из произвольного исполняемого файла:
+A multi-stage pipeline that recovers C++ from an arbitrary executable:
 **triage → Ghidra → score → LLM restore → assemble → (optional) polish / fidelity**.
 
-## Требования
+## Requirements
 
 - Python 3.10+
-- [Ghidra](https://ghidra-sre.org/) (headless; Windows `.bat` или Unix `analyzeHeadless`)
-- [Ollama](https://ollama.com/) + модель из `config.yaml` (по умолчанию `qwen2.5-coder:14b-instruct-q5_K_M`)
+- [Ghidra](https://ghidra-sre.org/) (headless; Windows `.bat` or Unix `analyzeHeadless`)
+- [Ollama](https://ollama.com/) plus the model in `config.yaml` (default `qwen2.5-coder:14b-instruct-q5_K_M`)
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Быстрый старт
+## Quick start
 
-1. Отредактируйте `config.yaml`: `binary_path`, `ghidra_path`, `ollama_url`.
-2. Запустите пайплайн. Подсказок под конкретный сэмпл нет: бинарник считается неизвестным.
+1. Edit `config.yaml`: `binary_path`, `ghidra_path`, `ollama_url`.
+2. Run the pipeline. There are no sample-specific hints: the binary is treated as unknown.
 
 ```bash
 py main.py --config config.yaml
-# или
+# or
 py main.py --binary path/to/app.exe
 ```
 
-Артефакты прогона: `output/logs/run_<timestamp>/`  
+Run artifacts land in `output/logs/run_<timestamp>/`
 (`triage.json`, `ghidra_raw.json`, `features.json`, `restored*.cpp`, `fidelity.json`, `metrics.json`).
 
-Пустой Ghidra-дамп — ошибка (fail-hard), пайплайн не продолжает «вхолостую».
+An empty Ghidra dump is a hard failure; the pipeline does not continue with a blank restore.
 
-## Triage и промпт-профили
+## Triage and prompt profiles
 
-`src/analysis/triage.py` определяет format (PE/ELF/Mach-O), arch, compiler, Debug/Release
-и выбирает профиль (`msvc_x64_debug`, `gcc_elf_x64`, `generic`, …).
+`src/analysis/triage.py` detects format (PE/ELF/Mach-O), arch, compiler, Debug/Release
+and selects a profile (`msvc_x64_debug`, `gcc_elf_x64`, `generic`, …).
 
-Restorer берёт system/user rules из `src/analysis/prompts.py` по этому профилю.
+The restorer loads system/user rules from `src/analysis/prompts.py` for that profile.
 
 ## Includes
 
-`#include` собираются динамически из `ext_calls` / `ext_dlls` бинарника
-(`src/analysis/includes.py`). GMP появляется, если в дампе есть `mpz_*` или `gmp.dll` —
-не из заранее известного имени сэмпла.
+`#include` lines are collected dynamically from the binary's `ext_calls` / `ext_dlls`
+(`src/analysis/includes.py`). GMP is added when the dump has `mpz_*` or `gmp.dll` —
+not from a hard-coded sample name.
 
-## Скоринг
+## Scoring
 
-- `scoring_mode: heuristic` — веса в `src/analysis/scorer.py`
-- `scoring_mode: ml` — модель из `ml_weights_path` (meta JSON + joblib)
+- `scoring_mode: heuristic` — weights in `src/analysis/scorer.py`
+- `scoring_mode: ml` — model from `ml_weights_path` (meta JSON + joblib)
 
 ```bash
 py -m src.analysis.train_scorer --help
 py -m src.analysis.eval_scorer_l1o --manifest eval/manifest.yaml
 ```
 
-`eval_scorer_l1o` — leave-one-binary-out по `eval/manifest.yaml`: heuristic / logreg / RF /
-дерево `max_depth=4`, те же 22 `FEATURE_KEYS`. Метрика — filtered recall@15 по `user_names`
-каждого exe. Не gcc в признаках, не compile-gate.
+`eval_scorer_l1o` is leave-one-binary-out over `eval/manifest.yaml`: heuristic / logreg / RF /
+a tree with `max_depth=4`, the same 22 `FEATURE_KEYS`. The metric is filtered recall@15 on each
+exe's `user_names`. gcc text is not a feature, and this track is not a compile-gate.
 
 ## Eval harness (scoring-only, Q6)
 
-Отдельный трек от compile-gate. Манифест: `eval/manifest.yaml` — 9 помеченных
-бинарников (`user_names` / `labels_MyCollatz.json`). Нет дампа в `output/cache/` —
-запись пропускается (CI без Ghidra). Не assemble, не gcc, не рецепты.
+A separate track from the compile-gate. Manifest: `eval/manifest.yaml` — 9 labeled
+binaries (`user_names` / `labels_MyCollatz.json`). If there is no dump in `output/cache/`,
+the entry is skipped (CI without Ghidra). No assemble, no gcc, no recipes.
 
 ```bash
 py -m src.analysis.eval_harness --manifest eval/manifest.yaml
 py -m src.analysis.eval_harness --fixture tests/fixtures/mini_ghidra.json
 ```
 
-Отчёт: `output/eval_report.json` (recall@k по именам, в т.ч. после CRT-фильтра).
-L1O: `output/scorer_l1o.json`. `train_scorer` не является compile-oracle и не учится на gcc-диагностиках.
+Report: `output/eval_report.json` (name recall@k, including after the CRT filter).
+L1O: `output/scorer_l1o.json`. `train_scorer` is not a compile oracle and does not train on gcc diagnostics.
 
-## Корпус диалекта Ghidra (compile-gate)
+## Ghidra dialect corpus (compile-gate)
 
-Новые rewrite в `ghidra_cpp.py` / `assembler.py` не добавляются по итогам одного exe.
-Сначала фикстура в `eval/corpus/<id>.yaml` (сниппет + recipe + contains / not_contains), затем рецепт.
-Схема полей: `eval/corpus/_schema.yaml`. Сейчас **160** загружаемых фикстур.
+New rewrites in `ghidra_cpp.py` / `assembler.py` are not added from a single exe run.
+First a fixture in `eval/corpus/<id>.yaml` (snippet + recipe + contains / not_contains), then the recipe.
+Field schema: `eval/corpus/_schema.yaml`. There are currently **161** loadable fixtures.
 
 ```bash
 py -m src.analysis.eval_corpus
@@ -82,120 +82,120 @@ py -m src.analysis.eval_corpus --dir eval/corpus --out output/corpus_report.json
 py -m src.analysis.eval_classifier
 ```
 
-Заморозка: не писать имена PointCloud / EchoFilter / MyCollatz / IniMini /
-TaskBoard / NetPath / `starts_with` в sanitizer или assembler.
-Per-function compile-fix пишет `compile_fn/*_fix.cpp` и кэш `kind=compile_fn_fix`.
-Он **не** перезаписывает restore-кэш и не подменяет `cpp_code` для assemble.
+Freeze: do not put PointCloud / EchoFilter / MyCollatz / IniMini /
+TaskBoard / NetPath / `starts_with` names into the sanitizer or assembler.
+Per-function compile-fix writes `compile_fn/*_fix.cpp` and cache `kind=compile_fn_fix`.
+It does **not** overwrite the restore cache and does not replace `cpp_code` used by assemble.
 
-## Генератор, librarian, Compiler agent, Critic
+## Generator, librarian, Compiler agent, Critic
 
-Наполнение базы — мини-программы (string/vector/iostream/chrono/GMP/main), не пользовательский exe:
+The corpus is filled from mini-programs (string/vector/iostream/chrono/GMP/main), not from a user exe:
 
 ```bash
 py -m src.analysis.gen_corpus --out output/corpus_gen --compile --vary
-# Ghidra-дампы мини-программ (нужен ghidra_path в config.yaml):
+# Ghidra dumps of mini-programs (needs ghidra_path in config.yaml):
 py -m src.analysis.gen_corpus --ghidra --config config.yaml
 ```
 
-`--vary` переименовывает идентификаторы в фикстурах: рецепт не должен быть приклеен к `prefixPtr`.
+`--vary` renames identifiers in fixtures: a recipe must not be glued to `prefixPtr`.
 
-Правило наполнения (Q1): дамп принимают в корпус, если он зелёный **без нового regex**, либо есть честный
-`gcc_fingerprint` и фикстура **до** рецепта. Не плодить compile-ok YAML с пустым отпечатком ради счётчика.
-Красные generator-дампы ниже не чинить.
+Fill rule (Q1): accept a dump into the corpus if it is green **without a new regex**, or if there is an honest
+`gcc_fingerprint` and the fixture exists **before** the recipe. Do not mint compile-ok YAML with an empty
+fingerprint just to grow the count. Do not patch the red generator dumps listed below.
 
-Q3b (план, не restore): тот же цикл unknown→мини→фикстура можно крутить офлайн (`dialect_loop`) —
-очередь нормализованных диагностик, каталог мини, Ghidra, YAML до рецепта. Лексика — таблица замен;
-структурный патч без автомержа; семантика красной восьмёрки (`T&` vs `T*`, `ios::good()` без объекта)
-и placeholder-итераторы / ключи (`sort<__normal_iterator`, `key_type` как `ghidra_word`) —
-skip-forever. Live `match_errors` то же правило: без LLM. `main.py` не патчит sanitizer.
+Q3b (lab, not restore): the same unknown→mini→fixture loop can run offline (`dialect_loop`) —
+a queue of normalized diagnostics, a mini catalog, Ghidra, YAML before any recipe. Lexical changes are a
+replacement table; structural patches are not auto-merged; red-eight semantics (`T&` vs `T*`, `ios::good()`
+with no object) and placeholder iterators / keys (`sort<__normal_iterator`, `key_type` as `ghidra_word`)
+are skip-forever. Live `match_errors` uses the same rule: no LLM. `main.py` does not patch the sanitizer.
 
 ```bash
 py -m src.analysis.dialect_loop --from-report output/apply_inimini_report.json
 py -m src.analysis.dialect_loop --message "invalid cast from type '__const_iterator'..." --emit
 py -m src.analysis.dialect_loop --message "..." --emit --dumps-dir output/corpus_gen/ghidra_dumps
-# опционально: --ghidra --config config.yaml  (дамп + проверка токена)
+# optional: --ghidra --config config.yaml  (dump + token check)
 ```
 
-Команда не патчит `ghidra_cpp.py` и не копирует YAML в `eval/corpus/`. Бюджет по умолчанию — один мини.
-Известный fingerprint → skip; красная восьмёрка → skip-forever; остальное — каталог или `no_catalog`.
+The command does not patch `ghidra_cpp.py` and does not copy YAML into `eval/corpus/`. Default budget is one mini.
+A known fingerprint → skip; red eight → skip-forever; otherwise catalog or `no_catalog`.
 
-Librarian собирает черновик YAML из дампа и принимает его в `eval/corpus/` только после зелёного `eval_case`.
-Имена held-out / сэмплов (`heldout`, `pointcloud`, `echofilter`, `mycollatz`, …) отклоняются.
+The librarian drafts YAML from a dump and accepts it into `eval/corpus/` only after a green `eval_case`.
+Held-out / sample names (`heldout`, `pointcloud`, `echofilter`, `mycollatz`, …) are refused.
 
 ```bash
 py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-dir output/librarian_draft
 py -m src.analysis.librarian --dumps-dir output/corpus_gen/ghidra_dumps --draft-dir output/librarian_draft --accept-compiled
 ```
 
-Целиком зелёные generator-дампы (assemble + gcc, без held-out): `hypot_sqrt`, `mingw_main`, `vector_reserve`, `iostream_shift`, `string_assign`, `string_find`, `set_count`, `algo_sort`, `chrono_cast`, `pair_first`, `string_substr`, `umap_count`, `vector_empty`, `string_compare`, `list_size`, `map_emplace`, `algo_reverse`, `string_append`, `vector_clear`, `cmath_fabs`, `string_erase`, `vector_resize`, `cstring_memcpy`, `cstring_memcmp`, `string_length`, `vector_pop_back`, `utility_swap`, `cstring_strlen`, `cstring_memset`, `string_c_str`, `vector_size`, `cmath_pow`, `cstring_strcmp`, `cstring_memmove`, `cstring_strcpy`, `string_clear`, `string_data`, `string_empty`, `vector_capacity`, `cmath_floor`, `cmath_sin`, `cstdio_printf`, `cmath_ceil`, `cmath_cos`, `cstring_strncpy`, `cstdio_sprintf`, `cstdlib_atoi`, `string_resize`, `string_reserve`, `pair_second`, `list_empty`, `set_empty`, `cmath_log`, `cmath_exp`, `cmath_round`, `cstring_strcat`, `cstdio_puts`, `cstdio_snprintf`, `string_push_back`, `map_size`, `set_size`, `list_clear`.
+Fully green generator dumps (assemble + gcc, not held-out): `hypot_sqrt`, `mingw_main`, `vector_reserve`, `iostream_shift`, `string_assign`, `string_find`, `set_count`, `algo_sort`, `chrono_cast`, `pair_first`, `string_substr`, `umap_count`, `vector_empty`, `string_compare`, `list_size`, `map_emplace`, `algo_reverse`, `string_append`, `vector_clear`, `cmath_fabs`, `string_erase`, `vector_resize`, `cstring_memcpy`, `cstring_memcmp`, `string_length`, `vector_pop_back`, `utility_swap`, `cstring_strlen`, `cstring_memset`, `string_c_str`, `vector_size`, `cmath_pow`, `cstring_strcmp`, `cstring_memmove`, `cstring_strcpy`, `string_clear`, `string_data`, `string_empty`, `vector_capacity`, `cmath_floor`, `cmath_sin`, `cstdio_printf`, `cmath_ceil`, `cmath_cos`, `cstring_strncpy`, `cstdio_sprintf`, `cstdlib_atoi`, `string_resize`, `string_reserve`, `pair_second`, `list_empty`, `set_empty`, `cmath_log`, `cmath_exp`, `cmath_round`, `cstring_strcat`, `cstdio_puts`, `cstdio_snprintf`, `string_push_back`, `map_size`, `set_size`, `list_clear`.
 
-Compiler agent классифицирует gcc-диагностики по `gcc_fingerprint` корпуса
-(`src/agents/compiler.py` `match_errors`). Это и есть P3: детерминированный
-gcc→recipe_id, уже включён в per-fn и TU compile-fix. Известный класс — без LLM.
-Skip-forever (красная восьмёрка, placeholder-итераторы, `this` как локаль) тоже
-без LLM: не чинить и не звать compile-fix. Неизвестный — один LLM-проход и
-YAML-черновик (не патч sanitizer).
-Scoring ML (`train_scorer`) не используется как compile-oracle.
+The Compiler agent classifies gcc diagnostics against corpus `gcc_fingerprint`
+(`src/agents/compiler.py` `match_errors`). That is P3: deterministic
+gcc→recipe_id, already wired into per-fn and TU compile-fix. A known class skips the LLM.
+Skip-forever (red eight, placeholder iterators, `this` as a local) also
+skips the LLM: do not patch and do not call compile-fix. Unknown → one LLM pass and
+a YAML draft (not a sanitizer patch).
+Scoring ML (`train_scorer`) is not used as a compile oracle.
 
-Из 160 фикстур 94 с `gcc_fingerprint` (классификатор), остальные — compile-ok
-регрессия рецепта. Гейт синтезирует probe из regex или берёт явный `gcc_probe`
-(реалистичное gcc-сообщение, когда `.*` / усечённый alt врёт синтез) и
-проверяет, что `match_errors` попадает в свой id. Коллизия ostream
-sanitize/assemble — один gcc, два рецепта: гейт по умолчанию зелёный;
-`--fail-on-overlap` падает только на unexpected (ostream-пара в allowlist).
-`--list-probes` печатает explicit vs synth. Не учить RF/sklearn на диагностиках.
+Of 161 fixtures, 95 have `gcc_fingerprint` (classifier); the rest are compile-ok
+recipe regression. The gate synthesizes a probe from the regex or uses an explicit `gcc_probe`
+(a realistic gcc message, when `.*` / a truncated alt would lie) and
+checks that `match_errors` hits its own id. The ostream sanitize/assemble collision
+is one gcc, two recipes: the gate is green by default;
+`--fail-on-overlap` fails only on unexpected overlaps (the ostream pair is allowlisted).
+`--list-probes` prints explicit vs synth. Do not train RF/sklearn on diagnostics.
 
-Critic (`critic.json`) принимает прогон только при compile ∧ fidelity ∧ identity.
-Fidelity не маскирует пропуск литерала или `ext_calls` средним score ≥ 0.85 —
-это факты дампа. Identity ловит подмену `starts_with` на `std::sort`.
-Critic не требует угадать исходное имя из репозитория. `compile_ok` — собранный
-TU, не compile-fix. Restore-кэш: `LLM_PROMPT_VER=p4`.
+The critic (`critic.json`) accepts a run only when compile ∧ fidelity ∧ identity hold.
+Fidelity does not paper over a missing literal or `ext_calls` with a mean score ≥ 0.85 —
+those are dump facts. Identity catches replacing `starts_with` with `std::sort`.
+The critic does not require guessing the original source name. `compile_ok` is the assembled
+TU, not compile-fix. Restore cache: `LLM_PROMPT_VER=p4`.
 
 ## Held-out (P2)
 
-PointCloud и сгенерированный `heldout_struct_math` **не** используются, чтобы писать regex.
-Eval только применяет корпус, Compiler agent и Critic.
+PointCloud and generated `heldout_struct_math` are **not** used to write regex.
+Eval only applies the corpus, Compiler agent, and Critic.
 
 ```bash
 py -m src.analysis.eval_heldout
 ```
 
-Отчёт: `output/heldout_report.json`. Красный TU — очередь в корпус, не патч `ghidra_cpp.py`.
-`--accept` на дампы с `heldout` в id запрещён.
+Report: `output/heldout_report.json`. A red TU is a corpus queue item, not a `ghidra_cpp.py` patch.
+`--accept` is forbidden on dumps whose id contains `heldout`.
 
-## Метрики прогона
+## Run metrics
 
-`RUN METRICS` + `metrics.json`: latency стадий, LLM ok/fail/fallback, polish, fidelity,
+`RUN METRICS` plus `metrics.json`: stage latency, LLM ok/fail/fallback, polish, fidelity,
 compile-verify, triage profile.
 
-## Compile-verify (Фаза 2)
+## Compile-verify (Phase 2)
 
-После restore каждая **user_code** функция проходит syntax-check отдельно
-(`compile_fn/`). LLM compile-fix остаётся диагностикой (файл `*_fix.cpp`),
-тело restore для assemble не подменяется. Затем собирается TU и проверяется
-`restored_final.cpp`. `llm_best_of: 2` — второй restore при fidelity < 0.85.
+After restore, each **user_code** function is syntax-checked on its own
+(`compile_fn/`). LLM compile-fix stays a diagnostic (`*_fix.cpp`);
+the restore body used by assemble is not replaced. Then the TU is assembled and
+`restored_final.cpp` is checked. `llm_best_of: 2` runs a second restore when fidelity < 0.85.
 
-CRT/STL/MinGW internals (`__mingw_*`, `_M_*`, `_pei386_*`, `fprintf`, …) **не**
-попадают в LLM top.
+CRT/STL/MinGW internals (`__mingw_*`, `_M_*`, `_pei386_*`, `fprintf`, …) do **not**
+enter the LLM top.
 
-В `config.yaml`: `compile_verify`, `compile_fix`, `compile_per_function`,
-опционально `cxx_compiler` / `llm_best_of`.
+In `config.yaml`: `compile_verify`, `compile_fix`, `compile_per_function`,
+optional `cxx_compiler` / `llm_best_of`.
 
-## Тесты (без Ghidra/Ollama)
+## Tests (no Ghidra/Ollama)
 
 ```bash
 py -m unittest tests.test_heldout tests.test_corpus tests.test_p1_agents tests.test_phase1 tests.test_smoke -q
 py -m unittest discover -s tests -v
 ```
 
-Ghidra нужна только для `--ghidra` / полного пайплайна / held-out PointCloud (дамп уже в `output/cache/`).
+Ghidra is needed only for `--ghidra` / the full pipeline / held-out PointCloud (dump already in `output/cache/`).
 
-## Структура
+## Layout
 
 ```
 main.py
 config.yaml
-eval/                   # scoring-манифесты, corpus/*.yaml, heldout.yaml
+eval/                   # scoring manifests, corpus/*.yaml, heldout.yaml
 scripts/                # Ghidra Java
 src/
   pipeline/             # runner, metrics
@@ -204,17 +204,17 @@ src/
   domains/              # generic C++ preamble / Ghidra typedefs
   ghidra/               # cross-platform headless launcher
   llm/
-legacy/                 # старый r2/LangGraph (не используется)
+legacy/                 # old r2/LangGraph (unused)
 tests/
 ```
 
-## Замечания
+## Notes
 
-- Не запускайте недоверенные бинарники без изоляции: Ghidra загружает файл целиком.
-- Полный multi-binary ML-датасет (5–10 labeled) — следующий шаг: наполните `eval/` и переобучите scorer.
-- Generator-дампы, которые ещё не собираются целиком (очередь корпуса, не PointCloud):
-  `map_count` (`mapped_type*` для `operator[]`, это `T&`),
-  `init_list_vector` (`reference` как `T&`, не `T*`),
-  `deque_push` / `uset_count` / `mset_count` (`this` в сигнатуре),
-  `fstream_write` (`ios::good()` без объекта — без честного receiver не чинить),
-  `optional_value` / `algo_fill` (внутренности `remove_cv_t` / `__fill_a1`).
+- Do not run untrusted binaries without isolation: Ghidra loads the whole file.
+- A full multi-binary ML dataset (5–10 labeled) is a later step: fill `eval/` and retrain the scorer.
+- Generator dumps that still do not assemble as a whole TU (corpus queue, not PointCloud):
+  `map_count` (`mapped_type*` for `operator[]`, which is `T&`),
+  `init_list_vector` (`reference` as `T&`, not `T*`),
+  `deque_push` / `uset_count` / `mset_count` (`this` in the signature),
+  `fstream_write` (`ios::good()` with no object — do not invent a receiver),
+  `optional_value` / `algo_fill` (`remove_cv_t` / `__fill_a1` internals).

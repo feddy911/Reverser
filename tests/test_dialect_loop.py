@@ -182,6 +182,20 @@ class TestDialectLoop(unittest.TestCase):
         )
         self.assertEqual(rec["emit"], [])
 
+    def test_ghidra_word_vs_mpz_ptr_is_skip_forever(self):
+        rec = plan_messages(
+            [
+                "invalid conversion from 'longlong' {aka 'long long int'} "
+                "to 'mpz_ptr' {aka '__mpz_struct*'} [-fpermissive]"
+            ],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertTrue(
+            any(c["action"] == "skip_forever" for c in rec["clusters"])
+        )
+        self.assertEqual(rec["emit"], [])
+
     def test_no_catalog_does_not_emit(self):
         rec = plan_messages(
             ["wholly_new_ghidra_token was not declared in this scope"],
