@@ -179,6 +179,21 @@ def _recall(
         out["n_addr_labels"] = naddr
         out["recall_at_k_addr"] = round(raw_a / naddr, 3)
         out["recall_at_k_addr_filtered"] = round(filt_a / naddr, 3)
+        out["addr_hits"] = [
+            {"address": t.get("address"), "name": t.get("name"),
+             "score": t.get("score"), "n_literals": t.get("n_literals"),
+             "size": t.get("size")}
+            for t in filtered if t.get("address") in pset
+        ]
+        fset = {t.get("address") for t in filtered}
+        out["addr_misses"] = [
+            {"address": s.get("address"), "name": s.get("name"),
+             "score": s.get("score"), "n_literals": s.get("n_literals"),
+             "n_iostream": s.get("n_iostream"), "size": s.get("size"),
+             "is_named": s.get("is_named"), "is_fun_name": s.get("is_fun_name")}
+            for s in scored
+            if s.get("address") in pset and s.get("address") not in fset
+        ]
     return out
 
 

@@ -39,8 +39,8 @@ The restorer loads system/user rules from `src/analysis/prompts.py` for that pro
 ## Includes
 
 `#include` lines are collected dynamically from the binary's `ext_calls` / `ext_dlls`
-(`src/analysis/includes.py`). GMP is added when the dump has `mpz_*` or `gmp.dll` —
-not from a hard-coded sample name.
+(`src/analysis/includes.py`). GMP is added when the dump has `mpz_*` or `gmp.dll`,
+MPFR when it has `mpfr_*` / `libmpfr` — not from a hard-coded sample name.
 
 ## Scoring
 
@@ -85,7 +85,7 @@ py -m src.analysis.eval_classifier
 ```
 
 Freeze: do not put PointCloud / EchoFilter / MyCollatz / IniMini /
-TaskBoard / NetPath / `starts_with` names into the sanitizer or assembler.
+TaskBoard / NetPath / GammaFn / `starts_with` names into the sanitizer or assembler.
 Per-function compile-fix writes `compile_fn/*_fix.cpp` and cache `kind=compile_fn_fix`.
 It does **not** overwrite the restore cache and does not replace `cpp_code` used by assemble.
 
@@ -119,7 +119,8 @@ py -m src.analysis.dialect_loop --message "..." --emit --dumps-dir output/corpus
 ```
 
 The command does not patch `ghidra_cpp.py` and does not copy YAML into `eval/corpus/`. Default budget is one mini.
-A known fingerprint → skip; red eight → skip-forever; otherwise catalog or `no_catalog`.
+A known fingerprint → skip; red eight → skip-forever; restore/compile TU (`compile.json` with `assembled_ok`) is refused;
+missing quotes / `else` without `if` are restore debris, not catalog; otherwise catalog or `no_catalog`.
 
 The librarian drafts YAML from a dump and accepts it into `eval/corpus/` only after a green `eval_case`.
 Held-out / sample names (`heldout`, `pointcloud`, `echofilter`, `mycollatz`, …) are refused.
@@ -134,8 +135,8 @@ Fully green generator dumps (assemble + gcc, not held-out): `hypot_sqrt`, `mingw
 The Compiler agent classifies gcc diagnostics against corpus `gcc_fingerprint`
 (`src/agents/compiler.py` `match_errors`). That is P3: deterministic
 gcc→recipe_id, already wired into per-fn and TU compile-fix. A known class skips the LLM.
-Skip-forever (red eight, placeholder iterators, `this` as a local) also
-skips the LLM: do not patch and do not call compile-fix. Unknown → one LLM pass and
+Skip-forever (red eight, placeholder iterators, `this` as a local, iterator/`char*` vs `string*`,
+truncated `mpz_*` calls) also skips the LLM: do not patch and do not call compile-fix. Unknown → one LLM pass and
 a YAML draft (not a sanitizer patch).
 Scoring ML (`train_scorer`) is not used as a compile oracle.
 

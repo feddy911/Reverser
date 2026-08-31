@@ -19,6 +19,7 @@ _CALL_INCLUDE_RULES: List[tuple] = [
     (re.compile(r"^(std::)?(cout|cerr|cin)$"), "#include <iostream>"),
     (re.compile(r"^mpz_|^__gmpz_"), "#include <gmp.h>"),
     (re.compile(r"^mpf_|^__gmpf_"), "#include <gmp.h>"),
+    (re.compile(r"^mpfr_|^__gmpfr_"), "#include <mpfr.h>"),
 ]
 
 # Domain DLL stem -> include

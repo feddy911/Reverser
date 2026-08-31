@@ -92,7 +92,7 @@ def _per_function_compile(
     if fname:
         body = extract_named_function(body, fname)
     body = sanitize_ghidra_cpp(body)
-    data["cpp_code"] = body
+    # Compile isolation only. Do not write back — that drops dump-fact comments.
 
     preamble = make_preamble(
         f"// per-function compile {addr}",
@@ -502,6 +502,11 @@ def run(config: AppConfig) -> int:
                 data["literals"] = s.get("literals", [])
                 data["ext_calls"] = s.get("ext_calls", [])
                 data["callees"] = s.get("callees", [])
+                from src.agents.restorer import keep_dump_literals
+                data["cpp_code"] = keep_dump_literals(
+                    data.get("cpp_code") or "",
+                    s.get("literals") or [],
+                )
                 if config.compile_verify and config.compile_per_function:
                     _per_function_compile(
                         data,

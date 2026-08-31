@@ -99,3 +99,15 @@ entries:
       - cheapest_path
       - print_route
       - collect_nodes
+
+  - name: gammafn
+    binary: samples/GammaFn.exe
+    ghidra_json: output/cache/cf63ba65bdd5aab1390170b9ad78a0bd/ghidra_full_v6.json
+    user_names:
+      - main
+      - gamma_eval
+      - ln_gamma_eval
+      - gamma_int_exact
+      - mpfr_to_string
+      - print_gamma_table
+      - mpz_to_dec

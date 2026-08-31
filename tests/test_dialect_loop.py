@@ -270,6 +270,32 @@ class TestDialectLoop(unittest.TestCase):
             checks = verify_dumps(plan, ddir)
             self.assertTrue(checks[0]["token_ok"])
 
+    def test_restore_compile_json_is_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "compile.json"
+            path.write_text(
+                json.dumps({
+                    "assembled_ok": False,
+                    "n_errors": 2,
+                    "unknown_messages": ["missing terminating ' character"],
+                }),
+                encoding="utf-8",
+            )
+            rec = plan_from_report(path)
+            self.assertTrue(rec.get("refused"))
+            self.assertEqual(rec["emit"], [])
+
+    def test_restore_debris_does_not_emit(self):
+        rec = plan_messages(
+            ["missing terminating ' character"],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertTrue(
+            any(c["action"] == "skip_restore_debris" for c in rec["clusters"])
+        )
+        self.assertEqual(rec["emit"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

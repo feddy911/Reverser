@@ -90,6 +90,10 @@ class TestScorerL1O(unittest.TestCase):
                 fold["models"]["heuristic"].get("recall_at_k_addr_filtered"),
                 1.0,
             )
+            self.assertEqual(
+                fold["models"]["heuristic"].get("addr_misses"),
+                [],
+            )
 
     def test_family_twin_dropped_from_train(self):
         with tempfile.TemporaryDirectory() as td:

@@ -69,6 +69,18 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "ghidra word vs mpz_ptr",
     ),
     (
+        r"too few arguments to function '(?:int |void )?__gmpz_",
+        "ghidra truncated mpz call",
+    ),
+    (
+        r"cannot convert '.*const_iterator' to 'std::string\*'",
+        "iterator vs string*",
+    ),
+    (
+        r"cannot convert 'char\*' to 'std::string\*'",
+        "char* vs string*",
+    ),
+    (
         r"to 'std::string\*' \{aka 'std::__cxx11::basic_string<char>\*'\} in assignment",
         "string value vs string*",
     ),

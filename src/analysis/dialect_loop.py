@@ -23,6 +23,15 @@ from src.analysis.gen_corpus import MINI_PROGRAMS
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# LLM restore debris: not a Ghidra dialect class. Do not emit a catalog mini.
+_RESTORE_DEBRIS = (
+    r"missing terminating ['\"] character",
+    r"'else' without a previous 'if'",
+    r"break statement not within loop or switch",
+    r"expected unqualified-id before '(?:void|return)'",
+    r"expected declaration before '\}' token",
+)
+
 # Honest Q3 minis: gcc text → generator id + Ghidra token to require in a dump.
 CATALOG: Sequence[tuple[str, str, str]] = (
     (r"const_std::|'conststd' was not declared", "map_str_size", "const_std::"),
@@ -133,6 +142,14 @@ def _skip_forever_reason(msg: str) -> Optional[str]:
     return skip_forever_reason(msg)
 
 
+def _restore_debris_reason(msg: str) -> Optional[str]:
+    text = msg or ""
+    for pat in _RESTORE_DEBRIS:
+        if _safe_search(pat, text):
+            return "restore TU debris (not Ghidra dialect)"
+    return None
+
+
 def _catalog_hit(msg: str) -> Optional[tuple[str, str]]:
     for pat, mini_id, token in CATALOG:
         if _safe_search(pat, msg):
@@ -170,6 +187,21 @@ def plan_messages(
                 clusters.append({
                     "action": "skip_forever",
                     "reason": forever,
+                    "messages": [text],
+                    "mini_id": "",
+                    "token": "",
+                })
+            else:
+                clusters[idx]["messages"].append(text)
+            continue
+        debris = _restore_debris_reason(text)
+        if debris:
+            idx = seen_skip.get(debris)
+            if idx is None:
+                seen_skip[debris] = len(clusters)
+                clusters.append({
+                    "action": "skip_restore_debris",
+                    "reason": debris,
                     "messages": [text],
                     "mini_id": "",
                     "token": "",
@@ -251,6 +283,22 @@ def plan_messages(
 
 def plan_from_report(path: Path, *, budget: int = 1) -> Dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("compile_fix") is not None or data.get("assembled_ok") is not None:
+        return {
+            "report": str(path),
+            "refused": "restore/compile TU is not a dialect_loop source; use apply-only or a mini",
+            "n_messages": 0,
+            "n_unknown": 0,
+            "n_known": 0,
+            "n_no_catalog": 0,
+            "budget": max(0, int(budget)),
+            "clusters": [],
+            "emit": [],
+            "note": (
+                "dialect_loop is a lab. It does not patch ghidra_cpp.py "
+                "and does not accept YAML into eval/corpus."
+            ),
+        }
     msgs = list(data.get("unknown_messages") or [])
     rec = plan_messages(msgs, budget=budget)
     rec["report"] = str(path)

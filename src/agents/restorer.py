@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from src.analysis.prompts import system_prompt_for, toolchain_rules_for
 from src.llm.client import OllamaClient, extract_json
@@ -72,6 +72,26 @@ DUP_NOTE = (
     "Это ДРУГАЯ функция по другому адресу. Переведи её код буквально и независимо, "
     "не повторяя предыдущие ответы."
 )
+
+
+def keep_dump_literals(code: str, literals: Sequence[str]) -> str:
+    """Re-attach dump-fact string literals the LLM dropped. No new control flow.
+
+    Notes go inside the last function body so extract_named_function / assemble
+    keep them. Trailing comments after '}' are stripped.
+    """
+    from src.analysis.fidelity import _c_escape, literal_in_code
+
+    missing = [l for l in (literals or []) if l and not literal_in_code(l, code)]
+    if not missing:
+        return code or ""
+    notes = "\n".join(f'// dump-fact: "{_c_escape(l)}"' for l in missing)
+    body = (code or "").rstrip()
+    if not body:
+        return notes + "\n"
+    if body.endswith("}"):
+        return body[:-1].rstrip() + "\n  " + notes.replace("\n", "\n  ") + "\n}\n"
+    return body + "\n" + notes + "\n"
 
 
 def _norm(code: str) -> str:

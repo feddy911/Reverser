@@ -52,6 +52,10 @@ FROZEN_TOKENS: Sequence[str] = (
     "NetPath",
     "link_cities",
     "cheapest_path",
+    "GammaFn",
+    "GammaHold",
+    "gamma_eval",
+    "ln_gamma_eval",
 )
 
 FROZEN_PATHS: Sequence[Path] = (

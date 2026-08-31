@@ -10,8 +10,9 @@ Built with MinGW (`samples/build_samples.ps1`): `-std=c++17 -O0 -g`.
 | `XorCipher.exe` | byte loops, buffers |
 | `FibTimer.exe` | numeric loops, chrono |
 | `TaskBoard.exe` | structs, vector, map, sort (apply-only; рецепты по нему не пишут) |
-| `NetPath.exe` | граф, pair, unordered_map (apply-only; рецепты по нему не пишут) |
-| `MyCollatz.exe` | legacy GMP/MSVC Debug эталон |
+| `NetPath.exe` | graph, pair, unordered_map (apply-only; do not write recipes from it) |
+| `GammaFn.exe` | MPFR Gamma + GMP factorial (Collatz-level library types; freeze; do not write recipes) |
+| `MyCollatz.exe` | legacy GMP/MSVC Debug reference |
 
 Rebuild:
 

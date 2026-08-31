@@ -21,8 +21,13 @@ $Targets = @(
     "XorCipher",
     "FibTimer",
     "TaskBoard",
-    "NetPath"
+    "NetPath",
+    "GammaFn"
 )
+
+$GmpTargets = @{
+    "GammaFn" = @("-lgmp", "-lmpfr")
+}
 
 Write-Host "Compiler: $Gpp"
 foreach ($name in $Targets) {
@@ -31,8 +36,12 @@ foreach ($name in $Targets) {
     if (-not (Test-Path $src)) {
         throw "Missing source: $src"
     }
+    $link = @()
+    if ($GmpTargets.ContainsKey($name)) {
+        $link = $GmpTargets[$name]
+    }
     # Debug-ish: -O0 -g for richer decompilation; PE via MinGW.
-    & $Gpp -std=c++17 -O0 -g -Wall -Wextra -o $exe $src
+    & $Gpp -std=c++17 -O0 -g -Wall -Wextra -o $exe $src @link
     if ($LASTEXITCODE -ne 0) {
         throw "Build failed: $name"
     }
@@ -49,4 +58,5 @@ Write-Host "Smoke-run:"
 & (Join-Path $Samples "FibTimer.exe") 10 | Out-Host
 & (Join-Path $Samples "TaskBoard.exe") | Out-Host
 & (Join-Path $Samples "NetPath.exe") | Out-Host
+& (Join-Path $Samples "GammaFn.exe") | Out-Host
 Write-Host "Done."

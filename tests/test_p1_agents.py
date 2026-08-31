@@ -196,6 +196,44 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertFalse(decision.need_llm)
         self.assertIn("ghidra word vs mpz_ptr", decision.skip_forever_reasons)
 
+    def test_skip_forever_char_star_vs_string_star(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "cannot convert 'char*' to 'std::string*' "
+                    "{aka 'std::__cxx11::basic_string<char>*'} in initialization"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("char* vs string*", decision.skip_forever_reasons)
+
+    def test_skip_forever_iterator_vs_string_star(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "cannot convert 'std::vector<std::__cxx11::basic_string<char> >::const_iterator' "
+                    "to 'std::string*' {aka 'std::__cxx11::basic_string<char>*'}"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("iterator vs string*", decision.skip_forever_reasons)
+
+    def test_skip_forever_truncated_mpz_call(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "too few arguments to function 'void __gmpz_set(mpz_ptr, mpz_srcptr)'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ghidra truncated mpz call", decision.skip_forever_reasons)
+
 
 class TestCritic(unittest.TestCase):
     def test_rejects_starts_with_replaced_by_sort(self):

@@ -491,6 +491,37 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertIn("begin", strict["missing_calls"])
         self.assertTrue(dump_facts_ok(strict))
 
+    def test_range_for_dump_does_not_require_std_get(self):
+        from src.analysis.fidelity import check_function
+
+        entry = {
+            "address": "0x1",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": (
+                "const_iterator __for_begin;\n"
+                "type *k;\n"
+            ),
+        }
+        toks = [("get<0>", ["get<0>"]), ("dump_n", ["dump_n"])]
+        restore = "void f() { for (const auto& kv : *m) dump_n(kv); }\n"
+        rep = check_function(entry, restore, toks)
+        self.assertNotIn("get<0>", rep["missing_calls"])
+
+    def test_keep_dump_literals_comments_missing(self):
+        from src.agents.restorer import keep_dump_literals
+        from src.analysis.fidelity import literal_in_code
+        from src.analysis.ghidra_cpp import extract_named_function
+
+        code = "int main() { return 0; }\n"
+        got = keep_dump_literals(code, ["ERROR: mode missing\n", "Selected mode: "])
+        self.assertTrue(literal_in_code("ERROR: mode missing\n", got))
+        self.assertTrue(literal_in_code("Selected mode: ", got))
+        self.assertIn("dump-fact", got)
+        extracted = extract_named_function(got, "main")
+        self.assertIn("dump-fact", extracted)
+        self.assertTrue(literal_in_code("Selected mode: ", extracted))
+
 
 class TestExtractFeatures(unittest.TestCase):
     def test_domain_dll_count(self):

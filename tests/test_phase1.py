@@ -126,6 +126,8 @@ class TestIncludes(unittest.TestCase):
     def test_from_calls_and_dlls(self):
         self.assertIn("#include <cstdio>", includes_from_calls(["printf"]))
         self.assertIn("#include <gmp.h>", includes_from_calls(["mpz_add"]))
+        self.assertIn("#include <mpfr.h>", includes_from_calls(["mpfr_gamma"]))
+        self.assertIn("#include <mpfr.h>", includes_from_dlls(["libmpfr-6.dll"]))
         self.assertIn("#include <gmp.h>", includes_from_dlls(["gmp.dll"]))
         self.assertEqual(includes_from_dlls(["kernel32.dll"]), set())
 

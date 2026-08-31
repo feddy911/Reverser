@@ -152,6 +152,7 @@ def check_function(
         (name, toks) for name, toks in call_tokens
         if not is_noise_call(name)
         and not (skip_range and _is_range_for_method(name))
+        and not (skip_range and _call_base(name) == "get")
     ]
     missing_calls = [
         name for name, toks in required_calls
