@@ -93,6 +93,10 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "ghidra_word* vs vector*",
     ),
     (
+        r"'p[bcilus]Var\d+' was not declared in this scope",
+        "undeclared ghidra temp",
+    ),
+    (
         r"base operand of '->' has non-pointer type '.*value_type' \{aka 'std::pair",
         "arrow on pair value",
     ),

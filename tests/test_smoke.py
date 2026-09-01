@@ -522,6 +522,15 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertIn("dump-fact", extracted)
         self.assertTrue(literal_in_code("Selected mode: ", extracted))
 
+    def test_repair_restore_debris_newline_char_and_void0(self):
+        from src.agents.restorer import repair_restore_debris
+
+        src = "if (c != '" + "\n" + "') { return 1; }(void)0;\n"
+        got = repair_restore_debris(src)
+        self.assertIn("'\\n'", got)
+        self.assertIn("(void)0; }", got)
+        self.assertNotIn("}(void)0;", got)
+
 
 class TestExtractFeatures(unittest.TestCase):
     def test_domain_dll_count(self):

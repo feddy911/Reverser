@@ -41,6 +41,7 @@ GHIDRA_TYPEDEFS: Tuple[str, ...] = (
     "using uint2 = std::uint16_t;",
     "using uint4 = std::uint32_t;",
     "using uint8 = std::uint64_t;",
+    "using __uint64 = unsigned long long;",
     "using pointer = void *;",
     "using PBYTE = unsigned char *;",
     "using PIMAGE_SECTION_HEADER = void *;",

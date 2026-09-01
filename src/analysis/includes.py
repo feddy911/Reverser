@@ -108,6 +108,8 @@ _CODE_INCLUDE_RULES: List[tuple] = [
     (re.compile(r"\b(?:std::)?(ofstream|ifstream|fstream)\b"), "#include <fstream>"),
     (re.compile(r"\bstd::set\b"), "#include <set>"),
     (re.compile(r"\bstd::optional\b"), "#include <optional>"),
+    (re.compile(r"\b(?:mpfr_|__gmpfr_)"), "#include <mpfr.h>"),
+    (re.compile(r"\b(?:mpz_|__gmpz_)"), "#include <gmp.h>"),
 ]
 
 
@@ -131,6 +133,7 @@ def collect_dynamic_includes(
     for r in restored or []:
         incs |= includes_from_calls(r.get("ext_calls") or [])
         incs |= includes_from_source(r.get("cpp_code") or "")
+        incs |= includes_from_source(r.get("ghidra_code") or "")
         for inc in r.get("includes") or []:
             s = str(inc).strip()
             if not s:
@@ -145,6 +148,7 @@ def collect_dynamic_includes(
     for f in functions or []:
         incs |= includes_from_calls(f.get("ext_calls") or [])
         incs |= includes_from_dlls(f.get("ext_dlls") or [])
+        incs |= includes_from_source(f.get("ghidra_code") or f.get("code") or "")
 
     # Стабильный порядок: BASE first, then the rest alpha
     base_set = set(BASE_INCLUDES)

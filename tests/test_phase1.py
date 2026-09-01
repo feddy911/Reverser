@@ -138,6 +138,15 @@ class TestIncludes(unittest.TestCase):
         self.assertIn("#include <cstdio>", incs)
         self.assertIn("#include <gmp.h>", incs)
 
+    def test_includes_mpfr_gmp_from_ghidra_body_without_imports(self):
+        from src.analysis.includes import collect_dynamic_includes
+
+        restored = [{"cpp_code": "void f() { mpfr_gamma(y); }", "ext_calls": []}]
+        funcs = [{"ghidra_code": "__gmpz_set_ui(z, 1); mpfr_lngamma(y);", "ext_calls": []}]
+        incs = collect_dynamic_includes(restored, funcs)
+        self.assertIn("#include <mpfr.h>", incs)
+        self.assertIn("#include <gmp.h>", incs)
+
     def test_includes_from_source_algorithm(self):
         from src.analysis.includes import includes_from_source
 
@@ -1056,6 +1065,23 @@ class TestCompileVerify(unittest.TestCase):
         blob = "\n".join(stubs)
         self.assertNotIn("struct local_110", blob)
 
+    def test_type_stubs_sibling_user_calls(self):
+        from src.agents.assembler import type_stubs_for_snippet
+
+        body = (
+            "int nearest(CloudPt *q) {\n"
+            "  return dist2(q, q) > 0.0;\n"
+            "}\n"
+        )
+        stubs = type_stubs_for_snippet(
+            body,
+            sibling_names=["dist2", "nearest"],
+            current_name="nearest",
+        )
+        blob = "\n".join(stubs)
+        self.assertIn("dist2", blob)
+        self.assertNotIn("inline ghidra_word nearest(", blob)
+
     def test_ghidra_typedefs_compile(self):
         from src.analysis.compile_verify import compile_cpp, find_cxx_compiler
         from src.analysis.includes import make_preamble
@@ -1065,7 +1091,7 @@ class TestCompileVerify(unittest.TestCase):
             self.skipTest("no C++ compiler on PATH")
         preamble = make_preamble("// test", [], [])
         src = "\n".join(preamble) + (
-            "int f(undefined8 x, longlong y) { return (int)(x + y); }\n"
+            "int f(undefined8 x, longlong y, __uint64 z) { return (int)(x + y + z); }\n"
         )
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "ghidra_types.cpp"

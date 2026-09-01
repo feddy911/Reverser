@@ -9,7 +9,7 @@ semantics; Compiler agent applies corpus recipes.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from src.analysis.ghidra_cpp import (
     extract_named_function,
@@ -146,6 +146,8 @@ def _clean_code(code: str, name: str = "") -> str:
     text = "\n".join(lines)
     text = text.replace("cout_exref", "std::cout").replace("cerr_exref", "std::cerr")
     text = sanitize_ghidra_cpp(text)
+    from src.agents.restorer import repair_restore_debris
+    text = repair_restore_debris(text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
@@ -276,11 +278,17 @@ def _ghidra_stubs(text: str) -> List[str]:
 _RE_STRUCT_NAME = re.compile(r"\bstruct\s+([A-Za-z_]\w*)")
 
 
-def type_stubs_for_snippet(code: str, preamble: str = "") -> List[str]:
+def type_stubs_for_snippet(
+    code: str,
+    preamble: str = "",
+    sibling_names: Optional[Sequence[str]] = None,
+    current_name: str = "",
+) -> List[str]:
     """Same inferred structs + thunk/DAT stubs assemble() prepends, for one fn.
 
     Per-function compile uses includes preamble only; without these stubs
-    known dialect undeclared-struct-type is a TU-only win.
+    known dialect undeclared-struct-type is a TU-only win. Sibling names
+    come from the Ghidra dump, not hard-coded sample symbols.
     """
     blob = code or ""
     already = set(_RE_STRUCT_NAME.findall(preamble or ""))
@@ -294,7 +302,35 @@ def type_stubs_for_snippet(code: str, preamble: str = "") -> List[str]:
             lines.append(_format_inferred_struct(name, inferred[name]))
             lines.append("")
     lines.extend(_ghidra_stubs(blob))
+    lines.extend(_sibling_call_stubs(blob, sibling_names or [], current_name))
     return lines
+
+
+def _sibling_call_stubs(
+    code: str,
+    sibling_names: Sequence[str],
+    current_name: str = "",
+) -> List[str]:
+    """Prototypes for other user functions this snippet calls (per-fn only)."""
+    from src.analysis.platform import is_runtime_noise
+
+    blob = code or ""
+    cur = (current_name or "").strip()
+    lines: List[str] = []
+    seen: Set[str] = set()
+    for raw in sibling_names:
+        name = (raw or "").strip()
+        if not name or name == cur or name in seen:
+            continue
+        if is_runtime_noise(name) or name.startswith(("FUN_", "thunk_", "_")):
+            continue
+        if not re.search(rf"\b{re.escape(name)}\s*\(", blob):
+            continue
+        seen.add(name)
+        lines.append(f"inline ghidra_word {name}(...) {{ return {{}}; }}")
+    if not lines:
+        return []
+    return ["// ---- sibling user calls (per-fn) ----"] + lines + [""]
 
 
 _RE_INT_DAT = re.compile(

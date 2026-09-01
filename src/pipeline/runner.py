@@ -99,6 +99,11 @@ def _per_function_compile(
         [data],
         functions,
     )
+    sibs = [
+        (f.get("name") or "").strip()
+        for f in functions or []
+        if (f.get("name") or "").strip()
+    ]
     crep = compile_snippet(
         body,
         preamble_lines=preamble,
@@ -106,6 +111,8 @@ def _per_function_compile(
         name=addr,
         compiler=config.cxx_compiler,
         timeout_sec=config.compile_timeout,
+        sibling_names=sibs,
+        current_name=fname,
     )
     data["compile_ok"] = bool(crep.ok)
     data["compile_n_errors"] = crep.n_errors
@@ -502,10 +509,12 @@ def run(config: AppConfig) -> int:
                 data["literals"] = s.get("literals", [])
                 data["ext_calls"] = s.get("ext_calls", [])
                 data["callees"] = s.get("callees", [])
-                from src.agents.restorer import keep_dump_literals
-                data["cpp_code"] = keep_dump_literals(
-                    data.get("cpp_code") or "",
-                    s.get("literals") or [],
+                from src.agents.restorer import keep_dump_literals, repair_restore_debris
+                data["cpp_code"] = repair_restore_debris(
+                    keep_dump_literals(
+                        data.get("cpp_code") or "",
+                        s.get("literals") or [],
+                    )
                 )
                 if config.compile_verify and config.compile_per_function:
                     _per_function_compile(

@@ -94,6 +94,21 @@ def keep_dump_literals(code: str, literals: Sequence[str]) -> str:
     return body + "\n" + notes + "\n"
 
 
+_RE_RAW_NL_CHAR = re.compile(r"'(?:\r\n|\n|\r)'?")
+_RE_GLUED_VOID0 = re.compile(r"\}[ \t]*\(void\)0;")
+
+
+def repair_restore_debris(code: str) -> str:
+    """Lexical LLM debris: raw newline in a char literal, `(void)0` glued to `}`.
+
+    No new control flow. Not a Ghidra-dialect recipe and not from an exe dump.
+    """
+    t = code or ""
+    t = _RE_RAW_NL_CHAR.sub(r"'\\n'", t)
+    t = _RE_GLUED_VOID0.sub("(void)0; }", t)
+    return t
+
+
 def _norm(code: str) -> str:
     return re.sub(r"\s+", "", code or "")
 

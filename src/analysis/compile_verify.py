@@ -191,11 +191,15 @@ def compile_snippet(
     name: str = "fn",
     compiler: str = "",
     timeout_sec: int = 60,
+    sibling_names: Sequence[str] = (),
+    current_name: str = "",
 ) -> CompileResult:
     """Syntax-check one function plus preamble (Phase 2 per-function gate).
 
     Injects the same inferred struct / thunk stubs assemble() would add, so
-    undeclared-struct-type is not a translation-unit-only win.
+    undeclared-struct-type is not a translation-unit-only win. Optional
+    sibling_names stub other user functions the snippet calls (per-fn has
+    no TU prototypes).
     """
     from src.agents.assembler import type_stubs_for_snippet
     from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -204,8 +208,15 @@ def compile_snippet(
     safe = re.sub(r"[^A-Za-z0-9_]+", "_", name)[:48] or "fn"
     path = work_dir / f"{safe}.cpp"
     body = sanitize_ghidra_cpp((body or "").strip())
+    from src.agents.restorer import repair_restore_debris
+    body = repair_restore_debris(body)
     preamble = list(preamble_lines)
-    stubs = type_stubs_for_snippet(body, "\n".join(preamble))
+    stubs = type_stubs_for_snippet(
+        body,
+        "\n".join(preamble),
+        sibling_names=sibling_names,
+        current_name=current_name,
+    )
     text = "\n".join(preamble + [""] + stubs + [body, ""])
     path.write_text(text, encoding="utf-8")
     return compile_cpp(path, compiler=compiler, timeout_sec=timeout_sec)

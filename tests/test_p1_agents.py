@@ -234,6 +234,43 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertFalse(decision.need_llm)
         self.assertIn("ghidra truncated mpz call", decision.skip_forever_reasons)
 
+    def test_echofilter_tu_classes_are_skip_forever(self):
+        decision = match_errors(
+            [
+                {
+                    "message": (
+                        "no match for 'operator=' (operand types are "
+                        "'std::vector<std::__cxx11::basic_string<char> >::const_iterator' "
+                        "and 'const_iterator' {aka 'ghidra_word*'})"
+                    ),
+                },
+                {
+                    "message": (
+                        "cannot convert 'std::vector<std::__cxx11::basic_string<char> >::const_iterator' "
+                        "to 'std::string*' {aka 'std::__cxx11::basic_string<char>*'}"
+                    ),
+                },
+                {
+                    "message": (
+                        "cannot convert 'char*' to 'std::string*' "
+                        "{aka 'std::__cxx11::basic_string<char>*'} in initialization"
+                    ),
+                },
+            ],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertEqual(decision.unknown, [])
+        self.assertGreaterEqual(len(decision.skip_forever_reasons), 2)
+
+    def test_skip_forever_undeclared_ghidra_temp(self):
+        decision = match_errors(
+            [{"message": "'pbVar3' was not declared in this scope; did you mean 'puVar2'?"}],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("undeclared ghidra temp", decision.skip_forever_reasons)
+
 
 class TestCritic(unittest.TestCase):
     def test_rejects_starts_with_replaced_by_sort(self):

@@ -190,10 +190,16 @@ def _recall(
             {"address": s.get("address"), "name": s.get("name"),
              "score": s.get("score"), "n_literals": s.get("n_literals"),
              "n_iostream": s.get("n_iostream"), "size": s.get("size"),
-             "is_named": s.get("is_named"), "is_fun_name": s.get("is_fun_name")}
+             "is_named": s.get("is_named"), "is_fun_name": s.get("is_fun_name"),
+             "cold": not (
+                 int(s.get("n_literals") or 0)
+                 or int(s.get("n_iostream") or 0)
+                 or int(s.get("n_stdio") or 0)
+             )}
             for s in scored
             if s.get("address") in pset and s.get("address") not in fset
         ]
+        out["n_cold_misses"] = sum(1 for m in out["addr_misses"] if m.get("cold"))
     return out
 
 
