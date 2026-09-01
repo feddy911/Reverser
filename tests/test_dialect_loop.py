@@ -296,6 +296,20 @@ class TestDialectLoop(unittest.TestCase):
         )
         self.assertEqual(rec["emit"], [])
 
+    def test_restore_debris_template_parse_does_not_emit(self):
+        rec = plan_messages(
+            [
+                "expected unqualified-id before ',' token",
+                "invalid declarator before '>' token",
+            ],
+            budget=1,
+            corpus_cases=[],
+        )
+        self.assertTrue(
+            any(c["action"] == "skip_restore_debris" for c in rec["clusters"])
+        )
+        self.assertEqual(rec["emit"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

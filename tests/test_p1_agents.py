@@ -271,6 +271,68 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertFalse(decision.need_llm)
         self.assertIn("undeclared ghidra temp", decision.skip_forever_reasons)
 
+    def test_skip_forever_string_vs_string_star_assign(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "no match for 'operator=' (operand types are "
+                    "'std::__cxx11::basic_string<char>' and "
+                    "'std::__cxx11::basic_string<char>*')"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("string vs string* assign", decision.skip_forever_reasons)
+
+    def test_skip_forever_map_index_by_map_star(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "no matching function for call to "
+                    "'std::unordered_map<std::__cxx11::basic_string<char>, "
+                    "std::__cxx11::basic_string<char> >::operator[]("
+                    "std::unordered_map<std::__cxx11::basic_string<char>, "
+                    "std::__cxx11::basic_string<char> >*)'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("assoc [] map* as key", decision.skip_forever_reasons)
+
+    def test_skip_forever_beats_broad_operator_index_fingerprint(self):
+        cases = load_corpus()
+        decision = match_errors(
+            [{
+                "message": (
+                    "no matching function for call to "
+                    "'std::unordered_map<std::__cxx11::basic_string<char>, "
+                    "std::__cxx11::basic_string<char> >::operator[]("
+                    "std::unordered_map<std::__cxx11::basic_string<char>, "
+                    "std::__cxx11::basic_string<char> >*)'"
+                ),
+            }],
+            cases,
+        )
+        self.assertIn("assoc [] map* as key", decision.skip_forever_reasons)
+        self.assertNotIn("vector-operator-index", decision.known_ids)
+
+    def test_skip_forever_vector_star_vs_unordered_map_star(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "cannot convert 'std::vector<std::__cxx11::basic_string<char>, "
+                    "std::allocator<std::__cxx11::basic_string<char> > >*' to "
+                    "'std::unordered_map<std::__cxx11::basic_string<char>, "
+                    "std::__cxx11::basic_string<char> >*'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("vector* vs unordered_map*", decision.skip_forever_reasons)
+
 
 class TestCritic(unittest.TestCase):
     def test_rejects_starts_with_replaced_by_sort(self):

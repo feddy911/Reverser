@@ -256,6 +256,68 @@ def _prototype(name: str, code: str) -> Optional[str]:
     return sig
 
 
+def _nargs_in_parens(inner: str) -> int:
+    t = (inner or "").strip()
+    if not t or t == "void":
+        return 0
+    return len(_split_top_args(t))
+
+
+def _max_call_arity(name: str, blob: str) -> int:
+    """Max args at call sites of `name` (definitions, with '{{' after, skipped)."""
+    if not name or name == "main":
+        return 0
+    s = blob or ""
+    best = 0
+    for m in re.finditer(rf"\b{re.escape(name)}\s*\(", s):
+        open_p = m.end() - 1
+        close = _match_forward(s, open_p, "(", ")")
+        if close < 0:
+            continue
+        after = s[close + 1:].lstrip()
+        if after.startswith("{"):
+            continue
+        inner = s[open_p + 1:close].strip()
+        n = 0 if not inner else len(_split_top_args(inner))
+        if n > best:
+            best = n
+    return best
+
+
+def _widen_def_arity(name: str, code: str, blob: str) -> str:
+    """If call sites pass more args than the def, accept extras via ellipsis.
+
+    Restore often drops parameters. Arity only; no new control flow.
+    """
+    src = code or ""
+    if not name or name == "main":
+        return src
+    need = _max_call_arity(name, blob)
+    if need <= 0:
+        return src
+    span = named_function_span(src, name, skip_qualified=True)
+    if not span:
+        return src
+    t0, close, _end = span
+    open_p = -1
+    i = t0
+    while i <= close:
+        if src[i] == "(" and _match_forward(src, i, "(", ")") == close:
+            open_p = i
+            break
+        i += 1
+    if open_p < 0:
+        return src
+    inner = src[open_p + 1:close].strip()
+    if "..." in inner:
+        return src
+    have = _nargs_in_parens(inner)
+    if have >= need:
+        return src
+    fill = "..." if (not inner or inner == "void") else inner + ", ..."
+    return src[:open_p + 1] + fill + src[close:]
+
+
 def _ghidra_stubs(text: str) -> List[str]:
     """Declarations for leftover Ghidra thunks/DAT so the TU can parse."""
     thunks = sorted(set(RE_THUNK_ID.findall(text or "")))
@@ -437,6 +499,12 @@ def assemble(
             (addr, name, _adjust_calls_to_ptrs(code, name, ptrs))
             for addr, name, code in cleaned
         ]
+
+    all_code = "\n".join(c for _, _, c in cleaned)
+    cleaned = [
+        (addr, name, _widen_def_arity(name, code, all_code))
+        for addr, name, code in cleaned
+    ]
 
     parts: List[str] = list(preamble_lines) if preamble_lines is not None else _default_preamble()
     parts.append("// ---- types (dedup) ----")

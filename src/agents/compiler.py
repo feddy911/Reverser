@@ -97,6 +97,18 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "undeclared ghidra temp",
     ),
     (
+        r"no match for 'operator=' \(operand types are 'std::__cxx11::basic_string<char>' and 'std::__cxx11::basic_string<char>\*'",
+        "string vs string* assign",
+    ),
+    (
+        r"::operator\[\]\(std::(?:unordered_)?map<",
+        "assoc [] map* as key",
+    ),
+    (
+        r"cannot convert 'std::vector<.*\*' to 'std::unordered_map<",
+        "vector* vs unordered_map*",
+    ),
+    (
         r"base operand of '->' has non-pointer type '.*value_type' \{aka 'std::pair",
         "arrow on pair value",
     ),
@@ -172,13 +184,13 @@ def match_errors(
         msg = str(err.get("message") or "").strip()
         if not msg:
             continue
-        hits = [c.id for c in with_fp if _safe_search(c.gcc_fingerprint, msg)]
-        if hits:
-            decision.known.append(DiagnosticHit(message=msg, case_ids=hits))
-            continue
         forever = skip_forever_reason(msg)
         if forever:
             decision.skip_forever.append(SkipForeverHit(message=msg, reason=forever))
+            continue
+        hits = [c.id for c in with_fp if _safe_search(c.gcc_fingerprint, msg)]
+        if hits:
+            decision.known.append(DiagnosticHit(message=msg, case_ids=hits))
             continue
         decision.unknown.append(msg)
     decision.need_llm = bool(decision.unknown)

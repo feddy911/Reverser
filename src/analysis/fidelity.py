@@ -22,6 +22,15 @@ def dump_has_range_for(ghidra_code: str) -> bool:
     return any(m in blob for m in _RANGE_FOR_MARKERS)
 
 
+def dump_has_duration_cast(ghidra_code: str) -> bool:
+    """True if the dump already has duration_cast; callee token may be mangled."""
+    return "duration_cast" in (ghidra_code or "")
+
+
+def _is_duration_cast_callee(name: str) -> bool:
+    return "duration_cast" in (name or "")
+
+
 def _call_base(name: str) -> str:
     return (name or "").split("<", 1)[0].strip()
 
@@ -148,11 +157,13 @@ def check_function(
             missing_ext.append(e)
 
     skip_range = dump_has_range_for(entry.get("ghidra_code") or "")
+    skip_duration = dump_has_duration_cast(entry.get("ghidra_code") or "")
     required_calls = [
         (name, toks) for name, toks in call_tokens
         if not is_noise_call(name)
         and not (skip_range and _is_range_for_method(name))
         and not (skip_range and _call_base(name) == "get")
+        and not (skip_duration and _is_duration_cast_callee(name))
     ]
     missing_calls = [
         name for name, toks in required_calls

@@ -304,6 +304,28 @@ class TestAssemblerDomain(unittest.TestCase):
         body = text[funcs_at:]
         self.assertNotIn("#include <vector>", body)
 
+    def test_widen_def_arity_when_calls_pass_extra_args(self):
+        restored = [
+            {
+                "classification": "user_code",
+                "address": "0x1",
+                "guessed_name": "show",
+                "ghidra_name": "show",
+                "cpp_code": "void show() { (void)0; }\n",
+            },
+            {
+                "classification": "user_code",
+                "address": "0x2",
+                "guessed_name": "main",
+                "ghidra_name": "main",
+                "cpp_code": "int main() { show(3); return 0; }\n",
+            },
+        ]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 2)
+        self.assertIn("show(...)", text)
+        self.assertNotIn("void show() {", text)
+
     def test_multiline_templated_return_prototype(self):
         restored = [
             {
@@ -507,6 +529,35 @@ class TestFidelitySmoke(unittest.TestCase):
         restore = "void f() { for (const auto& kv : *m) dump_n(kv); }\n"
         rep = check_function(entry, restore, toks)
         self.assertNotIn("get<0>", rep["missing_calls"])
+
+    def test_duration_cast_dump_does_not_require_mangled_callee(self):
+        from src.analysis.fidelity import check_function
+
+        entry = {
+            "address": "0x1",
+            "literals": ["n="],
+            "ext_calls": [],
+            "ghidra_code": (
+                "auto us = duration_cast<std::chrono::duration<"
+                "long_long_int, std::ratio<1, 1000000>>>(t1 - t0);\n"
+            ),
+        }
+        toks = [(
+            "duration_cast<std::chrono::duration<long_long_int,_std::ratio<1,_1000000>_>",
+            ["duration_cast<std::chrono::duration<long_long_int,_std::ratio<1,_1000000>_>"],
+        )]
+        restore = (
+            "int f() {\n"
+            "  auto us = std::chrono::duration_cast<"
+            "std::chrono::microseconds>(t1 - t0).count();\n"
+            "  return (int)us;\n"
+            "}\n"
+        )
+        rep = check_function(entry, restore, toks)
+        self.assertNotIn(
+            "duration_cast<std::chrono::duration<long_long_int,_std::ratio<1,_1000000>_>",
+            rep["missing_calls"],
+        )
 
     def test_keep_dump_literals_comments_missing(self):
         from src.agents.restorer import keep_dump_literals

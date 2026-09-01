@@ -30,6 +30,9 @@ _RESTORE_DEBRIS = (
     r"break statement not within loop or switch",
     r"expected unqualified-id before '(?:void|return)'",
     r"expected declaration before '\}' token",
+    r"expected unqualified-id before ',' token",
+    r"invalid declarator before ',' token",
+    r"invalid declarator before '>' token",
 )
 
 # Honest Q3 minis: gcc text → generator id + Ghidra token to require in a dump.
