@@ -77,6 +77,18 @@ class TestCorpusEval(unittest.TestCase):
             pairs,
         )
 
+    def test_skip_forever_fingerprint_is_not_self_miss(self):
+        from src.agents.compiler import match_errors
+        from src.analysis.corpus import load_corpus
+        from src.analysis.eval_classifier import probes_for_case
+
+        cases = {c.id: c for c in load_corpus()}
+        case = cases["ghidra-this-as-ident"]
+        probe = probes_for_case(case)[0]
+        decision = match_errors([{"message": probe}], list(cases.values()))
+        self.assertTrue(decision.skip_forever_reasons)
+        self.assertEqual(decision.known_ids, [])
+
     def test_explicit_gcc_probe_beats_synth(self):
         from src.analysis.corpus import load_corpus
         from src.analysis.eval_classifier import probes_for_case

@@ -147,6 +147,14 @@ class TestIncludes(unittest.TestCase):
         self.assertIn("#include <mpfr.h>", incs)
         self.assertIn("#include <gmp.h>", incs)
 
+    def test_includes_from_gmp_mpfr_typedef_tags(self):
+        from src.analysis.includes import includes_from_source
+
+        mpfr = includes_from_source("__mpfr_struct *x; mpfr_exp_t e;")
+        gmp = includes_from_source("__mpz_struct *z;")
+        self.assertIn("#include <mpfr.h>", mpfr)
+        self.assertIn("#include <gmp.h>", gmp)
+
     def test_includes_from_source_algorithm(self):
         from src.analysis.includes import includes_from_source
 

@@ -110,6 +110,17 @@ _CODE_INCLUDE_RULES: List[tuple] = [
     (re.compile(r"\bstd::optional\b"), "#include <optional>"),
     (re.compile(r"\b(?:mpfr_|__gmpfr_)"), "#include <mpfr.h>"),
     (re.compile(r"\b(?:mpz_|__gmpz_)"), "#include <gmp.h>"),
+    (
+        re.compile(
+            r"\b(?:__mpfr_struct|mpfr_exp_t|mpfr_prec_t|mpfr_rnd_t|"
+            r"mpfr_ptr|mpfr_srcptr)\b"
+        ),
+        "#include <mpfr.h>",
+    ),
+    (
+        re.compile(r"\b(?:__mpz_struct|__mpf_struct|__mpq_struct)\b"),
+        "#include <gmp.h>",
+    ),
 ]
 
 

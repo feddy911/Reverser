@@ -319,6 +319,25 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertFalse(decision.need_llm)
         self.assertIn("undeclared ghidra temp", decision.skip_forever_reasons)
 
+    def test_skip_forever_undeclared_ghidra_abi_temps(self):
+        for msg in (
+            "'in_stack_ffffffffffffff58' was not declared in this scope",
+            "'in_RCX' was not declared in this scope",
+            "'in_RDX' was not declared in this scope",
+        ):
+            decision = match_errors([{"message": msg}], cases=[])
+            self.assertFalse(decision.need_llm, msg)
+            self.assertIn("undeclared ghidra temp", decision.skip_forever_reasons)
+
+    def test_undeclared_it_is_not_skip_forever(self):
+        decision = match_errors(
+            [{"message": "'it' was not declared in this scope; did you mean 'int'?"}],
+            cases=[],
+        )
+        self.assertTrue(decision.need_llm)
+        self.assertEqual(decision.skip_forever, [])
+        self.assertEqual(len(decision.unknown), 1)
+
     def test_skip_forever_string_vs_string_star_assign(self):
         decision = match_errors(
             [{
@@ -380,6 +399,33 @@ class TestCompilerAgent(unittest.TestCase):
         )
         self.assertFalse(decision.need_llm)
         self.assertIn("vector* vs unordered_map*", decision.skip_forever_reasons)
+
+    def test_skip_forever_vector_star_vs_user_struct_star(self):
+        for dest in ("Node*", "Tree*"):
+            decision = match_errors(
+                [{
+                    "message": (
+                        "cannot convert 'std::vector<std::__cxx11::basic_string<char> >*' "
+                        f"to '{dest}'"
+                    ),
+                }],
+                cases=[],
+            )
+            self.assertFalse(decision.need_llm, dest)
+            self.assertIn("vector* vs user struct*", decision.skip_forever_reasons)
+
+    def test_skip_forever_struct_before_header_typedef(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "using typedef-name '__mpfr_struct' after 'struct' "
+                    "[-fpermissive]"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("struct before header typedef", decision.skip_forever_reasons)
 
 
 class TestCritic(unittest.TestCase):

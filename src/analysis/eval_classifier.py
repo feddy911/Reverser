@@ -205,6 +205,10 @@ def eval_classifier(
             decision = match_errors([{"message": probe}], labeled)
             hits = decision.known_ids
             if case.id not in hits:
+                # Skip-forever is the compiler decision for invent-semantics
+                # gcc that also has a documenting fingerprint. Not a miss.
+                if decision.skip_forever:
+                    continue
                 self_miss.append({"id": case.id, "probe": probe, "hits": hits})
                 continue
             extra = [h for h in hits if h != case.id]

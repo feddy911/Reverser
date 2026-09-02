@@ -79,6 +79,10 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "ghidra truncated mpfr call",
     ),
     (
+        r"using typedef-name '[^']+' after 'struct'",
+        "struct before header typedef",
+    ),
+    (
         r"cannot convert '.*const_iterator' to 'std::string\*'",
         "iterator vs string*",
     ),
@@ -99,7 +103,8 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "ghidra_word* vs vector*",
     ),
     (
-        r"'p[bcilus]Var\d+' was not declared in this scope",
+        r"'(?:p[bcilus]Var\d+|in_stack_[0-9A-Fa-f]+|in_RCX|in_RDX|"
+        r"in_R8D|in_R9D|in_RAX|in_R8|in_R9)' was not declared in this scope",
         "undeclared ghidra temp",
     ),
     (
@@ -113,6 +118,10 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
     (
         r"cannot convert 'std::vector<.*\*' to 'std::unordered_map<",
         "vector* vs unordered_map*",
+    ),
+    (
+        r"cannot convert 'std::vector<.*\*' to '[A-Z][A-Za-z0-9_]*\*'",
+        "vector* vs user struct*",
     ),
     (
         r"base operand of '->' has non-pointer type '.*value_type' \{aka 'std::pair",

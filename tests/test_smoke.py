@@ -172,6 +172,25 @@ class TestAssemblerDomain(unittest.TestCase):
         self.assertEqual(n, 1)
         self.assertNotIn("struct local_110", text)
 
+    def test_does_not_infer_gmp_mpfr_typedefs_as_structs(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "hold",
+            "ghidra_name": "FUN_1",
+            "cpp_code": (
+                "void hold(__mpfr_struct *x, __mpz_struct *z) {\n"
+                "  mpfr_exp_t e;\n"
+                "  (void)x; (void)z; (void)e;\n"
+                "}\n"
+            ),
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertNotIn("struct __mpfr_struct", text)
+        self.assertNotIn("struct __mpz_struct", text)
+        self.assertNotIn("struct mpfr_exp_t", text)
+
     def test_strips_assign_from_void_function(self):
         restored = [
             {
