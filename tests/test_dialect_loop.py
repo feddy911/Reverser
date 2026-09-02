@@ -301,13 +301,14 @@ class TestDialectLoop(unittest.TestCase):
             [
                 "expected unqualified-id before ',' token",
                 "invalid declarator before '>' token",
+                "stray '`' in program",
             ],
             budget=1,
             corpus_cases=[],
         )
-        self.assertTrue(
-            any(c["action"] == "skip_restore_debris" for c in rec["clusters"])
-        )
+        actions = {c["action"] for c in rec["clusters"]}
+        self.assertTrue(actions <= {"skip_forever", "skip_restore_debris"})
+        self.assertTrue(actions)
         self.assertEqual(rec["emit"], [])
 
 

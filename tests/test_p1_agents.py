@@ -234,6 +234,54 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertFalse(decision.need_llm)
         self.assertIn("ghidra truncated mpz call", decision.skip_forever_reasons)
 
+    def test_skip_forever_truncated_mpfr_call(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "too few arguments to function "
+                    "'int mpfr_gamma(mpfr_ptr, mpfr_srcptr, mpfr_rnd_t)'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ghidra truncated mpfr call", decision.skip_forever_reasons)
+
+    def test_skip_forever_this_in_prototype(self):
+        decision = match_errors(
+            [{
+                "message": "expected ',' or '...' before 'this'",
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("this as Ghidra local", decision.skip_forever_reasons)
+
+    def test_skip_forever_restore_template_debris(self):
+        decision = match_errors(
+            [
+                {"message": "expected unqualified-id before ',' token"},
+                {"message": "invalid declarator before '>' token"},
+            ],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("restore template debris", decision.skip_forever_reasons)
+
+    def test_skip_forever_member_on_function_type(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "request for member 'back' in 'series_fn', which is of "
+                    "non-class type 'std::vector<int>*(uint)' "
+                    "{aka 'std::vector<int>*(unsigned int)'}"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("member on function type", decision.skip_forever_reasons)
+
     def test_echofilter_tu_classes_are_skip_forever(self):
         decision = match_errors(
             [

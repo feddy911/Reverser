@@ -31,7 +31,9 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
     ),
     (r"'this' was not declared in this scope", "this in STL signature"),
     (
-        r"expected unqualified-id before 'this'|invalid use of 'this' in non-member",
+        r"expected ',' or '\.\.\.' before 'this'|"
+        r"expected unqualified-id before 'this'|"
+        r"invalid use of 'this' in non-member",
         "this as Ghidra local",
     ),
     (
@@ -71,6 +73,10 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
     (
         r"too few arguments to function '(?:int |void )?__gmpz_",
         "ghidra truncated mpz call",
+    ),
+    (
+        r"too few arguments to function '(?:int |void )?(?:mpfr_|__gmpfr_)",
+        "ghidra truncated mpfr call",
     ),
     (
         r"cannot convert '.*const_iterator' to 'std::string\*'",
@@ -115,6 +121,16 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
     (
         r"comparison between distinct pointer types 'std::__detail::_Node_const_iterator",
         "hashtable iterator* vs ghidra_word*",
+    ),
+    (
+        r"expected unqualified-id before ',' token|"
+        r"invalid declarator before ',' token|"
+        r"invalid declarator before '>' token",
+        "restore template debris",
+    ),
+    (
+        r"request for member '[^']+' in '[^']+', which is of non-class type '.+\([^)]*\)'",
+        "member on function type",
     ),
 )
 

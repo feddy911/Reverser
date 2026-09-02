@@ -33,6 +33,7 @@ _RESTORE_DEBRIS = (
     r"expected unqualified-id before ',' token",
     r"invalid declarator before ',' token",
     r"invalid declarator before '>' token",
+    r"stray '`' in program",
 )
 
 # Honest Q3 minis: gcc text → generator id + Ghidra token to require in a dump.

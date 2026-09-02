@@ -559,6 +559,32 @@ class TestFidelitySmoke(unittest.TestCase):
             rep["missing_calls"],
         )
 
+    def test_mangled_make_pair_matches_untemplated_call(self):
+        from src.analysis.fidelity import build_call_tokens, check_function
+
+        toks = build_call_tokens(
+            ["0xabc"],
+            name_by_addr={
+                "0xabc": "make_pair<const_std::__cxx11::basic_string<char>&,_int&>",
+            },
+        )
+        entry = {"address": "0x1", "literals": [], "ext_calls": [], "ghidra_code": ""}
+        restore = "void f() { g[k] = std::make_pair(k, w); }\n"
+        rep = check_function(entry, restore, toks)
+        self.assertNotIn(
+            "make_pair<const_std::__cxx11::basic_string<char>&,_int&>",
+            rep["missing_calls"],
+        )
+
+    def test_iterator_type_callee_not_required(self):
+        from src.analysis.fidelity import check_function
+
+        entry = {"address": "0x1", "literals": [], "ext_calls": [], "ghidra_code": ""}
+        toks = [("_Node_const_iterator", ["_Node_const_iterator"])]
+        restore = "void f() { walk(m); }\n"
+        rep = check_function(entry, restore, toks)
+        self.assertNotIn("_Node_const_iterator", rep["missing_calls"])
+
     def test_keep_dump_literals_comments_missing(self):
         from src.agents.restorer import keep_dump_literals
         from src.analysis.fidelity import literal_in_code
@@ -581,6 +607,15 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertIn("'\\n'", got)
         self.assertIn("(void)0; }", got)
         self.assertNotIn("}(void)0;", got)
+
+    def test_repair_restore_debris_strips_backticks(self):
+        from src.agents.restorer import repair_restore_debris
+
+        tick = chr(96)
+        src = f"int f() {{ return 1; }} {tick}extra{tick}\n"
+        got = repair_restore_debris(src)
+        self.assertNotIn(tick, got)
+        self.assertIn("int f()", got)
 
 
 class TestExtractFeatures(unittest.TestCase):

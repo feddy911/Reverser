@@ -94,6 +94,12 @@ def symbol_names_from_dump(
     return names
 
 
+def _is_stl_iterator_type_callee(name: str) -> bool:
+    """Ghidra lists nested iterator types as callees; they are not user calls."""
+    n = (name or "").lower()
+    return "_iterator" in n
+
+
 def build_call_tokens(
     callees: Iterable[str],
     name_by_addr: Optional[Dict[str, str]] = None,
@@ -113,6 +119,8 @@ def build_call_tokens(
             continue
         tgt = thunk_target.get(c, c)
         primary = (name_by_addr.get(tgt) or name_by_addr.get(c) or "").strip()
+        if not primary and not str(c).startswith("0x"):
+            primary = str(c).strip()
         if not primary:
             continue
         tokens = []
@@ -124,6 +132,9 @@ def build_call_tokens(
         ):
             if t and t not in tokens:
                 tokens.append(t)
+        base = _call_base(primary)
+        if "<" in primary and base and base not in tokens:
+            tokens.append(base)
         if not tokens:
             continue
         if is_noise_call(primary) or all(is_noise_call(t) for t in tokens):
@@ -164,6 +175,7 @@ def check_function(
         and not (skip_range and _is_range_for_method(name))
         and not (skip_range and _call_base(name) == "get")
         and not (skip_duration and _is_duration_cast_callee(name))
+        and not _is_stl_iterator_type_callee(name)
     ]
     missing_calls = [
         name for name, toks in required_calls

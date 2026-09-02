@@ -99,13 +99,13 @@ _RE_GLUED_VOID0 = re.compile(r"\}[ \t]*\(void\)0;")
 
 
 def repair_restore_debris(code: str) -> str:
-    """Lexical LLM debris: raw newline in a char literal, `(void)0` glued to `}`.
-
-    No new control flow. Not a Ghidra-dialect recipe and not from an exe dump.
+    """Lexical LLM debris: raw newline in a char literal, `(void)0` glued to `}`,
+    and markdown backticks. No new control flow. Not a Ghidra-dialect recipe.
     """
     t = code or ""
     t = _RE_RAW_NL_CHAR.sub(r"'\\n'", t)
     t = _RE_GLUED_VOID0.sub("(void)0; }", t)
+    t = t.replace("`", "")
     return t
 
 
