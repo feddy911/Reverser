@@ -44,8 +44,8 @@ MPFR when it has `mpfr_*` / `libmpfr` — not from a hard-coded sample name.
 
 ## Scoring
 
-- `scoring_mode: heuristic` — weights in `src/analysis/scorer.py`
-- `scoring_mode: ml` — model from `ml_weights_path` (meta JSON + joblib)
+- `scoring_mode: heuristic` — weights in `src/analysis/scorer.py` (unbounded; CRT names get large negatives)
+- `scoring_mode: ml` — model from `ml_weights_path` (meta JSON + joblib). `predict_proba` is already in `[0, 1]`. Runtime-noise names are mapped into `[0, 0.5)` so they never outrank a user function; user scores occupy `[0.5, 1]`. The old `p - 10` (CRT at `-9.7` in TOP-15) was the same ranking, not a broken model. Not a 23rd feature.
 
 ```bash
 py -m src.analysis.train_scorer --help

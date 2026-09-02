@@ -66,12 +66,21 @@ class TestFeaturesSmoke(unittest.TestCase):
         self.assertGreater(by_name["FUN_140001000"], by_name["_RTC_CheckStackVars"])
 
     def test_ml_noise_penalty_sinks_crt(self):
-        from src.analysis.scorer import apply_runtime_noise_penalty, ML_NOISE_PENALTY
+        from src.analysis.scorer import (
+            ML_NOISE_CEILING,
+            apply_runtime_noise_penalty,
+        )
 
-        self.assertEqual(apply_runtime_noise_penalty("main", 0.9), 0.9)
-        self.assertEqual(
-            apply_runtime_noise_penalty("_RTC_CheckStackVars", 0.9),
-            0.9 - ML_NOISE_PENALTY,
+        user = apply_runtime_noise_penalty("main", 0.9)
+        crt = apply_runtime_noise_penalty("_RTC_CheckStackVars", 0.9)
+        self.assertGreaterEqual(user, ML_NOISE_CEILING)
+        self.assertLess(crt, ML_NOISE_CEILING)
+        self.assertLessEqual(user, 1.0)
+        self.assertGreaterEqual(crt, 0.0)
+        # Weak user still outranks a confident CRT name (the reason we used -10).
+        self.assertLess(
+            apply_runtime_noise_penalty("_pei386_runtime_relocator", 1.0),
+            apply_runtime_noise_penalty("main", 0.0),
         )
         self.assertEqual(len(FEATURE_KEYS), 22)
 

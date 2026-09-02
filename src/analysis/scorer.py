@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.analysis.features import (
@@ -18,16 +19,39 @@ WEIGHTS: Dict[str, float] = {
     "crt_only": -20.0, "called_by_seed": 25.0,
 }
 
-# Larger than typical ML predict_proba / decision_function so CRT sinks
-# below user functions. Same policy as select_llm_targets; not a 23rd feature.
+# Lower half of [0, 1] is reserved for CRT/STL/MinGW names after ML.
+# Same ranking as the old subtract-10 penalty: every user score >= 0.5,
+# every noise score < 0.5. Not a 23rd feature.
+ML_NOISE_CEILING = 0.5
+# Kept as the historical subtract magnitude (R2). Tests / docs may mention it.
 ML_NOISE_PENALTY = 10.0
 
 
+def _as_unit_interval(score: float) -> float:
+    """Fold a model score into [0, 1]. Proba is already there; decision_function is not."""
+    p = float(score)
+    if 0.0 <= p <= 1.0:
+        return p
+    # Unbounded decision_function → logistic. Monotonic, so ranking is unchanged.
+    try:
+        return 1.0 / (1.0 + math.exp(-p))
+    except OverflowError:
+        return 0.0 if p < 0.0 else 1.0
+
+
 def apply_runtime_noise_penalty(name: str, score: float) -> float:
-    """Demote CRT/STL/MinGW internals after ML score. No gcc text."""
+    """Demote CRT/STL/MinGW internals after ML score. Result is in [0, 1].
+
+    The live RF already emits predict_proba in [0, 1]. The old mapping
+    `p - 10` made TOP-15 look broken (CRT at -9.7) while ranking was correct.
+    Users occupy [0.5, 1], noise occupies [0, 0.5). Order among users and
+    among noise is unchanged; every user still ranks above every noise name.
+    """
+    p = _as_unit_interval(score)
     if is_runtime_noise(name):
-        return float(score) - ML_NOISE_PENALTY
-    return float(score)
+        # Strictly below ML_NOISE_CEILING so a p=1 CRT cannot tie a p=0 user.
+        return ML_NOISE_CEILING * p * (1.0 - 1e-9)
+    return ML_NOISE_CEILING + (1.0 - ML_NOISE_CEILING) * p
 
 
 class GhidraFunctionScorer:
@@ -90,10 +114,12 @@ class GhidraFunctionScorer:
         if b.get("scaler") is not None:
             x = b["scaler"].transform(x)
         m = b["model"]
-        if hasattr(m, "decision_function"):
+        if hasattr(m, "predict_proba"):
+            s = float(m.predict_proba(x)[0][1])
+        elif hasattr(m, "decision_function"):
             s = float(m.decision_function(x)[0])
         else:
-            s = float(m.predict_proba(x)[0][1])
+            s = float(m.predict(x)[0])
         return apply_runtime_noise_penalty(ft.get("name") or "", s)
 
     def score_all(self, functions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
