@@ -31,6 +31,7 @@ _RESTORE_DEBRIS = (
     r"expected unqualified-id before '(?:void|return)'",
     r"expected declaration before '\}' token",
     r"expected unqualified-id before ',' token",
+    r"expected unqualified-id before '>' token",
     r"invalid declarator before ',' token",
     r"invalid declarator before '>' token",
     r"stray '`' in program",

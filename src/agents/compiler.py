@@ -103,7 +103,7 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "ghidra_word* vs vector*",
     ),
     (
-        r"'(?:p[bcilus]Var\d+|in_stack_[0-9A-Fa-f]+|in_RCX|in_RDX|"
+        r"'(?:p[bcilus]Var\d+|var_\d+|in_stack_[0-9A-Fa-f]+|in_RCX|in_RDX|"
         r"in_R8D|in_R9D|in_RAX|in_R8|in_R9)' was not declared in this scope",
         "undeclared ghidra temp",
     ),
@@ -133,9 +133,28 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
     ),
     (
         r"expected unqualified-id before ',' token|"
+        r"expected unqualified-id before '>' token|"
         r"invalid declarator before ',' token|"
         r"invalid declarator before '>' token",
         "restore template debris",
+    ),
+    (
+        r"missing terminating ['\"] character",
+        "restore quote debris",
+    ),
+    (
+        r"no match for call to '\(ghidra_word\) \(\)'",
+        "ghidra_word as functor",
+    ),
+    (
+        r"'using value_type = struct ghidra_word' \{aka 'struct ghidra_word'\} "
+        r"has no member named",
+        "ghidra_word placeholder member",
+    ),
+    (
+        r"type/value mismatch at argument \d+ in template parameter list for "
+        r"'template<class[^']*> class std::(?:allocator|vector)",
+        "non-type in std template",
     ),
     (
         r"request for member '[^']+' in '[^']+', which is of non-class type '.+\([^)]*\)'",

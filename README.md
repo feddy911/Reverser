@@ -137,9 +137,11 @@ The Compiler agent classifies gcc diagnostics against corpus `gcc_fingerprint`
 gcc→recipe_id, already wired into per-fn and TU compile-fix. A known class skips the LLM.
 Skip-forever (red eight, placeholder iterators, `this` as a local, iterator/`char*` vs `string*`,
 truncated `mpz_*` / `mpfr_*` calls, `struct` before a header typedef, undeclared Ghidra temps
-`pbVarN` / `in_stack_*` / `in_RCX`, string vs `string*` assign, `operator[]` with a map pointer
-as key, `vector*` vs `unordered_map*` or a user struct `T*`, `this` in a prototype, member access
-on a function type) also skips the LLM: do not patch and do not call compile-fix. Unknown → one LLM pass and
+`pbVarN` / `var_N` / `in_stack_*` / `in_RCX`, restore quote debris, `ghidra_word` as a functor
+or placeholder member, non-type in `std::allocator`/`vector`, string vs `string*` assign,
+`operator[]` with a map pointer as key, `vector*` vs `unordered_map*` or a user struct `T*`,
+`this` in a prototype, member access on a function type) also skips the LLM: do not patch and
+do not call compile-fix. Unknown → one LLM pass and
 a YAML draft (not a sanitizer patch).
 Scoring ML (`train_scorer`) is not used as a compile oracle.
 

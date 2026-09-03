@@ -191,6 +191,23 @@ class TestAssemblerDomain(unittest.TestCase):
         self.assertNotIn("struct __mpz_struct", text)
         self.assertNotIn("struct mpfr_exp_t", text)
 
+    def test_does_not_infer_ghidra_var_stack_temps_as_structs(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "go",
+            "ghidra_name": "FUN_1",
+            "cpp_code": (
+                "void go() {\n"
+                "  var_10 *p;\n"
+                "  (void)p;\n"
+                "}\n"
+            ),
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertNotIn("struct var_10", text)
+
     def test_strips_assign_from_void_function(self):
         restored = [
             {

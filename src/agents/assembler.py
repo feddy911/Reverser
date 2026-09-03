@@ -86,7 +86,7 @@ _NOT_STRUCT_TYPES = frozenset({
 })
 
 _GHIDRA_TEMP_TYPE = re.compile(
-    r"^(local_|param_|in_stack|auStack|stack_|lVar|uVar|iVar|sVar|"
+    r"^(local_|param_|in_stack|auStack|stack_|var_\d+|lVar|uVar|iVar|sVar|"
     r"pcVar|puVar|pbVar|plVar|unaff_|register_)",
     re.IGNORECASE,
 )

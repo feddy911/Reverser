@@ -292,7 +292,10 @@ class TestDialectLoop(unittest.TestCase):
             corpus_cases=[],
         )
         self.assertTrue(
-            any(c["action"] == "skip_restore_debris" for c in rec["clusters"])
+            any(
+                c["action"] in {"skip_restore_debris", "skip_forever"}
+                for c in rec["clusters"]
+            )
         )
         self.assertEqual(rec["emit"], [])
 

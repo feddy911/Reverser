@@ -262,6 +262,7 @@ class TestCompilerAgent(unittest.TestCase):
             [
                 {"message": "expected unqualified-id before ',' token"},
                 {"message": "invalid declarator before '>' token"},
+                {"message": "expected unqualified-id before '>' token"},
             ],
             cases=[],
         )
@@ -324,6 +325,8 @@ class TestCompilerAgent(unittest.TestCase):
             "'in_stack_ffffffffffffff58' was not declared in this scope",
             "'in_RCX' was not declared in this scope",
             "'in_RDX' was not declared in this scope",
+            "'var_10' was not declared in this scope",
+            "'var_20' was not declared in this scope",
         ):
             decision = match_errors([{"message": msg}], cases=[])
             self.assertFalse(decision.need_llm, msg)
@@ -426,6 +429,72 @@ class TestCompilerAgent(unittest.TestCase):
         )
         self.assertFalse(decision.need_llm)
         self.assertIn("struct before header typedef", decision.skip_forever_reasons)
+
+    def test_skip_forever_restore_quote_debris(self):
+        decision = match_errors(
+            [{"message": 'missing terminating " character'}],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("restore quote debris", decision.skip_forever_reasons)
+
+    def test_skip_forever_ghidra_word_as_functor(self):
+        decision = match_errors(
+            [{"message": "no match for call to '(ghidra_word) ()'"}],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ghidra_word as functor", decision.skip_forever_reasons)
+
+    def test_skip_forever_ghidra_word_placeholder_member(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "'using value_type = struct ghidra_word' "
+                    "{aka 'struct ghidra_word'} has no member named 'first'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ghidra_word placeholder member", decision.skip_forever_reasons)
+
+    def test_skip_forever_non_type_in_std_template(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "type/value mismatch at argument 1 in template parameter "
+                    "list for 'template<class> class std::allocator'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("non-type in std template", decision.skip_forever_reasons)
+        vector = match_errors(
+            [{
+                "message": (
+                    "type/value mismatch at argument 1 in template parameter "
+                    "list for 'template<class _Tp, class _Alloc> class std::vector'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertIn("non-type in std template", vector.skip_forever_reasons)
+
+    def test_duration_cast_targs_stay_known_not_skip_forever(self):
+        cases = load_corpus()
+        decision = match_errors(
+            [{
+                "message": (
+                    "wrong number of template arguments (3, should be 1) "
+                    "for 'std::chrono::duration_cast'"
+                ),
+            }],
+            cases,
+        )
+        self.assertEqual(decision.skip_forever, [])
+        self.assertIn("ghidra-chrono-duration-cast-targs", decision.known_ids)
 
 
 class TestCritic(unittest.TestCase):
