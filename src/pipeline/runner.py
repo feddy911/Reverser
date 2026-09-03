@@ -32,6 +32,15 @@ def _save_json(path: Path, data: Any) -> None:
     )
 
 
+def _remember_run(run_dir: Path) -> None:
+    try:
+        from src.analysis.run_store import record_run
+
+        record_run(run_dir, prompt_ver=LLM_PROMPT_VER)
+    except Exception as exc:
+        logger.warning("run_store record failed: %s", exc)
+
+
 def _call_tokens(
     callees: List[str],
     name_by_addr: Dict[str, str],
@@ -943,9 +952,11 @@ def run(config: AppConfig) -> int:
     except Exception:
         logger.exception("Pipeline failed")
         _save_json(run_dir / "metrics.json", metrics.to_dict())
+        _remember_run(run_dir)
         return 1
 
     _save_json(run_dir / "metrics.json", metrics.to_dict())
+    _remember_run(run_dir)
     for line in metrics.summary_lines():
         print(line)
     print(f"OK: артефакты: {run_dir}")

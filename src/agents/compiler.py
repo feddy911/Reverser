@@ -152,6 +152,19 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "ghidra_word placeholder member",
     ),
     (
+        r"no match for 'operator\[\]' \(operand types are 'ghidra_word' and "
+        r"'(?:int|unsigned|long|size_t|size_type)'",
+        "ghidra_word operator[]",
+    ),
+    (
+        r"cannot convert '[A-Z][A-Za-z0-9_]*\*' to 'mpfr_(?:ptr|srcptr)'",
+        "user struct* vs mpfr_ptr",
+    ),
+    (
+        r"'int [A-Za-z_]\w*' redeclared as different kind of entity",
+        "ident redeclared as different kind",
+    ),
+    (
         r"type/value mismatch at argument \d+ in template parameter list for "
         r"'template<class[^']*> class std::(?:allocator|vector)",
         "non-type in std template",

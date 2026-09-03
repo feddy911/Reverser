@@ -137,11 +137,12 @@ The Compiler agent classifies gcc diagnostics against corpus `gcc_fingerprint`
 gcc→recipe_id, already wired into per-fn and TU compile-fix. A known class skips the LLM.
 Skip-forever (red eight, placeholder iterators, `this` as a local, iterator/`char*` vs `string*`,
 truncated `mpz_*` / `mpfr_*` calls, `struct` before a header typedef, undeclared Ghidra temps
-`pbVarN` / `var_N` / `in_stack_*` / `in_RCX`, restore quote debris, `ghidra_word` as a functor
-or placeholder member, non-type in `std::allocator`/`vector`, string vs `string*` assign,
-`operator[]` with a map pointer as key, `vector*` vs `unordered_map*` or a user struct `T*`,
-`this` in a prototype, member access on a function type) also skips the LLM: do not patch and
-do not call compile-fix. Unknown → one LLM pass and
+`pbVarN` / `var_N` / `in_stack_*` / `in_RCX`, restore quote debris, `ghidra_word` as a functor,
+placeholder member, or `operator[]`, user struct `T*` vs `mpfr_ptr`, ident redeclared as a
+different kind, non-type in `std::allocator`/`vector`, string vs `string*` assign, `operator[]`
+with a map pointer as key, `vector*` vs `unordered_map*` or a user struct `T*`, `this` in a
+prototype, member access on a function type) also skips the LLM: do not patch and do not call
+compile-fix. Unknown → one LLM pass and
 a YAML draft (not a sanitizer patch).
 Scoring ML (`train_scorer`) is not used as a compile oracle.
 
@@ -158,6 +159,15 @@ Fidelity does not paper over a missing literal or `ext_calls` with a mean score 
 those are dump facts. Identity catches replacing `starts_with` with `std::sort`.
 The critic does not require guessing the original source name. `compile_ok` is the assembled
 TU, not compile-fix. Restore cache: `LLM_PROMPT_VER=p4`.
+
+Live run metrics (gcc counts, critic, skip-forever hits) are indexed in
+`output/runs.sqlite` after each `main.py` run. This is a warehouse, not the
+dialect catalog — skip-forever and YAML recipes stay in git.
+
+```bash
+py -m src.analysis.run_store ingest
+py -m src.analysis.run_store scorecard
+```
 
 ## Held-out (P2)
 

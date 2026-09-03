@@ -496,6 +496,49 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertEqual(decision.skip_forever, [])
         self.assertIn("ghidra-chrono-duration-cast-targs", decision.known_ids)
 
+    def test_netpath_template_arity_without_duration_cast_is_unknown(self):
+        decision = match_errors(
+            [{"message": "wrong number of template arguments (3, should be 2)"}],
+            cases=[],
+        )
+        self.assertTrue(decision.need_llm)
+        self.assertEqual(decision.skip_forever, [])
+
+    def test_skip_forever_ghidra_word_operator_index(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "no match for 'operator[]' (operand types are "
+                    "'ghidra_word' and 'int')"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ghidra_word operator[]", decision.skip_forever_reasons)
+
+    def test_skip_forever_user_struct_star_vs_mpfr_ptr(self):
+        for dest in ("mpfr_ptr", "mpfr_srcptr"):
+            decision = match_errors(
+                [{
+                    "message": (
+                        f"cannot convert 'Hold*' to '{dest}' "
+                        "{aka '__mpfr_struct*'}"
+                    ),
+                }],
+                cases=[],
+            )
+            self.assertFalse(decision.need_llm, dest)
+            self.assertIn("user struct* vs mpfr_ptr", decision.skip_forever_reasons)
+
+    def test_skip_forever_ident_redeclared_as_different_kind(self):
+        decision = match_errors(
+            [{"message": "'int is_ready' redeclared as different kind of entity"}],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ident redeclared as different kind", decision.skip_forever_reasons)
+
 
 class TestCritic(unittest.TestCase):
     def test_rejects_starts_with_replaced_by_sort(self):
