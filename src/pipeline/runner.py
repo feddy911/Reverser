@@ -780,12 +780,16 @@ def run(config: AppConfig) -> int:
                 tu_text = (
                     source_cpp.read_text(encoding="utf-8") if source_cpp else ""
                 )
-                from src.agents.critic import review_compile_fix, review_run
+                from src.agents.critic import review_run
 
                 assembled_ok = None
                 if config.compile_verify and source_cpp is not None:
                     from src.analysis.compile_verify import compile_cpp
-                    from src.agents.compiler import match_errors, write_proposal
+                    from src.agents.compiler import (
+                        match_errors,
+                        tu_compiler_action,
+                        write_proposal,
+                    )
 
                     t0 = time.perf_counter()
                     crep = compile_cpp(
@@ -821,11 +825,11 @@ def run(config: AppConfig) -> int:
                                 + ", ".join(decision.skip_forever_reasons[:4]),
                                 flush=True,
                             )
-                        if not decision.need_llm:
+                        tu_action = tu_compiler_action(decision)
+                        if tu_action == "skip":
                             metrics.compile_known_skip += 1
-                            why = "corpus or skip-forever"
                             print(
-                                f"  Compiler agent: skip LLM ({why})",
+                                "  Compiler agent: skip LLM (corpus or skip-forever)",
                                 flush=True,
                             )
                         else:
@@ -840,51 +844,11 @@ def run(config: AppConfig) -> int:
                                 metrics.compiler_proposals += 1
                             except Exception as exc:
                                 logger.warning("TU corpus proposal failed: %s", exc)
-                            try:
-                                metrics.llm_attempted += 1
-                                fixed = restorer.fix_compile(
-                                    source_cpp.read_text(encoding="utf-8"),
-                                    crep.errors,
-                                    compiler=crep.compiler,
-                                )
-                                if fixed:
-                                    from src.agents.assembler import strip_int_dat_redecls
-                                    fixed = strip_int_dat_redecls(fixed)
-                                    ident_ok, ident_reasons = review_compile_fix(
-                                        fixed,
-                                        user_parts,
-                                        ghidra_by_addr=ghidra_by_addr,
-                                    )
-                                    if not ident_ok:
-                                        print(
-                                            "  critic REJECT compile-fix: "
-                                            + "; ".join(ident_reasons),
-                                            flush=True,
-                                        )
-                                        metrics.llm_fail += 1
-                                        payload["compile_fix_rejected"] = ident_reasons
-                                    else:
-                                        fix_path = run_dir / "restored_compilefix.cpp"
-                                        fix_path.write_text(fixed, encoding="utf-8")
-                                        crep2 = compile_cpp(
-                                            fix_path,
-                                            compiler=config.cxx_compiler or crep.compiler,
-                                            timeout_sec=config.compile_timeout,
-                                        )
-                                        payload["compile_fix"] = crep2.to_dict()
-                                        if crep2.ok or (
-                                            crep2.attempted
-                                            and crep2.n_errors < crep.n_errors
-                                        ):
-                                            metrics.compile_fixed = True
-                                            metrics.llm_ok += 1
-                                        else:
-                                            metrics.llm_fail += 1
-                                else:
-                                    metrics.llm_fail += 1
-                            except Exception as exc:
-                                metrics.llm_fail += 1
-                                logger.warning("compile-fix LLM failed: %s", exc)
+                            print(
+                                "  Compiler agent: TU unknown -> proposal, "
+                                "no compile-fix",
+                                flush=True,
+                            )
                     metrics.mark_stage("compile", t0)
                     metrics.compile_attempted = crep.attempted
                     metrics.compile_ok = bool(assembled_ok)

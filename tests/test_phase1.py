@@ -1108,6 +1108,30 @@ class TestCompileVerify(unittest.TestCase):
             self.assertTrue(rep.attempted)
             self.assertTrue(rep.ok, rep.stderr)
 
+    def test_ghidra_word_placeholder_index_call_and_pair_compile(self):
+        from src.analysis.compile_verify import compile_cpp, find_cxx_compiler
+        from src.analysis.includes import make_preamble
+
+        cxx = find_cxx_compiler()
+        if not cxx:
+            self.skipTest("no C++ compiler on PATH")
+        preamble = make_preamble("// test", [], [])
+        src = "\n".join(preamble) + (
+            "int f(ghidra_word w) {\n"
+            "  (void)w[0];\n"
+            "  (void)w();\n"
+            "  (void)w.first;\n"
+            "  (void)w.second;\n"
+            "  return (int)w;\n"
+            "}\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "ghidra_word_ops.cpp"
+            p.write_text(src, encoding="utf-8")
+            rep = compile_cpp(p, compiler=cxx, timeout_sec=30)
+            self.assertTrue(rep.attempted)
+            self.assertTrue(rep.ok, rep.stderr)
+
     def test_rewritten_member_calls_compile(self):
         from src.analysis.compile_verify import compile_snippet, find_cxx_compiler
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp

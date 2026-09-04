@@ -46,10 +46,6 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "ghidra sort placeholder iterators",
     ),
     (
-        r"iterator_traits<ghidra_word>|iterator_category.*ghidra_word",
-        "ghidra algo placeholder iterators",
-    ),
-    (
         r"no match for 'operator\[\]' \(operand types are 'std::(?:map|unordered_map).+' and '(?:key_type|__normal_iterator)'",
         "assoc [] placeholder key",
     ),
@@ -99,11 +95,7 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "const void* vs pointer",
     ),
     (
-        r"cannot convert 'ghidra_word\*' to 'std::vector<",
-        "ghidra_word* vs vector*",
-    ),
-    (
-        r"'(?:p[bcilus]Var\d+|var_\d+|in_stack_[0-9A-Fa-f]+|in_RCX|in_RDX|"
+        r"'(?:p[bcilus]Var\d+|var_\d+|local_\d+|in_stack_[0-9A-Fa-f]+|in_RCX|in_RDX|"
         r"in_R8D|in_R9D|in_RAX|in_R8|in_R9)' was not declared in this scope",
         "undeclared ghidra temp",
     ),
@@ -143,18 +135,15 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "restore quote debris",
     ),
     (
-        r"no match for call to '\(ghidra_word\) \(\)'",
-        "ghidra_word as functor",
-    ),
-    (
+        r"iterator_traits<ghidra_word>|iterator_category.*ghidra_word|"
+        r"cannot convert 'ghidra_word\*' to 'std::vector<|"
+        r"no match for call to '\(ghidra_word\) \(\)'|"
         r"'using value_type = struct ghidra_word' \{aka 'struct ghidra_word'\} "
-        r"has no member named",
-        "ghidra_word placeholder member",
-    ),
-    (
+        r"has no member named|"
         r"no match for 'operator\[\]' \(operand types are 'ghidra_word' and "
-        r"'(?:int|unsigned|long|size_t|size_type)'",
-        "ghidra_word operator[]",
+        r"'(?:int|unsigned|long|size_t|size_type)'|"
+        r"no match for 'operator[+\-*/]' \(operand types are 'ghidra_word'",
+        "ghidra_word dummy",
     ),
     (
         r"cannot convert '[A-Z][A-Za-z0-9_]*\*' to 'mpfr_(?:ptr|srcptr)'",
@@ -228,6 +217,18 @@ def skip_forever_reason(msg: str) -> Optional[str]:
         if _safe_search(pat, msg):
             return reason
     return None
+
+
+def tu_compiler_action(decision: CompilerDecision) -> str:
+    """Live assembled TU never LLM-patches.
+
+    ``skip``: known dialect and/or skip-forever only.
+    ``proposal``: at least one unknown gcc — draft YAML, do not compile-fix.
+    Per-function compile-fix still uses ``need_llm``.
+    """
+    if decision.need_llm:
+        return "proposal"
+    return "skip"
 
 
 def match_errors(

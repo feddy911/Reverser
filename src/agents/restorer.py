@@ -98,14 +98,37 @@ _RE_RAW_NL_CHAR = re.compile(r"'(?:\r\n|\n|\r)'?")
 _RE_GLUED_VOID0 = re.compile(r"\}[ \t]*\(void\)0;")
 
 
+def _close_unbalanced_dquotes(text: str) -> str:
+    """Close a line with an odd number of unescaped double quotes (LLM debris)."""
+    out: List[str] = []
+    for line in (text or "").splitlines(keepends=True):
+        core = line.rstrip("\r\n")
+        n = 0
+        i = 0
+        while i < len(core):
+            if core[i] == "\\":
+                i += 2
+                continue
+            if core[i] == '"':
+                n += 1
+            i += 1
+        if n % 2 == 1:
+            out.append(core + '"' + line[len(core):])
+        else:
+            out.append(line)
+    return "".join(out)
+
+
 def repair_restore_debris(code: str) -> str:
     """Lexical LLM debris: raw newline in a char literal, `(void)0` glued to `}`,
-    and markdown backticks. No new control flow. Not a Ghidra-dialect recipe.
+    markdown backticks, and an unclosed `"` on a line. No new control flow.
+    Not a Ghidra-dialect recipe.
     """
     t = code or ""
     t = _RE_RAW_NL_CHAR.sub(r"'\\n'", t)
     t = _RE_GLUED_VOID0.sub("(void)0; }", t)
     t = t.replace("`", "")
+    t = _close_unbalanced_dquotes(t)
     return t
 
 

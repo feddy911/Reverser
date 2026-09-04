@@ -662,6 +662,15 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertNotIn(tick, got)
         self.assertIn("int f()", got)
 
+    def test_repair_restore_debris_closes_unbalanced_dquote(self):
+        from src.agents.restorer import repair_restore_debris
+
+        src = 'std::string s = "hello;\nreturn 0;\n'
+        got = repair_restore_debris(src)
+        self.assertIn('std::string s = "hello;"', got)
+        src_ok = 'std::string s = "hello";\n'
+        self.assertEqual(repair_restore_debris(src_ok), src_ok)
+
 
 class TestExtractFeatures(unittest.TestCase):
     def test_domain_dll_count(self):

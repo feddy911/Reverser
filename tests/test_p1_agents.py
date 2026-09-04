@@ -9,7 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.agents.compiler import match_errors, proposal_payload, write_proposal
+from src.agents.compiler import (
+    match_errors,
+    proposal_payload,
+    tu_compiler_action,
+    write_proposal,
+)
 from src.agents.critic import review_compile_fix, review_function, review_run
 from src.analysis.corpus import load_corpus
 from src.analysis.gen_corpus import (
@@ -327,6 +332,7 @@ class TestCompilerAgent(unittest.TestCase):
             "'in_RDX' was not declared in this scope",
             "'var_10' was not declared in this scope",
             "'var_20' was not declared in this scope",
+            "'local_68' was not declared in this scope",
         ):
             decision = match_errors([{"message": msg}], cases=[])
             self.assertFalse(decision.need_llm, msg)
@@ -438,26 +444,36 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertFalse(decision.need_llm)
         self.assertIn("restore quote debris", decision.skip_forever_reasons)
 
-    def test_skip_forever_ghidra_word_as_functor(self):
-        decision = match_errors(
-            [{"message": "no match for call to '(ghidra_word) ()'"}],
-            cases=[],
-        )
-        self.assertFalse(decision.need_llm)
-        self.assertIn("ghidra_word as functor", decision.skip_forever_reasons)
-
-    def test_skip_forever_ghidra_word_placeholder_member(self):
-        decision = match_errors(
-            [{
-                "message": (
-                    "'using value_type = struct ghidra_word' "
-                    "{aka 'struct ghidra_word'} has no member named 'first'"
-                ),
-            }],
-            cases=[],
-        )
-        self.assertFalse(decision.need_llm)
-        self.assertIn("ghidra_word placeholder member", decision.skip_forever_reasons)
+    def test_skip_forever_ghidra_word_dummy_family(self):
+        for msg, label in (
+            ("no match for call to '(ghidra_word) ()'", "functor"),
+            (
+                "'using value_type = struct ghidra_word' "
+                "{aka 'struct ghidra_word'} has no member named 'first'",
+                "member",
+            ),
+            (
+                "no match for 'operator[]' (operand types are "
+                "'ghidra_word' and 'int')",
+                "index",
+            ),
+            (
+                "iterator_traits<ghidra_word>::iterator_category is not a type",
+                "algo",
+            ),
+            (
+                "cannot convert 'ghidra_word*' to 'std::vector<int>*'",
+                "vector*",
+            ),
+            (
+                "no match for 'operator+' (operand types are "
+                "'ghidra_word' and 'int')",
+                "novel",
+            ),
+        ):
+            decision = match_errors([{"message": msg}], cases=[])
+            self.assertFalse(decision.need_llm, label)
+            self.assertIn("ghidra_word dummy", decision.skip_forever_reasons, label)
 
     def test_skip_forever_non_type_in_std_template(self):
         decision = match_errors(
@@ -504,18 +520,26 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertTrue(decision.need_llm)
         self.assertEqual(decision.skip_forever, [])
 
-    def test_skip_forever_ghidra_word_operator_index(self):
-        decision = match_errors(
-            [{
-                "message": (
-                    "no match for 'operator[]' (operand types are "
-                    "'ghidra_word' and 'int')"
-                ),
-            }],
+    def test_tu_compiler_action_unknown_is_proposal_not_fix(self):
+        unknown = match_errors(
+            [{"message": "wrong number of template arguments (3, should be 2)"}],
             cases=[],
         )
-        self.assertFalse(decision.need_llm)
-        self.assertIn("ghidra_word operator[]", decision.skip_forever_reasons)
+        self.assertEqual(tu_compiler_action(unknown), "proposal")
+        skip = match_errors(
+            [{"message": "ios::good was not declared in this scope"}],
+            cases=[],
+        )
+        self.assertEqual(tu_compiler_action(skip), "skip")
+
+    def test_mpfr_to_string_undeclared_is_unknown_not_skip(self):
+        decision = match_errors(
+            [{"message": "'mpfr_to_string' was not declared in this scope"}],
+            cases=[],
+        )
+        self.assertTrue(decision.need_llm)
+        self.assertEqual(decision.skip_forever, [])
+        self.assertEqual(tu_compiler_action(decision), "proposal")
 
     def test_skip_forever_user_struct_star_vs_mpfr_ptr(self):
         for dest in ("mpfr_ptr", "mpfr_srcptr"):
