@@ -671,6 +671,86 @@ class TestFidelitySmoke(unittest.TestCase):
         src_ok = 'std::string s = "hello";\n'
         self.assertEqual(repair_restore_debris(src_ok), src_ok)
 
+    def test_repair_restore_debris_unwraps_json_envelope(self):
+        from src.agents.restorer import repair_restore_debris, unwrap_restore_payload
+
+        blob = (
+            '{\n'
+            '  "classification": "user_code",\n'
+            '  "guessed_name": "fmt_num",\n'
+            '  "cpp_code": "int fmt_num() { return 1; }"\n'
+            '}\n'
+        )
+        got = repair_restore_debris(blob)
+        self.assertIn("int fmt_num() { return 1; }", got)
+        self.assertNotIn("classification", got)
+        compound = "{\n  int x = 1;\n  return x;\n}\n"
+        self.assertEqual(repair_restore_debris(compound), compound)
+
+        broken = (
+            '{\n'
+            '  "classification": "user_code",\n'
+            '  "guessed_name": "fmt_num",\n'
+            '  "evidence": ["std::string"],\n'
+            '  "cpp_code": "int fmt_num() { return 1; }"\n'
+            '  },\n'
+            '  "includes": [],\n'
+            '  "confidence": 100\n'
+            '}\n'
+        )
+        self.assertIn("int fmt_num() { return 1; }", repair_restore_debris(broken))
+        rec = {
+            "classification": "user_code",
+            "guessed_name": "-",
+            "confidence": 50,
+            "cpp_code": broken,
+        }
+        unwrap_restore_payload(rec)
+        self.assertEqual(rec["guessed_name"], "fmt_num")
+        self.assertIn("int fmt_num()", rec["cpp_code"])
+        self.assertNotIn("classification", rec["cpp_code"])
+
+    def test_assemble_unwraps_restore_json_envelope(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "fmt_num",
+            "ghidra_name": "FUN_1",
+            "cpp_code": (
+                '{\n'
+                '  "classification": "user_code",\n'
+                '  "guessed_name": "fmt_num",\n'
+                '  "cpp_code": "int fmt_num() { return 1; }"\n'
+                '}\n'
+            ),
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertIn("int fmt_num()", text)
+        self.assertNotIn('"classification"', text)
+
+        broken = [{
+            "classification": "user_code",
+            "address": "0x2",
+            "guessed_name": "-",
+            "ghidra_name": "FUN_2",
+            "cpp_code": (
+                '{\n'
+                '  "classification": "user_code",\n'
+                '  "guessed_name": "fmt_num",\n'
+                '  "cpp_code": "int fmt_num() { return 1; }"\n'
+                '  },\n'
+                '  "includes": []\n'
+                '}\n'
+            ),
+        }]
+        from src.agents.restorer import unwrap_restore_payload
+        unwrap_restore_payload(broken[0])
+        text2, n2 = assemble(broken, [], [])
+        self.assertEqual(n2, 1)
+        self.assertIn("int fmt_num()", text2)
+        self.assertNotIn('"classification"', text2)
+
 
 class TestExtractFeatures(unittest.TestCase):
     def test_domain_dll_count(self):

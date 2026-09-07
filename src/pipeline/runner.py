@@ -498,6 +498,19 @@ def run(config: AppConfig) -> int:
                     if not from_llm_cache:
                         metrics.llm_ok += 1
 
+                from src.agents.restorer import (
+                    keep_dump_literals,
+                    repair_restore_debris,
+                    unwrap_restore_payload,
+                )
+                unwrap_restore_payload(data)
+                data["cpp_code"] = repair_restore_debris(
+                    keep_dump_literals(
+                        data.get("cpp_code") or "",
+                        s.get("literals") or [],
+                    )
+                )
+
                 cls = data.get("classification", "unknown")
                 guess = data.get("guessed_name") or "-"
                 conf = data.get("confidence", 0)
@@ -518,13 +531,6 @@ def run(config: AppConfig) -> int:
                 data["literals"] = s.get("literals", [])
                 data["ext_calls"] = s.get("ext_calls", [])
                 data["callees"] = s.get("callees", [])
-                from src.agents.restorer import keep_dump_literals, repair_restore_debris
-                data["cpp_code"] = repair_restore_debris(
-                    keep_dump_literals(
-                        data.get("cpp_code") or "",
-                        s.get("literals") or [],
-                    )
-                )
                 if config.compile_verify and config.compile_per_function:
                     _per_function_compile(
                         data,

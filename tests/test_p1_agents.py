@@ -268,10 +268,14 @@ class TestCompilerAgent(unittest.TestCase):
                 {"message": "expected unqualified-id before ',' token"},
                 {"message": "invalid declarator before '>' token"},
                 {"message": "expected unqualified-id before '>' token"},
+                {"message": "expected unqualified-id before '{' token"},
+                {"message": "expected unqualified-id before string constant"},
+                {"message": "expected declaration before '}' token"},
             ],
             cases=[],
         )
         self.assertFalse(decision.need_llm)
+        self.assertEqual(decision.unknown, [])
         self.assertIn("restore template debris", decision.skip_forever_reasons)
 
     def test_skip_forever_member_on_function_type(self):
@@ -532,6 +536,20 @@ class TestCompilerAgent(unittest.TestCase):
             cases=[],
         )
         self.assertEqual(tu_compiler_action(skip), "skip")
+
+    def test_skip_forever_vector_allocator_star_ctor(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "no matching function for call to "
+                    "'std::vector<char, std::allocator<char> >::vector("
+                    "size_type, std::allocator<char>*&)'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ghidra vector allocator* ctor", decision.skip_forever_reasons)
 
     def test_mpfr_to_string_undeclared_is_unknown_not_skip(self):
         decision = match_errors(

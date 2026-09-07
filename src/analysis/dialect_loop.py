@@ -29,6 +29,8 @@ _RESTORE_DEBRIS = (
     r"'else' without a previous 'if'",
     r"break statement not within loop or switch",
     r"expected unqualified-id before '(?:void|return)'",
+    r"expected unqualified-id before '\{' token",
+    r"expected unqualified-id before string constant",
     r"expected declaration before '\}' token",
     r"expected unqualified-id before ',' token",
     r"expected unqualified-id before '>' token",

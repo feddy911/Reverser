@@ -438,6 +438,13 @@ def assemble(
         r for r in restored or []
         if r.get("classification") == "user_code" and (r.get("cpp_code") or "").strip()
     ]
+    from src.agents.restorer import unwrap_restore_payload
+    for r in user:
+        unwrap_restore_payload(r)
+    user = [
+        r for r in user
+        if (r.get("cpp_code") or "").strip()
+    ]
     user = user_emit_order(user)
 
     # 1) адрес -> излучаемый символ

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -119,12 +120,109 @@ def _close_unbalanced_dquotes(text: str) -> str:
     return "".join(out)
 
 
-def repair_restore_debris(code: str) -> str:
-    """Lexical LLM debris: raw newline in a char literal, `(void)0` glued to `}`,
-    markdown backticks, and an unclosed `"` on a line. No new control flow.
+_JSON_STR_ESC = {
+    "n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f",
+    '"': '"', "\\": "\\", "/": "/",
+}
+_EMPTY_GUESS = frozenset({"", "-", "null"})
+
+
+def _json_string_field(text: str, key: str) -> Optional[str]:
+    """Read a JSON string field even when the surrounding object is invalid."""
+    m = re.search(rf'"{re.escape(key)}"\s*:\s*"', text or "")
+    if not m:
+        return None
+    i = m.end()
+    out: List[str] = []
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\":
+            if i + 1 >= len(text):
+                break
+            nxt = text[i + 1]
+            if nxt == "u" and i + 5 < len(text):
+                hexpart = text[i + 2:i + 6]
+                try:
+                    out.append(chr(int(hexpart, 16)))
+                    i += 6
+                    continue
+                except ValueError:
+                    pass
+            out.append(_JSON_STR_ESC.get(nxt, nxt))
+            i += 2
+            continue
+        if ch == '"':
+            return "".join(out)
+        out.append(ch)
+        i += 1
+    return "".join(out) if out else None
+
+
+def _looks_like_restore_envelope(s: str) -> bool:
+    t = (s or "").strip()
+    return t.startswith("{") and '"cpp_code"' in t and '"classification"' in t
+
+
+def _unwrap_restore_json(code: str) -> str:
+    """If the LLM stored the whole restore envelope as cpp_code, take the inner C++.
+
+    Gate on restore keys so a C++ compound statement is left alone. Unwrap at most
+    twice (double-wrapped envelope). Invalid JSON still yields the cpp_code field.
     Not a Ghidra-dialect recipe.
     """
     t = code or ""
+    for _ in range(2):
+        s = t.strip()
+        if not _looks_like_restore_envelope(s):
+            return t
+        # Do not call extract_json: its C++ fallback treats the envelope `{` as
+        # a compound statement when evidence lists mention std::.
+        inner = _json_string_field(s, "cpp_code") or ""
+        if not inner.strip():
+            try:
+                parsed = json.loads(s)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                parsed = None
+            if isinstance(parsed, dict):
+                cand = parsed.get("cpp_code")
+                if isinstance(cand, str):
+                    inner = cand
+        if not inner.strip():
+            return t
+        t = inner
+    return t
+
+
+def unwrap_restore_payload(data: Dict[str, Any]) -> None:
+    """Recover cpp_code and guessed_name when the restore envelope was stored as the body."""
+    if not isinstance(data, dict):
+        return
+    code = str(data.get("cpp_code") or "")
+    if not _looks_like_restore_envelope(code):
+        return
+    guess = str(data.get("guessed_name") or "").strip()
+    if guess.lower() in _EMPTY_GUESS:
+        name = (_json_string_field(code, "guessed_name") or "").strip()
+        if not name:
+            try:
+                parsed = json.loads(code.strip())
+            except (json.JSONDecodeError, TypeError, ValueError):
+                parsed = None
+            if isinstance(parsed, dict):
+                cand = parsed.get("guessed_name")
+                if isinstance(cand, str):
+                    name = cand.strip()
+        if name and name.lower() not in _EMPTY_GUESS:
+            data["guessed_name"] = name
+    data["cpp_code"] = _unwrap_restore_json(code)
+
+
+def repair_restore_debris(code: str) -> str:
+    """Lexical LLM debris: restore JSON envelope, raw newline in a char literal,
+    `(void)0` glued to `}`, markdown backticks, and an unclosed `"` on a line.
+    No new control flow. Not a Ghidra-dialect recipe.
+    """
+    t = _unwrap_restore_json(code)
     t = _RE_RAW_NL_CHAR.sub(r"'\\n'", t)
     t = _RE_GLUED_VOID0.sub("(void)0; }", t)
     t = t.replace("`", "")

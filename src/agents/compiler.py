@@ -127,9 +127,17 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
     (
         r"expected unqualified-id before ',' token|"
         r"expected unqualified-id before '>' token|"
+        r"expected unqualified-id before '\{' token|"
+        r"expected unqualified-id before string constant|"
+        r"expected declaration before '\}' token|"
         r"invalid declarator before ',' token|"
         r"invalid declarator before '>' token",
         "restore template debris",
+    ),
+    (
+        r"no matching function for call to 'std::vector<.+>::vector\("
+        r"size_type, std::allocator<[^>]+>\*",
+        "ghidra vector allocator* ctor",
     ),
     (
         r"missing terminating ['\"] character",
