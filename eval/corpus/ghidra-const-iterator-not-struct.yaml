@@ -14,7 +14,7 @@ ghidra_cpp: |
               (p,in_stack_ffffffffffffffb0);
   }
 contains:
-  - "->erase(in_stack_ffffffffffffffb0)"
+  - "->erase(in_stk_n80)"
 not_contains:
   - "struct __const_iterator"
 compile: true

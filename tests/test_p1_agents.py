@@ -328,6 +328,7 @@ class TestCompilerAgent(unittest.TestCase):
     def test_skip_forever_undeclared_ghidra_abi_temps(self):
         for msg in (
             "'in_stack_ffffffffffffff58' was not declared in this scope",
+            "'in_stk_n168' was not declared in this scope",
             "'in_RCX' was not declared in this scope",
             "'in_RDX' was not declared in this scope",
             "'var_10' was not declared in this scope",

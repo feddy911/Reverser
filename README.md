@@ -137,7 +137,7 @@ The Compiler agent classifies gcc diagnostics against corpus `gcc_fingerprint`
 gcc→recipe_id, already wired into per-fn compile-fix. A known class skips the LLM.
 Skip-forever (red eight, placeholder iterators, `this` as a local, iterator/`char*` vs `string*`,
 truncated `mpz_*` / `mpfr_*` calls, `struct` before a header typedef, undeclared Ghidra temps
-`pbVarN` / `var_N` / `local_N` / `in_stack_*` / `in_RCX`, restore quote debris, the assembler
+`pbVarN` / `var_N` / `local_N` / `in_stack_*` / `in_stk_n*` / `in_RCX`, restore quote debris, the assembler
 dummy `ghidra_word` used as functor / `operator[]` / placeholder member / algo iterator /
 `ghidra_word*` vs `vector*` (one family, not one regex per gcc spelling), user struct `T*` vs
 `mpfr_ptr`, ident redeclared as a different kind, non-type in `std::allocator`/`vector`,
@@ -148,7 +148,7 @@ one LLM pass and a YAML draft (not a sanitizer patch). The assembled TU never ca
 compile-fix: unknown gcc drafts YAML only (`tu_compiler_action`). Scoring ML
 (`train_scorer`) is not used as a compile oracle.
 
-Of 161 fixtures, 95 have `gcc_fingerprint` (classifier); the rest are compile-ok
+Of 162 fixtures, 95 have `gcc_fingerprint` (classifier); the rest are compile-ok
 recipe regression. The gate synthesizes a probe from the regex or uses an explicit `gcc_probe`
 (a realistic gcc message, when `.*` / a truncated alt would lie) and
 checks that `match_errors` hits its own id. The ostream sanitize/assemble collision

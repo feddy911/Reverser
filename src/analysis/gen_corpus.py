@@ -104,7 +104,7 @@ def _is_protected(ident: str) -> bool:
         return True
     if ident.startswith((
         "DAT_", "thunk_", "FUN_", "std", "local_", "param_",
-        "in_stack", "auStack", "mpz_", "long_long",
+        "in_stack", "in_stk_", "auStack", "mpz_", "long_long",
     )):
         return True
     return False

@@ -466,6 +466,21 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertNotIn("->begin()", nested)
         self.assertNotIn("->end()", nested)
 
+    def test_in_stack_sign_extended_offset_is_readable(self):
+        from src.analysis.ghidra_cpp import readable_in_stack_name, sanitize_ghidra_cpp
+
+        self.assertEqual(readable_in_stack_name("ffffffffffffff58"), "in_stk_n168")
+        self.assertEqual(readable_in_stack_name("ffffffffffffffd8"), "in_stk_n40")
+        self.assertEqual(readable_in_stack_name("98"), "in_stack_98")
+        got = sanitize_ghidra_cpp(
+            "int *in_stack_ffffffffffffff58;\n"
+            "int in_stack_98;\n"
+            "return *in_stack_ffffffffffffff58 + in_stack_98;\n"
+        )
+        self.assertIn("in_stk_n168", got)
+        self.assertIn("in_stack_98", got)
+        self.assertNotIn("in_stack_ffffffffffffff58", got)
+
     def test_duration_cast_not_rewritten(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 

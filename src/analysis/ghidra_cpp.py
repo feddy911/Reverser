@@ -942,6 +942,33 @@ def rewrite_gmp_amp_args(code: str) -> str:
     return "".join(out)
 
 
+_RE_IN_STACK = re.compile(r"\bin_stack_([0-9A-Fa-f]+)\b")
+
+
+def readable_in_stack_name(hexpart: str) -> str:
+    """Decode Ghidra ``in_stack_<hex>`` to a C identifier.
+
+    Long hex is a sign-extended 64-bit frame offset: ``ffffffffffffff58`` is
+    -168, not a unique token. Short hex (``in_stack_98``) stays as Ghidra
+    printed it. Does not invent a source name.
+    """
+    raw = (hexpart or "").strip()
+    if len(raw) < 8:
+        return "in_stack_" + raw
+    val = int(raw, 16)
+    bits = min(len(raw) * 4, 64)
+    sign_bit = 1 << (bits - 1)
+    mask = (1 << bits) - 1
+    val &= mask
+    if val & sign_bit:
+        return f"in_stk_n{abs(val - (1 << bits))}"
+    return f"in_stk_{val}"
+
+
+def _rewrite_in_stack_temps(chunk: str) -> str:
+    return _RE_IN_STACK.sub(lambda m: readable_in_stack_name(m.group(1)), chunk or "")
+
+
 def sanitize_ghidra_cpp(code: str) -> str:
     """Rewrite Ghidra type spellings and member-call syntax into parseable C++."""
     t = code or ""
@@ -1023,4 +1050,5 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _RE_STL_PRIV_FIELD.sub("", t)
     t = _RE_STACK_ADDR_ASSIGN.sub(r"(void)&", t)
     t = _RE_STACK_PTR_ASSIGN.sub(r"(void)(\2)", t)
+    t = _outside_strings(t, _rewrite_in_stack_temps)
     return t

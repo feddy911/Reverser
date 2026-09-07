@@ -1,0 +1,18 @@
+id: ghidra-in-stack-offset
+profile: generic
+recipe: sanitize
+ghidra_cpp: |
+  int take(int *p)
+  {
+    int *in_stack_ffffffffffffff58;
+    int in_stack_98;
+    in_stack_ffffffffffffff58 = p;
+    return *in_stack_ffffffffffffff58 + in_stack_98;
+  }
+contains:
+  - in_stk_n168
+  - in_stack_98
+not_contains:
+  - in_stack_ffffffffffffff58
+compile: true
+notes: "Ghidra names incoming stack slots by sign-extended hex offset; decode to in_stk_n<abs>. Short in_stack_98 stays."

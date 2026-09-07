@@ -11,9 +11,9 @@ ghidra_cpp: |
               (in_stack_ffffffffffffffd8,in_stack_ffffffffffffffe0);
   }
 contains:
-  - "->push_back(in_stack_ffffffffffffffe0)"
+  - "->push_back(in_stk_n32)"
 not_contains:
-  - "*(in_stack_ffffffffffffffe0)"
+  - "*(in_stk_n32)"
   - "::push_back"
 compile: true
 notes: "Ghidra string::push_back(this, char) is by value; do not deref like vector T*"

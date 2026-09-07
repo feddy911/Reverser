@@ -95,7 +95,8 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "const void* vs pointer",
     ),
     (
-        r"'(?:p[bcilus]Var\d+|var_\d+|local_\d+|in_stack_[0-9A-Fa-f]+|in_RCX|in_RDX|"
+        r"'(?:p[bcilus]Var\d+|var_\d+|local_\d+|in_stk_n?\d+|"
+        r"in_stack_[0-9A-Fa-f]+|in_RCX|in_RDX|"
         r"in_R8D|in_R9D|in_RAX|in_R8|in_R9)' was not declared in this scope",
         "undeclared ghidra temp",
     ),

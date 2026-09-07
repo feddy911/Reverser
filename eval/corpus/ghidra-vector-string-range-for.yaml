@@ -23,7 +23,7 @@ ghidra_cpp: |
     (void)n;
   }
 contains:
-  - "(const_iterator)(in_stack_ffffffffffffff98)"
+  - "(const_iterator)(in_stk_n104)"
 not_contains:
   - "->begin()"
   - "->end()"
