@@ -32,6 +32,8 @@ _RESTORE_DEBRIS = (
     r"expected unqualified-id before '\{' token",
     r"expected unqualified-id before string constant",
     r"expected declaration before '\}' token",
+    r"a function-definition is not allowed here before '\{' token",
+    r"expected '\}' at end of input",
     r"expected unqualified-id before ',' token",
     r"expected unqualified-id before '>' token",
     r"invalid declarator before ',' token",

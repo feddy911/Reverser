@@ -50,8 +50,8 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "assoc [] placeholder key",
     ),
     (
-        r"no match for 'operator!=' \(operand types are 'std::__cxx11::basic_string<char>' and 'char'|"
-        r"operator!=<char, std::char_traits<char>, std::allocator<char> >\(std::__cxx11::basic_string<char>\*&",
+        r"no match for 'operator[=!]=' \(operand types are 'std::__cxx11::basic_string<char>' and 'char'|"
+        r"operator[=!]=<char, std::char_traits<char>, std::allocator<char> >\(std::__cxx11::basic_string<char>\*&",
         "string vs char compare",
     ),
     (
@@ -71,7 +71,7 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "ghidra truncated mpz call",
     ),
     (
-        r"too few arguments to function '(?:int |void )?(?:mpfr_|__gmpfr_)",
+        r"too few arguments to function '[^']*\b(?:mpfr_|__gmpfr_)",
         "ghidra truncated mpfr call",
     ),
     (
@@ -131,7 +131,9 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         r"expected unqualified-id before string constant|"
         r"expected declaration before '\}' token|"
         r"invalid declarator before ',' token|"
-        r"invalid declarator before '>' token",
+        r"invalid declarator before '>' token|"
+        r"a function-definition is not allowed here before '\{' token|"
+        r"expected '\}' at end of input",
         "restore template debris",
     ),
     (

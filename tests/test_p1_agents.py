@@ -252,6 +252,34 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertFalse(decision.need_llm)
         self.assertIn("ghidra truncated mpfr call", decision.skip_forever_reasons)
 
+    def test_skip_forever_truncated_mpfr_get_str_with_return_type(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "too few arguments to function "
+                    "'char* mpfr_get_str(char*, mpfr_exp_t*, int, size_t, "
+                    "mpfr_srcptr, mpfr_rnd_t)'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ghidra truncated mpfr call", decision.skip_forever_reasons)
+
+    def test_skip_forever_string_vs_char_compare_eq(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "no matching function for call to "
+                    "'operator==<char, std::char_traits<char>, std::allocator<char> >("
+                    "std::__cxx11::basic_string<char>*&, char*)'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("string vs char compare", decision.skip_forever_reasons)
+
     def test_skip_forever_this_in_prototype(self):
         decision = match_errors(
             [{
@@ -271,6 +299,8 @@ class TestCompilerAgent(unittest.TestCase):
                 {"message": "expected unqualified-id before '{' token"},
                 {"message": "expected unqualified-id before string constant"},
                 {"message": "expected declaration before '}' token"},
+                {"message": "a function-definition is not allowed here before '{' token"},
+                {"message": "expected '}' at end of input"},
             ],
             cases=[],
         )

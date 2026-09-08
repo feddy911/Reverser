@@ -307,6 +307,8 @@ class TestDialectLoop(unittest.TestCase):
                 "stray '`' in program",
                 "expected unqualified-id before '{' token",
                 "expected unqualified-id before string constant",
+                "a function-definition is not allowed here before '{' token",
+                "expected '}' at end of input",
             ],
             budget=1,
             corpus_cases=[],

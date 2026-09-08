@@ -120,6 +120,74 @@ def _close_unbalanced_dquotes(text: str) -> str:
     return "".join(out)
 
 
+def _close_unbalanced_braces(text: str) -> str:
+    """Close leftover `{` at EOF (truncated LLM body). Do not invent identifiers."""
+    s = text or ""
+    depth = 0
+    i = 0
+    n = len(s)
+    in_str = False
+    in_char = False
+    in_sl = False
+    in_ml = False
+    while i < n:
+        ch = s[i]
+        nxt = s[i + 1] if i + 1 < n else ""
+        if in_sl:
+            if ch == "\n":
+                in_sl = False
+            i += 1
+            continue
+        if in_ml:
+            if ch == "*" and nxt == "/":
+                in_ml = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if in_str:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if in_char:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "'":
+                in_char = False
+            i += 1
+            continue
+        if ch == "/" and nxt == "/":
+            in_sl = True
+            i += 2
+            continue
+        if ch == "/" and nxt == "*":
+            in_ml = True
+            i += 2
+            continue
+        if ch == '"':
+            in_str = True
+            i += 1
+            continue
+        if ch == "'":
+            in_char = True
+            i += 1
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}" and depth > 0:
+            depth -= 1
+        i += 1
+    if depth <= 0:
+        return s
+    nl = "" if s.endswith("\n") else "\n"
+    return s + nl + ("}" * depth) + "\n"
+
+
 _JSON_STR_ESC = {
     "n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f",
     '"': '"', "\\": "\\", "/": "/",
@@ -219,14 +287,16 @@ def unwrap_restore_payload(data: Dict[str, Any]) -> None:
 
 def repair_restore_debris(code: str) -> str:
     """Lexical LLM debris: restore JSON envelope, raw newline in a char literal,
-    `(void)0` glued to `}`, markdown backticks, and an unclosed `"` on a line.
-    No new control flow. Not a Ghidra-dialect recipe.
+    `(void)0` glued to `}`, markdown backticks, an unclosed `"` on a line, and
+    leftover `{` at EOF. No new identifiers or control flow.
+    Not a Ghidra-dialect recipe.
     """
     t = _unwrap_restore_json(code)
     t = _RE_RAW_NL_CHAR.sub(r"'\\n'", t)
     t = _RE_GLUED_VOID0.sub("(void)0; }", t)
     t = t.replace("`", "")
     t = _close_unbalanced_dquotes(t)
+    t = _close_unbalanced_braces(t)
     return t
 
 

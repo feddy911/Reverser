@@ -671,6 +671,40 @@ class TestFidelitySmoke(unittest.TestCase):
         src_ok = 'std::string s = "hello";\n'
         self.assertEqual(repair_restore_debris(src_ok), src_ok)
 
+    def test_repair_restore_debris_closes_truncated_braces(self):
+        from src.agents.restorer import repair_restore_debris
+
+        src = "int fmt_num() {\n  if (1) {\n    std::wid\n"
+        got = repair_restore_debris(src)
+        self.assertIn("std::wid", got)
+        self.assertNotIn("std::wstring", got)
+        self.assertGreaterEqual(got.count("}"), src.count("}") + 2)
+        balanced = "int fmt_num() { return 1; }\n"
+        self.assertEqual(repair_restore_debris(balanced), balanced)
+
+    def test_assemble_truncated_body_does_not_swallow_next_fn(self):
+        restored = [
+            {
+                "classification": "user_code",
+                "address": "0x1",
+                "guessed_name": "fmt_num",
+                "ghidra_name": "FUN_1",
+                "cpp_code": "int fmt_num() {\n  if (1) {\n    std::wid\n",
+            },
+            {
+                "classification": "user_code",
+                "address": "0x2",
+                "guessed_name": "next_fn",
+                "ghidra_name": "FUN_2",
+                "cpp_code": "int next_fn() { return 2; }\n",
+            },
+        ]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 2)
+        self.assertIn("int next_fn()", text)
+        self.assertIn("std::wid", text)
+        self.assertNotIn("std::wstring", text)
+
     def test_repair_restore_debris_unwraps_json_envelope(self):
         from src.agents.restorer import repair_restore_debris, unwrap_restore_payload
 
