@@ -65,6 +65,18 @@ class TestFeaturesSmoke(unittest.TestCase):
         by_name = {s["name"]: s["score"] for s in scored}
         self.assertGreater(by_name["FUN_140001000"], by_name["_RTC_CheckStackVars"])
 
+    def test_fixture_pcode_is_dump_only_not_a_feature(self):
+        from src.agents.restorer import USER_PROMPT
+        from src.analysis.pcode import PCODE_KEY, entry_pcode, op_lines
+
+        dump = _load_fixture()
+        fn = dump["functions"][0]
+        lines = op_lines(entry_pcode(fn))
+        self.assertGreaterEqual(len(lines), 1)
+        self.assertTrue(any("COPY" in ln or "RETURN" in ln for ln in lines))
+        self.assertNotIn(PCODE_KEY, FEATURE_KEYS)
+        self.assertNotIn("pcode", USER_PROMPT.lower())
+
     def test_ml_noise_penalty_sinks_crt(self):
         from src.analysis.scorer import (
             ML_NOISE_CEILING,

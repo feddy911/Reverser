@@ -1,4 +1,5 @@
-// Ghidra headless: full dump (functions + decompile + imports + thunks + strings + callees + dlls).
+// Ghidra headless: full dump (functions + decompile + high p-code + imports + thunks + strings + callees + dlls).
+// pcode is clipped (500 ops / 12000 chars). Live restore still uses ghidra_code (p4).
 // Usage: -postScript GhidraDecompileAll.java <output.json>
 // @category Reverser
 import ghidra.app.script.GhidraScript;
@@ -8,12 +9,15 @@ import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
 import ghidra.program.model.listing.Data;
+import ghidra.program.model.pcode.HighFunction;
+import ghidra.program.model.pcode.PcodeOpAST;
 import ghidra.program.model.symbol.SourceType;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
@@ -103,6 +107,7 @@ public class GhidraDecompileAll extends GhidraScript {
             }
 
             String code = "";
+            String pcode = "";
             try {
                 DecompileResults res = decomp.decompileFunction(func, 30, monitor);
                 if (res != null && res.decompileCompleted()) {
@@ -110,6 +115,25 @@ public class GhidraDecompileAll extends GhidraScript {
                     if (df != null && df.getC() != null) {
                         code = df.getC();
                         ok++;
+                    }
+                    HighFunction hf = res.getHighFunction();
+                    if (hf != null) {
+                        StringBuilder pc = new StringBuilder();
+                        Iterator<PcodeOpAST> ops = hf.getPcodeOps();
+                        int nops = 0;
+                        while (ops.hasNext() && nops < 500) {
+                            PcodeOpAST op = ops.next();
+                            if (op == null) {
+                                continue;
+                            }
+                            pc.append(op.toString());
+                            pc.append('\n');
+                            nops++;
+                        }
+                        pcode = pc.toString();
+                        if (pcode.length() > 12000) {
+                            pcode = pcode.substring(0, 12000);
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -124,7 +148,8 @@ public class GhidraDecompileAll extends GhidraScript {
                 "\"ext_calls\": [" + String.join(",", calleeExts) + "], " +
                 "\"ext_dlls\": [" + String.join(",", calleeDlls) + "], " +
                 "\"lib_matched\": " + (libMatched ? "true" : "false") + ", " +
-                "\"ghidra_code\": " + escapeJson(code) + "}"
+                "\"ghidra_code\": " + escapeJson(code) + ", " +
+                "\"pcode\": " + escapeJson(pcode) + "}"
             );
         }
 

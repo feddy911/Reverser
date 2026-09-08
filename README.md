@@ -28,6 +28,9 @@ Run artifacts land in `output/logs/run_<timestamp>/`
 (`triage.json`, `ghidra_raw.json`, `features.json`, `restored*.cpp`, `fidelity.json`, `metrics.json`).
 
 An empty Ghidra dump is a hard failure; the pipeline does not continue with a blank restore.
+The dump may include a `pcode` string (high p-code ops, clipped). Live restore (`p4`) still
+reads Ghidra C only; restore-from-IR is not enabled. Cache key stays `ghidra_full_v6` — dumps
+without `pcode` remain valid. Do not bump `LLM_PROMPT_VER` until the restore prompt consumes IR.
 
 ## Triage and prompt profiles
 

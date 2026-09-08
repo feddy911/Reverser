@@ -8,7 +8,8 @@
       "ext_calls": ["printf", "operator<<"],
       "ext_dlls": ["msvcrt.dll", "gmp.dll"],
       "lib_matched": false,
-      "ghidra_code": "void FUN_140001000(void)\n{\n  printf(\"hello\\n\");\n  std::cout << \"x\";\n}\n"
+      "ghidra_code": "void FUN_140001000(void)\n{\n  printf(\"hello\\n\");\n  std::cout << \"x\";\n}\n",
+      "pcode": "(unique, 8, 0x1000) COPY (const, 8, 0x0)\n(register, RIP, 8) RETURN\n"
     },
     {
       "address": "0x140002000",
