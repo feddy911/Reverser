@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from src.analysis.prompts import system_prompt_for, toolchain_rules_for
 from src.llm.client import OllamaClient, extract_json
@@ -120,8 +120,8 @@ def _close_unbalanced_dquotes(text: str) -> str:
     return "".join(out)
 
 
-def _close_unbalanced_braces(text: str) -> str:
-    """Close leftover `{` at EOF (truncated LLM body). Do not invent identifiers."""
+def _scan_cpp_state(text: str) -> Tuple[int, bool, bool]:
+    """Brace depth and open string/char at EOF. Not a dialect recipe."""
     s = text or ""
     depth = 0
     i = 0
@@ -182,10 +182,102 @@ def _close_unbalanced_braces(text: str) -> str:
         elif ch == "}" and depth > 0:
             depth -= 1
         i += 1
+    return depth, in_str, in_char
+
+
+def _close_unbalanced_braces(text: str) -> str:
+    """Close leftover `{` at EOF (truncated LLM body). Do not invent identifiers."""
+    s = text or ""
+    depth, _in_str, _in_char = _scan_cpp_state(s)
     if depth <= 0:
         return s
     nl = "" if s.endswith("\n") else "\n"
     return s + nl + ("}" * depth) + "\n"
+
+
+CONTINUE_PROMPT = (
+    "The previous restore cpp_code was cut off before a complete function body.\n"
+    "Continue ONLY the missing tail of that C++ body.\n"
+    "Do not invent identifiers that are not already started in the bytes so far.\n"
+    'Return JSON with a single field cpp_code_tail (the remainder only).'
+)
+
+
+def looks_truncated_cpp(code: str) -> bool:
+    """True when the restored body was cut off (open brace/string). No ident rewrite."""
+    s = code or ""
+    if not s.strip():
+        return False
+    depth, in_str, in_char = _scan_cpp_state(s)
+    return depth > 0 or in_str or in_char
+
+
+def merge_cpp_continuation(head: str, tail: str) -> str:
+    """Append a continue-tail. Do not rewrite truncated identifiers."""
+    h = head or ""
+    t = tail or ""
+    if not t.strip():
+        return h
+    hs = h.strip()
+    ts = t.strip()
+    prefix = hs[: min(32, len(hs))]
+    if prefix and ts.startswith(prefix) and len(ts) >= len(hs):
+        return t if t.endswith("\n") else t + "\n"
+    out = h.rstrip() + "\n" + t.lstrip("\n")
+    if not out.endswith("\n"):
+        out += "\n"
+    return out
+
+
+def extract_restore_json(text: str) -> Optional[Dict[str, Any]]:
+    """Parse restore JSON. Never treat a JSON envelope `{` as C++."""
+    from src.llm.client import parse_json_object
+
+    parsed = parse_json_object(text or "")
+    if isinstance(parsed, dict) and (
+        "cpp_code" in parsed
+        or "cpp_code_tail" in parsed
+        or parsed.get("classification")
+    ):
+        return parsed
+    code = _json_string_field(text, "cpp_code")
+    tail = _json_string_field(text, "cpp_code_tail")
+    if code is None and tail is None:
+        return None
+    rec: Dict[str, Any] = {
+        "classification": _json_string_field(text, "classification") or "user_code",
+        "purpose": _json_string_field(text, "purpose") or "",
+        "evidence": [],
+        "includes": [],
+        "confidence": 50,
+    }
+    if code is not None:
+        rec["cpp_code"] = code
+    if tail is not None:
+        rec["cpp_code_tail"] = tail
+    name = _json_string_field(text, "guessed_name")
+    if name:
+        rec["guessed_name"] = name
+    return rec
+
+
+def continue_truncated_cpp(client: Any, code: str, system: str = "") -> str:
+    """Ask the model for the cut-off tail. Does not complete ident via regex."""
+    head = code or ""
+    if not looks_truncated_cpp(head):
+        return head
+    prompt = CONTINUE_PROMPT + "\n\n--- cpp_code so far ---\n" + head[-4000:]
+    try:
+        raw = client.generate(prompt, system=system, json_mode=True)
+    except Exception as exc:
+        logger.warning("restore continue failed: %s", exc)
+        return head
+    parsed = extract_restore_json(raw) or {}
+    tail = parsed.get("cpp_code_tail")
+    if not isinstance(tail, str) or not tail.strip():
+        alt = parsed.get("cpp_code")
+        tail = alt if isinstance(alt, str) else ""
+    return merge_cpp_continuation(head, tail)
 
 
 _JSON_STR_ESC = {
@@ -340,27 +432,35 @@ class CodeRestorerLLM:
             ghidra_code=(ghidra_code or "")[:6000],
             toolchain_rules=toolchain_rules_for(self.profile),
         )
-        raw = self.client.generate(prompt, system=self.system_prompt)
+        raw = self.client.generate(prompt, system=self.system_prompt, json_mode=True)
         self._dump(entry.get("address", ""), prompt, raw)
-        parsed = extract_json(raw)
+        parsed = extract_restore_json(raw)
         if not parsed:
             logger.warning("LLM JSON parse failed for %s -> retry", entry.get("address"))
             raw = self.client.generate(
                 prompt + "\n\nВАЖНО: предыдущий ответ не был валидным JSON. "
                          "Верни СТРОГО один валидный JSON-объект, без пояснений и markdown.",
                 system=self.system_prompt,
+                json_mode=True,
             )
             self._dump(entry.get("address", ""), prompt, raw)
-            parsed = extract_json(raw)
+            parsed = extract_restore_json(raw)
         if not parsed:
             return None
         code = parsed.get("cpp_code") or ""
         if parsed.get("classification") == "user_code" and _norm(code) in self.seen:
             logger.info("Duplicate restoration for %s -> re-prompt", entry.get("address"))
-            raw2 = self.client.generate(prompt + DUP_NOTE, system=self.system_prompt)
-            parsed2 = extract_json(raw2)
+            raw2 = self.client.generate(
+                prompt + DUP_NOTE, system=self.system_prompt, json_mode=True
+            )
+            parsed2 = extract_restore_json(raw2)
             if parsed2 and _norm(parsed2.get("cpp_code") or "") not in self.seen:
                 parsed = parsed2
+        code = parsed.get("cpp_code") or ""
+        if parsed.get("classification") == "user_code" and looks_truncated_cpp(code):
+            parsed["cpp_code"] = continue_truncated_cpp(
+                self.client, code, self.system_prompt
+            )
         if parsed.get("classification") == "user_code":
             self.seen.add(_norm(parsed.get("cpp_code") or ""))
         return parsed
@@ -434,13 +534,15 @@ class CodeRestorerLLM:
                 'Ответь ТОЛЬКО JSON: {"cpp_code": "исправленный C++ код"}'
             )
 
-            raw = self.client.generate(refinement_prompt, system=self.system_prompt)
+            raw = self.client.generate(
+                refinement_prompt, system=self.system_prompt, json_mode=True
+            )
             self._dump(
                 (entry.get("address") or "") + f"_refine_{attempt}",
                 refinement_prompt,
                 raw,
             )
-            parsed = extract_json(raw)
+            parsed = extract_restore_json(raw)
             if not parsed:
                 break
             new_code = parsed.get("cpp_code", "")

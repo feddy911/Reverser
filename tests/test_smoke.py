@@ -785,6 +785,54 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertIn("int fmt_num()", text2)
         self.assertNotIn('"classification"', text2)
 
+    def test_extract_restore_json_does_not_use_cpp_fallback(self):
+        from src.agents.restorer import extract_restore_json
+        from src.llm.client import extract_json
+
+        broken = (
+            '{\n'
+            '  "classification": "user_code",\n'
+            '  "guessed_name": "fmt_num",\n'
+            '  "evidence": ["std::string"],\n'
+            '  "cpp_code": "int fmt_num() { return 1; }"\n'
+            '  },\n'
+            '  "includes": [],\n'
+            '  "confidence": 100\n'
+            '}\n'
+        )
+        got = extract_restore_json(broken)
+        self.assertIsNotNone(got)
+        self.assertIn("int fmt_num() { return 1; }", got.get("cpp_code") or "")
+        self.assertNotIn("classification", got.get("cpp_code") or "")
+        fallback = extract_json(broken)
+        self.assertIsNotNone(fallback)
+
+    def test_continue_truncated_cpp_does_not_invent_ident(self):
+        from src.agents.restorer import (
+            continue_truncated_cpp,
+            looks_truncated_cpp,
+        )
+
+        class _Client:
+            def __init__(self):
+                self.json_mode = None
+
+            def generate(self, prompt, system="", json_mode=False):
+                self.json_mode = json_mode
+                return '{"cpp_code_tail": "  return 0;\\n}\\n}\\n"}'
+
+        head = "int fmt_num() {\n  if (1) {\n    std::wid\n"
+        self.assertTrue(looks_truncated_cpp(head))
+        client = _Client()
+        got = continue_truncated_cpp(client, head, "")
+        self.assertTrue(client.json_mode)
+        self.assertIn("std::wid", got)
+        self.assertNotIn("std::wstring", got)
+        self.assertIn("return 0", got)
+        balanced = "int fmt_num() { return 1; }\n"
+        self.assertFalse(looks_truncated_cpp(balanced))
+        self.assertEqual(continue_truncated_cpp(client, balanced, ""), balanced)
+
 
 class TestExtractFeatures(unittest.TestCase):
     def test_domain_dll_count(self):

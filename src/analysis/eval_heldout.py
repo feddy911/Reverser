@@ -204,6 +204,7 @@ def eval_heldout_entry(
             ghidra_by_addr={r["address"]: r for r in restored},
             tu_text=tu_text,
             compile_ok=None,
+            assembled_ok=None,
         )
         result["critic"] = verdict.to_dict()
         return result
@@ -245,6 +246,7 @@ def eval_heldout_entry(
         thunk_target=thunk_target,
         tu_text=tu_text,
         compile_ok=result["assembled_ok"],
+        assembled_ok=result["assembled_ok"],
         functions=functions,
         thunks=thunks,
     )

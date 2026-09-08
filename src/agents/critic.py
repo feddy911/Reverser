@@ -2,9 +2,11 @@ from __future__ import annotations
 
 """Critic: accept / reject / rollback. Does not generate C++.
 
-A green TU is not enough. Reject if restore swapped the function for a
-different well-known algorithm (starts_with → std::sort) or dropped
-Ghidra facts (fidelity).
+A green glued TU is not the compile gate. ``compile_ok`` is per-function
+syntax of LLM user_code targets. The assembled TU is ``assembled_ok``
+(report only) and does not block ACCEPT. Reject if restore swapped the
+function for a different well-known algorithm (starts_with to std::sort)
+or dropped Ghidra facts (fidelity).
 """
 
 import re
@@ -133,6 +135,7 @@ class FunctionVerdict:
 class RunVerdict:
     accept: bool = True
     compile_ok: Optional[bool] = None
+    assembled_ok: Optional[bool] = None
     identity_ok: bool = True
     fidelity_ok: bool = True
     functions: List[FunctionVerdict] = field(default_factory=list)
@@ -142,6 +145,7 @@ class RunVerdict:
         return {
             "accept": self.accept,
             "compile_ok": self.compile_ok,
+            "assembled_ok": self.assembled_ok,
             "identity_ok": self.identity_ok,
             "fidelity_ok": self.fidelity_ok,
             "reasons": list(self.reasons),
@@ -149,6 +153,26 @@ class RunVerdict:
             "n_reject": sum(1 for f in self.functions if not f.accept),
             "functions": [f.to_dict() for f in self.functions],
         }
+
+
+def per_fn_compile_ok(restored: Sequence[Dict[str, Any]]) -> Optional[bool]:
+    """Syntax-ok of LLM user_code targets that were compile-checked.
+
+    Missing ``compile_ok`` on every target means per-fn was not run (None).
+    The glued TU is not this signal.
+    """
+    flags: List[bool] = []
+    for r in restored or []:
+        if r.get("classification") not in (None, "user_code"):
+            continue
+        if not (r.get("cpp_code") or "").strip():
+            continue
+        if "compile_ok" not in r:
+            continue
+        flags.append(bool(r.get("compile_ok")))
+    if not flags:
+        return None
+    return all(flags)
 
 
 def review_function(
@@ -203,6 +227,7 @@ def review_run(
     thunk_target: Optional[Dict[str, str]] = None,
     tu_text: str = "",
     compile_ok: Optional[bool] = None,
+    assembled_ok: Optional[bool] = None,
     functions: Optional[Sequence[Dict[str, Any]]] = None,
     thunks: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> RunVerdict:
@@ -247,13 +272,19 @@ def review_run(
     for f in fns:
         if not f.accept:
             reasons.append(f"{f.address}: " + "; ".join(f.reasons[:3]))
+    fn_gate = per_fn_compile_ok(restored)
+    gate = fn_gate if fn_gate is not None else compile_ok
     accept = identity_ok and fidelity_ok
-    if compile_ok is False:
-        reasons.append("assembled TU did not compile")
+    if gate is False:
+        if fn_gate is False:
+            reasons.append("per-fn syntax failed")
+        else:
+            reasons.append("assembled TU did not compile")
         accept = False
     return RunVerdict(
         accept=accept,
-        compile_ok=compile_ok,
+        compile_ok=gate,
+        assembled_ok=assembled_ok,
         identity_ok=identity_ok,
         fidelity_ok=fidelity_ok,
         functions=fns,

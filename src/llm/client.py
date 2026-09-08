@@ -27,7 +27,13 @@ class OllamaClient:
         self.timeout_sec = timeout_sec
         self.num_ctx = num_ctx
 
-    def generate(self, prompt: str, system: str = "") -> str:
+    def generate(
+        self,
+        prompt: str,
+        system: str = "",
+        *,
+        json_mode: bool = False,
+    ) -> str:
         url = self.base_url + "/api/generate"
         payload: Dict[str, Any] = {
             "model": self.model,
@@ -38,6 +44,8 @@ class OllamaClient:
                 "num_ctx": self.num_ctx,
             },
         }
+        if json_mode:
+            payload["format"] = "json"
         if system:
             payload["system"] = system
         data = json.dumps(payload).encode("utf-8")
@@ -119,69 +127,67 @@ def _fix_invalid_escapes(s: str) -> str:
     return ''.join(result)
 
 
-def extract_json(text: str) -> Optional[Dict[str, Any]]:
-    """Достает JSON-объект из ответа LLM (возможно, в ```-скобках)."""
-    text = text.strip()
+def _try_json_loads(candidate: str, *, trailing_commas: bool = False) -> Any:
+    blobs = [candidate]
+    try:
+        blobs.append(_sanitize_control_chars(candidate))
+    except Exception:
+        pass
+    try:
+        blobs.append(_fix_invalid_escapes(candidate))
+    except Exception:
+        pass
+    try:
+        blobs.append(_fix_invalid_escapes(_sanitize_control_chars(candidate)))
+    except Exception:
+        pass
+    seen = set()
+    for blob in blobs:
+        if blob in seen:
+            continue
+        seen.add(blob)
+        variants = [blob]
+        if trailing_commas:
+            fixed = re.sub(r",\s*}", "}", blob)
+            fixed = re.sub(r",\s*]", "]", fixed)
+            variants.append(fixed)
+        for item in variants:
+            try:
+                return json.loads(item)
+            except Exception:
+                continue
+    return None
 
-    # Попытка 1: markdown code block с JSON (GREEDY поиск!)
+
+def parse_json_object(text: str) -> Optional[Dict[str, Any]]:
+    """Parse a JSON object from LLM text. No C++ fallback."""
+    parsed = _parse_json_value(text)
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _parse_json_value(text: str) -> Any:
+    text = (text or "").strip()
     fence = re.search(r"```(?:json)?\s*({.*})\s*```", text, re.DOTALL)
     if fence:
-        candidate = fence.group(1)
-        try:
-            return json.loads(candidate)
-        except Exception:
-            pass
-        try:
-            return json.loads(_sanitize_control_chars(candidate))
-        except Exception:
-            pass
-        # Попытка 1.3: исправить невалидные escape-последовательности
-        try:
-            fixed = _fix_invalid_escapes(candidate)
-            return json.loads(fixed)
-        except Exception:
-            pass
-        # Попытка 1.4: sanitize + fix escapes
-        try:
-            fixed = _fix_invalid_escapes(_sanitize_control_chars(candidate))
-            return json.loads(fixed)
-        except Exception:
-            pass
-
-    # Попытка 2: найти первый { и последний } (без markdown)
+        parsed = _try_json_loads(fence.group(1), trailing_commas=False)
+        if parsed is not None:
+            return parsed
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
-        candidate = text[start:end + 1]
-        try:
-            return json.loads(candidate)
-        except Exception:
-            pass
-        try:
-            return json.loads(_sanitize_control_chars(candidate))
-        except Exception:
-            pass
-        # Попытка 2.3: исправить trailing commas
-        try:
-            fixed = re.sub(r",\s*}", "}", candidate)
-            fixed = re.sub(r",\s*]", "]", fixed)
-            return json.loads(fixed)
-        except Exception:
-            pass
-        # Попытка 2.4: исправить невалидные escape-последовательности
-        try:
-            fixed = _fix_invalid_escapes(candidate)
-            return json.loads(fixed)
-        except Exception:
-            pass
-        # Попытка 2.5: sanitize + fix escapes + trailing commas
-        try:
-            fixed = _fix_invalid_escapes(_sanitize_control_chars(candidate))
-            fixed = re.sub(r",\s*}", "}", fixed)
-            fixed = re.sub(r",\s*]", "]", fixed)
-            return json.loads(fixed)
-        except Exception:
-            pass
+        parsed = _try_json_loads(text[start:end + 1], trailing_commas=True)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def extract_json(text: str) -> Optional[Dict[str, Any]]:
+    """Достает JSON-объект из ответа LLM (возможно, в ```-скобках)."""
+    parsed = _parse_json_value(text)
+    if parsed is not None:
+        return parsed
+
+    text = (text or "").strip()
 
     # Попытка 3: Fallback — извлечь C++ код из markdown-блока
     cpp_fence = re.search(r"```(?:cpp|c|c\+\+)?\s*\n([\s\S]*?)\n```", text)

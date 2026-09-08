@@ -159,8 +159,9 @@ is one gcc, two recipes: the gate is green by default;
 The critic (`critic.json`) accepts a run only when compile ∧ fidelity ∧ identity hold.
 Fidelity does not paper over a missing literal or `ext_calls` with a mean score ≥ 0.85 —
 those are dump facts. Identity catches replacing `starts_with` with `std::sort`.
-The critic does not require guessing the original source name. `compile_ok` is the assembled
-TU, not compile-fix. Restore cache: `LLM_PROMPT_VER=p4`.
+The critic does not require guessing the original source name. `compile_ok` is per-function
+syntax of LLM user_code targets, not the glued TU. `assembled_ok` is the TU report and
+does not block ACCEPT. Restore cache: `LLM_PROMPT_VER=p4`.
 
 Live run metrics (gcc counts, critic, skip-forever hits) are indexed in
 `output/runs.sqlite` after each `main.py` run. This is a warehouse, not the

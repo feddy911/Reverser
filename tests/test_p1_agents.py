@@ -763,6 +763,77 @@ class TestCritic(unittest.TestCase):
         self.assertFalse(verdict.identity_ok)
         self.assertFalse(verdict.accept)
 
+    def test_per_fn_ok_accepts_despite_red_tu(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "walk_keys",
+            "ghidra_name": "FUN_1",
+            "name": "FUN_1",
+            "cpp_code": 'void walk_keys() { puts("k"); }\n',
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": 'void FUN_1() { puts("k"); }',
+            "compile_ok": True,
+        }]
+        verdict = review_run(
+            restored,
+            tu_text="void walk_keys() { puts(\"k\"); }",
+            compile_ok=False,
+            assembled_ok=False,
+        )
+        self.assertTrue(verdict.compile_ok)
+        self.assertFalse(verdict.assembled_ok)
+        self.assertTrue(verdict.identity_ok)
+        self.assertTrue(verdict.fidelity_ok)
+        self.assertTrue(verdict.accept)
+        self.assertNotIn("assembled TU did not compile", verdict.reasons)
+
+    def test_per_fn_fail_rejects_despite_green_tu(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "walk_keys",
+            "ghidra_name": "FUN_1",
+            "name": "FUN_1",
+            "cpp_code": 'void walk_keys() { puts("k"); }\n',
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": 'void FUN_1() { puts("k"); }',
+            "compile_ok": False,
+        }]
+        verdict = review_run(
+            restored,
+            tu_text="void walk_keys() { puts(\"k\"); }",
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertFalse(verdict.compile_ok)
+        self.assertTrue(verdict.assembled_ok)
+        self.assertFalse(verdict.accept)
+        self.assertIn("per-fn syntax failed", verdict.reasons)
+
+    def test_tu_gate_when_per_fn_missing(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "walk_keys",
+            "ghidra_name": "FUN_1",
+            "name": "FUN_1",
+            "cpp_code": 'void walk_keys() { puts("k"); }\n',
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": 'void FUN_1() { puts("k"); }',
+        }]
+        verdict = review_run(
+            restored,
+            compile_ok=False,
+            assembled_ok=False,
+        )
+        self.assertFalse(verdict.compile_ok)
+        self.assertFalse(verdict.accept)
+        self.assertIn("assembled TU did not compile", verdict.reasons)
+
 
 if __name__ == "__main__":
     unittest.main()

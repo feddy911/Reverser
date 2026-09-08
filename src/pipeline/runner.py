@@ -123,8 +123,9 @@ def _per_function_compile(
         sibling_names=sibs,
         current_name=fname,
     )
-    data["compile_ok"] = bool(crep.ok)
-    data["compile_n_errors"] = crep.n_errors
+    if crep.attempted:
+        data["compile_ok"] = bool(crep.ok)
+        data["compile_n_errors"] = crep.n_errors
     if not crep.attempted:
         return
     if crep.ok:
@@ -499,7 +500,9 @@ def run(config: AppConfig) -> int:
                         metrics.llm_ok += 1
 
                 from src.agents.restorer import (
+                    continue_truncated_cpp,
                     keep_dump_literals,
+                    looks_truncated_cpp,
                     repair_restore_debris,
                     unwrap_restore_payload,
                 )
@@ -510,6 +513,14 @@ def run(config: AppConfig) -> int:
                         s.get("literals") or [],
                     )
                 )
+                if looks_truncated_cpp(data.get("cpp_code") or ""):
+                    data["cpp_code"] = repair_restore_debris(
+                        continue_truncated_cpp(
+                            restorer.client,
+                            data.get("cpp_code") or "",
+                            restorer.system_prompt,
+                        )
+                    )
 
                 cls = data.get("classification", "unknown")
                 guess = data.get("guessed_name") or "-"
@@ -887,6 +898,7 @@ def run(config: AppConfig) -> int:
                     thunk_target=thunk_target,
                     tu_text=tu_text,
                     compile_ok=assembled_ok,
+                    assembled_ok=assembled_ok,
                     functions=functions,
                     thunks=thunks,
                 )
@@ -914,6 +926,7 @@ def run(config: AppConfig) -> int:
                     f"{flag}: identity={verdict.identity_ok} "
                     f"fidelity={verdict.fidelity_ok} "
                     f"compile={verdict.compile_ok} "
+                    f"tu={verdict.assembled_ok} "
                     f"reject_fn={metrics.critic_reject}"
                 )
                 for reason in verdict.reasons[:8]:
