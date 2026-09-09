@@ -1160,6 +1160,144 @@ def _rewrite_bool_xor(chunk: str) -> str:
     return (chunk or "").replace("^^", "!=")
 
 
+_RE_NEW_ALLOC_DTOR = re.compile(
+    r"[ \t]*[^;\n]*~__new_allocator\s*(?:<[^>]*>)?\s*\([^;]*\)\s*;"
+)
+
+# Microsoft Learn x64: integer args RCX, RDX, R8, R9. MinGW PE uses this ABI.
+_MS64_INT_REGS = (
+    ("in_RCX", "in_ECX", "in_CX"),
+    ("in_RDX", "in_EDX", "in_DX"),
+    ("in_R8D", "in_R8W", "in_R8"),
+    ("in_R9D", "in_R9W", "in_R9"),
+)
+_PTR_AS_INT = frozenset({
+    "undefined8", "ulonglong", "unsignedlonglong", "__uint64", "uint8",
+})
+_INT_AS_INT = frozenset({
+    "int", "uint", "unsigned", "unsignedint", "int4", "uint4", "undefined4",
+    "unsignedchar", "uchar", "char", "byte", "short", "ushort", "undefined2",
+    "int2", "uint2",
+})
+
+
+def _strip_empty_allocator_dtors(chunk: str) -> str:
+    """Drop libstdc++ empty-base ~__new_allocator after a ctor (no human equivalent)."""
+    return _RE_NEW_ALLOC_DTOR.sub("", chunk or "")
+
+
+def _norm_abi_type(ty: str) -> str:
+    s = re.sub(r"\s+", "", ty or "")
+    s = s.replace("std::", "")
+    return s
+
+
+def _abi_types_compatible(decl_ty: str, param_ty: str) -> bool:
+    a, b = _norm_abi_type(decl_ty), _norm_abi_type(param_ty)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if a in _PTR_AS_INT and "*" in b:
+        return True
+    if b in _PTR_AS_INT and "*" in a:
+        return True
+    if a in _INT_AS_INT and b in _INT_AS_INT:
+        return True
+    return False
+
+
+def _looks_msx64_sret(ret: str) -> bool:
+    r = _norm_abi_type(ret)
+    if "*" not in r:
+        return False
+    return any(k in r for k in ("string", "vector", "pair", "map", "set", "list"))
+
+
+def _parse_param_decls(inner: str) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for raw in _split_top_args(inner):
+        p = raw.split("=")[0].strip()
+        if not p or p == "void" or p == "...":
+            continue
+        m = re.search(r"([A-Za-z_]\w*)\s*$", p)
+        if not m or m.group(1) == "void":
+            continue
+        out.append((p[: m.start()].strip(), m.group(1)))
+    return out
+
+
+def _in_reg_decl_type(body: str, name: str) -> str | None:
+    m = re.search(
+        rf"^[ \t]*([A-Za-z_:][\w:\s\*&<>,]*)\b{re.escape(name)}\s*;",
+        body,
+        re.M,
+    )
+    if not m:
+        return None
+    return m.group(1).strip()
+
+
+def _rewrite_one_msx64_fn(blob: str, ident: str, t0: int, close: int, end: int) -> str:
+    if ident == "main":
+        return blob
+    mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
+    if not mname:
+        return blob
+    name_at = t0 + mname.start()
+    open_p = t0 + mname.end() - 1
+    ret = blob[t0:name_at].strip()
+    formals = _parse_param_decls(blob[open_p + 1 : close])
+    if not formals:
+        return blob
+    brace = _brace_after_params(blob, close)
+    if brace < 0:
+        return blob
+    body = blob[brace : end + 1]
+    if "in_" not in body:
+        return blob
+    start_slot = 1 if _looks_msx64_sret(ret) else 0
+    repl: dict[str, str] = {}
+    for i, (_pty, pname) in enumerate(formals):
+        slot = start_slot + i
+        if slot >= len(_MS64_INT_REGS):
+            break
+        aliases = _MS64_INT_REGS[slot]
+        for alias in aliases:
+            if not re.search(rf"\b{re.escape(alias)}\b", body):
+                continue
+            decl_ty = _in_reg_decl_type(body, alias)
+            if decl_ty is None:
+                if not start_slot:
+                    continue
+                decl_ty = _pty
+            if not _abi_types_compatible(decl_ty, _pty):
+                continue
+            repl[alias] = pname
+    if not repl:
+        return blob
+    new_body = body
+    for alias, pname in sorted(repl.items(), key=lambda kv: -len(kv[0])):
+        new_body = re.sub(rf"\b{re.escape(alias)}\b", pname, new_body)
+        new_body = re.sub(
+            rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(pname)}\s*;[ \t]*\n?",
+            "",
+            new_body,
+            count=1,
+            flags=re.M,
+        )
+    return blob[:brace] + new_body + blob[end + 1 :]
+
+
+def _rewrite_msx64_incoming(code: str) -> str:
+    """Bind Ghidra in_RCX/in_RDX to formals (Microsoft x64 / MinGW PE)."""
+    blob = code or ""
+    spans = list(_iter_function_defs(blob, skip_qualified=True))
+    for ident, t0, close, end in reversed(spans):
+        blob = _rewrite_one_msx64_fn(blob, ident, t0, close, end)
+    return blob
+
+
 def sanitize_ghidra_cpp(code: str) -> str:
     """Rewrite Ghidra type spellings and member-call syntax into parseable C++."""
     t = code or ""
@@ -1228,6 +1366,8 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _USING_STD.sub("", t)
     t = _strip_invalid_using(t)
     t = rewrite_ghidra_member_calls(t)
+    t = _outside_strings(t, _strip_empty_allocator_dtors)
+    t = _rewrite_msx64_incoming(t)
     t = _rewrite_const_iter_begin_assign(t)
     t = _rewrite_string_ref_deref(t)
     t = _rewrite_const_ref_arrow(t)

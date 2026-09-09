@@ -1,0 +1,18 @@
+id: ghidra-msx64-sret-shift
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  string * wrap(int *n)
+  {
+    string *in_RCX;
+    undefined8 in_RDX;
+    (void)in_RDX;
+    return in_RCX;
+  }
+contains:
+  - "(void)n"
+  - "in_RCX"
+not_contains:
+  - "in_RDX"
+compile: true
+notes: "Microsoft x64: non-POD return uses a hidden pointer in RCX; real args shift to RDX. Keep in_RCX as the sret slot."

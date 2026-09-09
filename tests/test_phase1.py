@@ -529,6 +529,41 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("a != b", bx)
         lit_xor = sanitize_ghidra_cpp('const char *s = "a ^^ b";\n')
         self.assertIn("a ^^ b", lit_xor)
+        alloc = sanitize_ghidra_cpp(
+            "new (p) std::string(s, a);\n"
+            "((std::__new_allocator<char> *)p)->~__new_allocator();\n"
+        )
+        self.assertNotIn("~__new_allocator", alloc)
+        abi = sanitize_ghidra_cpp(
+            "void copy3(char *d, char *s)\n"
+            "{\n"
+            "  char *in_RCX;\n"
+            "  char *in_RDX;\n"
+            "  strncpy(in_RCX, in_RDX, 3);\n"
+            "}\n"
+        )
+        self.assertIn("strncpy(d, s, 3)", abi)
+        self.assertNotIn("in_RCX", abi)
+        pair = sanitize_ghidra_cpp(
+            "int first_of(std::pair<int, int> *p)\n"
+            "{\n"
+            "  int *in_RCX;\n"
+            "  return *in_RCX;\n"
+            "}\n"
+        )
+        self.assertIn("in_RCX", pair)
+        sret = sanitize_ghidra_cpp(
+            "string * wrap(int *n)\n"
+            "{\n"
+            "  string *in_RCX;\n"
+            "  undefined8 in_RDX;\n"
+            "  (void)in_RDX;\n"
+            "  return in_RCX;\n"
+            "}\n"
+        )
+        self.assertIn("(void)n", sret)
+        self.assertIn("in_RCX", sret)
+        self.assertNotIn("in_RDX", sret)
 
     def test_duration_cast_not_rewritten(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp

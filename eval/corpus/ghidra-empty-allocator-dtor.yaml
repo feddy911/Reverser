@@ -1,0 +1,15 @@
+id: ghidra-empty-allocator-dtor
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void make_s(std::string *p, char *s)
+  {
+    new (p) std::string(s);
+    ((std::__new_allocator<char> *)p)->~__new_allocator();
+  }
+contains:
+  - "new (p)"
+not_contains:
+  - "~__new_allocator"
+compile: true
+notes: "libstdc++ allocator is an empty base; GCC emits ~__new_allocator after string ctor. Human code does not."

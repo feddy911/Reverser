@@ -1,0 +1,18 @@
+id: ghidra-msx64-incoming-regs
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void copy3(char *d, char *s)
+  {
+    char *in_RCX;
+    char *in_RDX;
+    strncpy(in_RCX, in_RDX, 3);
+    return;
+  }
+contains:
+  - "strncpy(d, s, 3)"
+not_contains:
+  - "in_RCX"
+  - "in_RDX"
+compile: true
+notes: "Microsoft x64 ABI (MinGW PE): first two pointer args in RCX and RDX. Ghidra in_RCX is the formal, not a new variable."
