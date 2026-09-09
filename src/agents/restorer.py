@@ -74,6 +74,48 @@ DUP_NOTE = (
     "не повторяя предыдущие ответы."
 )
 
+PCODE_SECTION_TITLE = "HIGH P-CODE (порядок операций; не копировать как C++)"
+
+
+def build_restore_prompt(
+    entry: Dict[str, Any],
+    ghidra_code: str,
+    *,
+    profile: str = "generic",
+    pcode: str = "",
+) -> str:
+    """p4 user prompt. Optional pcode is mini/p5 only — live restore omits it."""
+    from src.analysis.pcode import clip_pcode, op_lines
+
+    func_strings = entry.get("string_matches") or entry.get("literals") or []
+    called = entry.get("called_imports") or sorted(set(entry.get("ext_calls") or []))
+    prompt = USER_PROMPT.format(
+        address=entry.get("address"),
+        name=entry.get("name"),
+        ghidra_name=entry.get("ghidra_name", ""),
+        size=entry.get("size"),
+        profile=profile,
+        func_strings="\n".join(f'- "{s}"' for s in func_strings[:10]) or "(нет)",
+        called_imports=", ".join(called[:20]) or "(нет)",
+        ghidra_code=(ghidra_code or "")[:6000],
+        toolchain_rules=toolchain_rules_for(profile),
+    )
+    ops = op_lines(clip_pcode(pcode))
+    if not ops:
+        return prompt
+    block = (
+        f"\n=== {PCODE_SECTION_TITLE} ===\n"
+        "Используй эти ops только как порядок вычисления. "
+        "Не печатай синтаксис p-code как C++. "
+        "Имена, типы и строковые литералы бери из блока Ghidra C выше, не из IR.\n"
+        + "\n".join(ops[:80])
+        + "\n\n"
+    )
+    marker = "=== СТРОГИЕ ПРАВИЛА ==="
+    if marker in prompt:
+        return prompt.replace(marker, block + marker, 1)
+    return prompt + block
+
 
 def keep_dump_literals(code: str, literals: Sequence[str]) -> str:
     """Re-attach dump-fact string literals the LLM dropped. No new control flow.
@@ -203,13 +245,38 @@ CONTINUE_PROMPT = (
 )
 
 
+_QUAL_IDENT_END = re.compile(
+    r"(?:[A-Za-z_][A-Za-z0-9_]*::)+[A-Za-z_][A-Za-z0-9_]*\s*$"
+)
+
+
+def ident_cut_head(code: str) -> Optional[str]:
+    """If a nested-name ident was cut off, body without trailing brace-close debris.
+
+    After ``_close_unbalanced_braces``, ``std::basic_st\\n}}}}}}`` is still a cut.
+    Do not rewrite the ident.
+    """
+    s = code or ""
+    _depth, in_str, in_char = _scan_cpp_state(s)
+    if in_str or in_char:
+        return None
+    core = s.rstrip()
+    while core.endswith("}"):
+        core = core[:-1].rstrip()
+    if not core or not _QUAL_IDENT_END.search(core):
+        return None
+    return core + "\n"
+
+
 def looks_truncated_cpp(code: str) -> bool:
-    """True when the restored body was cut off (open brace/string). No ident rewrite."""
+    """True when the restored body was cut off. No ident rewrite."""
     s = code or ""
     if not s.strip():
         return False
     depth, in_str, in_char = _scan_cpp_state(s)
-    return depth > 0 or in_str or in_char
+    if depth > 0 or in_str or in_char:
+        return True
+    return ident_cut_head(s) is not None
 
 
 def merge_cpp_continuation(head: str, tail: str) -> str:
@@ -263,15 +330,16 @@ def extract_restore_json(text: str) -> Optional[Dict[str, Any]]:
 
 def continue_truncated_cpp(client: Any, code: str, system: str = "") -> str:
     """Ask the model for the cut-off tail. Does not complete ident via regex."""
-    head = code or ""
-    if not looks_truncated_cpp(head):
-        return head
+    raw_head = code or ""
+    if not looks_truncated_cpp(raw_head):
+        return raw_head
+    head = ident_cut_head(raw_head) or raw_head
     prompt = CONTINUE_PROMPT + "\n\n--- cpp_code so far ---\n" + head[-4000:]
     try:
         raw = client.generate(prompt, system=system, json_mode=True)
     except Exception as exc:
         logger.warning("restore continue failed: %s", exc)
-        return head
+        return raw_head
     parsed = extract_restore_json(raw) or {}
     tail = parsed.get("cpp_code_tail")
     if not isinstance(tail, str) or not tail.strip():
@@ -419,18 +487,8 @@ class CodeRestorerLLM:
         (self.dump_dir / (safe + ".response.txt")).write_text(raw, encoding="utf-8")
 
     def restore(self, entry: Dict[str, Any], ghidra_code: str) -> Optional[Dict[str, Any]]:
-        func_strings = entry.get("string_matches") or entry.get("literals") or []
-        called = entry.get("called_imports") or sorted(set(entry.get("ext_calls") or []))
-        prompt = USER_PROMPT.format(
-            address=entry.get("address"),
-            name=entry.get("name"),
-            ghidra_name=entry.get("ghidra_name", ""),
-            size=entry.get("size"),
-            profile=self.profile,
-            func_strings="\n".join(f'- "{s}"' for s in func_strings[:10]) or "(нет)",
-            called_imports=", ".join(called[:20]) or "(нет)",
-            ghidra_code=(ghidra_code or "")[:6000],
-            toolchain_rules=toolchain_rules_for(self.profile),
+        prompt = build_restore_prompt(
+            entry, ghidra_code, profile=self.profile
         )
         raw = self.client.generate(prompt, system=self.system_prompt, json_mode=True)
         self._dump(entry.get("address", ""), prompt, raw)

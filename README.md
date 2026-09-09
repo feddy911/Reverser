@@ -29,8 +29,14 @@ Run artifacts land in `output/logs/run_<timestamp>/`
 
 An empty Ghidra dump is a hard failure; the pipeline does not continue with a blank restore.
 The dump may include a `pcode` string (high p-code ops, clipped). Live restore (`p4`) still
-reads Ghidra C only; restore-from-IR is not enabled. Cache key stays `ghidra_full_v6` — dumps
-without `pcode` remain valid. Do not bump `LLM_PROMPT_VER` until the restore prompt consumes IR.
+reads Ghidra C only. `build_restore_prompt(..., pcode=)` can attach IR on a fixture; the
+live restorer does not pass that field, so `LLM_PROMPT_VER` stays `p4`. Cache key stays
+`ghidra_full_v6` — dumps without `pcode` remain valid. Do not bump the prompt version until
+live restore consumes IR.
+
+Ghidra headless does not run RecoverClassesFromRTTI, DWARF, or FID before decompile.
+`src/analysis/ghidra_prepass.py` counts `this` in prototypes on an existing dump; it is
+not a live pre-pass and must not bump the cache to `ghidra_full_v7` until a real re-dump.
 
 ## Triage and prompt profiles
 

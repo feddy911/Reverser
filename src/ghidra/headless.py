@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""Headless dump via GhidraDecompileAll.java. No I4 pre-pass.
+
+RecoverClassesFromRTTI, DWARF, and FID are not enabled here. Do not bump
+GHIDRA_CACHE_KEY until a real pre-pass re-dump exists (see ghidra_prepass.py).
+"""
+
 import json
 import logging
 import subprocess

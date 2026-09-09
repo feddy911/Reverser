@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-"""High p-code from the Ghidra dump. Restore p5 is not live (p4 still uses C).
+"""High p-code from the Ghidra dump. Live restore is still p4 (C only).
 
 The headless script may attach ``pcode`` next to ``ghidra_code``. Cached
-``ghidra_full_v6`` dumps without the field stay valid. Do not bump
-LLM_PROMPT_VER until the restore prompt consumes these ops.
+``ghidra_full_v6`` dumps without the field stay valid. Optional consumer:
+``build_restore_prompt(..., pcode=)`` on a fixture. ``CodeRestorerLLM.restore``
+does not pass pcode, so do not bump ``LLM_PROMPT_VER``.
 """
 
 from typing import Any, Dict, List, Optional

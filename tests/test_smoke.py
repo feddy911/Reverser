@@ -66,8 +66,13 @@ class TestFeaturesSmoke(unittest.TestCase):
         self.assertGreater(by_name["FUN_140001000"], by_name["_RTC_CheckStackVars"])
 
     def test_fixture_pcode_is_dump_only_not_a_feature(self):
-        from src.agents.restorer import USER_PROMPT
+        from src.agents.restorer import (
+            PCODE_SECTION_TITLE,
+            USER_PROMPT,
+            build_restore_prompt,
+        )
         from src.analysis.pcode import PCODE_KEY, entry_pcode, op_lines
+        from src.pipeline.runner import LLM_PROMPT_VER
 
         dump = _load_fixture()
         fn = dump["functions"][0]
@@ -76,6 +81,18 @@ class TestFeaturesSmoke(unittest.TestCase):
         self.assertTrue(any("COPY" in ln or "RETURN" in ln for ln in lines))
         self.assertNotIn(PCODE_KEY, FEATURE_KEYS)
         self.assertNotIn("pcode", USER_PROMPT.lower())
+        live = build_restore_prompt(fn, fn["ghidra_code"])
+        self.assertNotIn(PCODE_SECTION_TITLE, live)
+        self.assertNotIn("COPY", live)
+        with_p = build_restore_prompt(fn, fn["ghidra_code"], pcode=fn["pcode"])
+        self.assertIn(PCODE_SECTION_TITLE, with_p)
+        self.assertIn("COPY", with_p)
+        self.assertIn("RETURN", with_p)
+        self.assertLess(
+            with_p.find(PCODE_SECTION_TITLE),
+            with_p.find("=== СТРОГИЕ ПРАВИЛА ==="),
+        )
+        self.assertEqual(LLM_PROMPT_VER, "p4")
 
     def test_ml_noise_penalty_sinks_crt(self):
         from src.analysis.scorer import (
@@ -822,15 +839,19 @@ class TestFidelitySmoke(unittest.TestCase):
     def test_continue_truncated_cpp_does_not_invent_ident(self):
         from src.agents.restorer import (
             continue_truncated_cpp,
+            ident_cut_head,
             looks_truncated_cpp,
+            repair_restore_debris,
         )
 
         class _Client:
             def __init__(self):
                 self.json_mode = None
+                self.prompt = ""
 
             def generate(self, prompt, system="", json_mode=False):
                 self.json_mode = json_mode
+                self.prompt = prompt
                 return '{"cpp_code_tail": "  return 0;\\n}\\n}\\n"}'
 
         head = "int fmt_num() {\n  if (1) {\n    std::wid\n"
@@ -843,7 +864,92 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertIn("return 0", got)
         balanced = "int fmt_num() { return 1; }\n"
         self.assertFalse(looks_truncated_cpp(balanced))
+        self.assertIsNone(ident_cut_head(balanced))
         self.assertEqual(continue_truncated_cpp(client, balanced, ""), balanced)
+
+        debris = "int fmt_num() {\n            std::basic_st\n}}}}}}"
+        self.assertTrue(looks_truncated_cpp(debris))
+        repaired = repair_restore_debris(
+            "int fmt_num() {\n            std::basic_st\n"
+        )
+        self.assertTrue(looks_truncated_cpp(repaired))
+        self.assertNotIn("basic_string", repaired)
+        client2 = _Client()
+        got2 = continue_truncated_cpp(client2, debris, "")
+        self.assertIn("std::basic_st", got2)
+        self.assertNotIn("basic_string", got2)
+        self.assertNotIn("}}}}}}", client2.prompt)
+        self.assertIn("std::basic_st", client2.prompt)
+
+    def test_restore_live_omits_pcode_even_if_entry_has_it(self):
+        from src.agents.restorer import CodeRestorerLLM, PCODE_SECTION_TITLE
+
+        class _Client:
+            def __init__(self):
+                self.prompt = ""
+
+            def generate(self, prompt, system="", json_mode=False):
+                self.prompt = prompt
+                return (
+                    '{"classification":"user_code",'
+                    '"cpp_code":"int f(){return 0;}"}'
+                )
+
+        dump = _load_fixture()
+        fn = dump["functions"][0]
+        client = _Client()
+        CodeRestorerLLM(client).restore(fn, fn["ghidra_code"])
+        self.assertNotIn(PCODE_SECTION_TITLE, client.prompt)
+        self.assertNotIn("COPY", client.prompt)
+
+
+class TestGhidraPrepass(unittest.TestCase):
+    def test_this_proto_counts_signature_not_body(self):
+        from src.analysis.ghidra_prepass import (
+            CACHE_KEY_NOW,
+            LIVE_PREPASS,
+            compare_summaries,
+            proto_has_this,
+            prototype_span,
+            summarize_dump,
+        )
+
+        self.assertFalse(LIVE_PREPASS)
+        self.assertEqual(CACHE_KEY_NOW, "ghidra_full_v6")
+        body_only = "void f(int x)\n{\n  return this;\n}\n"
+        self.assertFalse(proto_has_this(prototype_span(body_only)))
+        sig = "void __thiscall Item::rank(Item *this)\n{\n  return;\n}\n"
+        self.assertTrue(proto_has_this(prototype_span(sig)))
+        left = summarize_dump(
+            {
+                "functions": [
+                    {
+                        "address": "0x1",
+                        "name": "distance",
+                        "ghidra_code": "double distance(Pt *a)\n{\n  return 0;\n}\n",
+                    }
+                ]
+            }
+        )
+        right = summarize_dump(
+            {
+                "functions": [
+                    {
+                        "address": "0x2",
+                        "name": "rank",
+                        "ghidra_code": "void Item::rank(Item *this)\n{\n  return;\n}\n",
+                    }
+                ]
+            }
+        )
+        self.assertEqual(left["n_this_proto"], 0)
+        self.assertEqual(right["n_this_proto"], 1)
+        self.assertEqual(right["n_this_proto_other"], 1)
+        self.assertEqual(right["n_this_proto_stl"], 0)
+        delta = compare_summaries(left, right)
+        self.assertEqual(delta["delta_this_proto"], 1)
+        self.assertFalse(delta["live_prepass"])
+        self.assertIn("v7", delta["note"])
 
 
 class TestExtractFeatures(unittest.TestCase):
