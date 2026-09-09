@@ -9,9 +9,10 @@ ghidra_cpp: |
     return CONCAT71(x, y);
   }
 contains:
-  - "CONCAT71"
+  - "<< 8"
   - "undefined7"
 not_contains:
+  - "CONCAT71"
   - "struct undefined7"
 compile: true
-notes: "Ghidra undefined7 is a 7-byte storage unit used in CONCAT71; typedef like undefined8"
+notes: "Ghidra undefined7 is a 7-byte storage unit; CONCAT71 expands to C++ shift/or"

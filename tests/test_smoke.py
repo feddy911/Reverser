@@ -28,6 +28,7 @@ class TestPreamble(unittest.TestCase):
         lines = NONE_PACK.preamble("// test")
         self.assertNotIn("#include <gmp.h>", lines)
         self.assertIn("#include <cstdint>", lines)
+        self.assertFalse(any("CONCAT" in ln for ln in lines))
 
 
 class TestFeaturesSmoke(unittest.TestCase):

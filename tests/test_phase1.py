@@ -481,6 +481,35 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("in_stack_98", got)
         self.assertNotIn("in_stack_ffffffffffffff58", got)
 
+    def test_ghidra_piece_ops_expand_to_cpp(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        concat = sanitize_ghidra_cpp("return CONCAT44(hi, lo);\n")
+        self.assertNotIn("CONCAT44", concat)
+        self.assertIn("<< 32", concat)
+        concat71 = sanitize_ghidra_cpp("return CONCAT71(x, y);\n")
+        self.assertNotIn("CONCAT71", concat71)
+        self.assertIn("<< 8", concat71)
+        zext = sanitize_ghidra_cpp("return ZEXT24(0xaabb);\n")
+        self.assertNotIn("ZEXT24", zext)
+        self.assertIn("unsigned", zext)
+        zext412 = sanitize_ghidra_cpp("hold._80_12_ = ZEXT412(0x80) << 0x40;\n")
+        self.assertNotIn("ZEXT412", zext412)
+        sext = sanitize_ghidra_cpp("return SEXT14(c);\n")
+        self.assertNotIn("SEXT14", sext)
+        self.assertIn("signed char", sext)
+        sub = sanitize_ghidra_cpp("return SUB42(0xaabbccdd, 1);\n")
+        self.assertNotIn("SUB42", sub)
+        nested = sanitize_ghidra_cpp(
+            "p = (double *)CONCAT44(in_stack_ffffffffffffff84, in_stack_ffffffffffffff80);\n"
+        )
+        self.assertNotIn("CONCAT44", nested)
+        self.assertIn("in_stk_", nested)
+        twice = sanitize_ghidra_cpp("return CONCAT44(CONCAT22(a, b), c);\n")
+        self.assertNotRegex(twice, r"\bCONCAT\d+")
+        lit = sanitize_ghidra_cpp('const char *s = "CONCAT44(a,b)";\n')
+        self.assertIn("CONCAT44(a,b)", lit)
+
     def test_duration_cast_not_rewritten(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 

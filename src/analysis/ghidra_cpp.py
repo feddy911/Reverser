@@ -969,6 +969,109 @@ def _rewrite_in_stack_temps(chunk: str) -> str:
     return _RE_IN_STACK.sub(lambda m: readable_in_stack_name(m.group(1)), chunk or "")
 
 
+# Ghidra Help (Decompiler Concepts): PIECE→CONCAT, INT_ZEXT→ZEXT, INT_SEXT→SEXT,
+# SUBPIECE→SUB. Trailing digits are sizes in bytes (CONCAT44 = 4+4, ZEXT14 = 1→4,
+# CONCAT412 = 4+12). Not a per-sample dictionary.
+_RE_GHIDRA_PIECE = re.compile(r"\b(CONCAT|ZEXT|SEXT|SUB)(\d+)\s*\(")
+_UINT_CAST = {1: "unsigned char", 2: "unsigned short", 4: "unsigned", 8: "unsigned long long"}
+_SINT_CAST = {1: "signed char", 2: "short", 4: "int", 8: "long long"}
+
+
+def _piece_sizes(digits: str) -> tuple[int, int] | None:
+    """First digit = first size (bytes); remainder = second size."""
+    if len(digits) < 2 or not digits.isdigit():
+        return None
+    a = int(digits[0])
+    b = int(digits[1:])
+    if a < 1 or b < 1:
+        return None
+    return a, b
+
+
+def _split_call_args(inner: str) -> list[str]:
+    """Split C++ call args on top-level commas. Shifts (`<<`) are not templates."""
+    args: list[str] = []
+    depth = 0
+    start = 0
+    for i, c in enumerate(inner):
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif c == "," and depth == 0:
+            args.append(inner[start:i].strip())
+            start = i + 1
+    tail = inner[start:].strip()
+    if tail:
+        args.append(tail)
+    return args
+
+
+def _uint_cast(expr: str, nbytes: int) -> str:
+    ty = _UINT_CAST.get(nbytes, "unsigned long long")
+    return f"({ty})({expr})"
+
+
+def _expand_piece_call(kind: str, digits: str, args: list[str]) -> str | None:
+    sizes = _piece_sizes(digits)
+    if not sizes:
+        return None
+    a_n, b_n = sizes
+    if kind == "CONCAT":
+        if len(args) != 2:
+            return None
+        hi, lo = args[0], args[1]
+        return f"(({_uint_cast(hi, min(a_n, 8))} << {b_n * 8}) | {_uint_cast(lo, min(b_n, 8))})"
+    if kind == "ZEXT":
+        if len(args) != 1:
+            return None
+        return _uint_cast(args[0], min(b_n, 8))
+    if kind == "SEXT":
+        if len(args) != 1:
+            return None
+        signed = _SINT_CAST.get(a_n, "long long")
+        outer = "unsigned long long" if b_n > 4 else "unsigned"
+        return f"({outer})({signed})({args[0]})"
+    if kind == "SUB":
+        if len(args) != 2:
+            return None
+        drop = args[1].strip()
+        if not re.fullmatch(r"\d+", drop):
+            drop = f"(int)({args[1]})"
+        return f"(({_uint_cast(args[0], 8)} >> (8 * {drop})) & {_uint_cast('~0ull', min(b_n, 8))})"
+    return None
+
+
+def _rewrite_ghidra_piece_ops(code: str) -> str:
+    """Expand CONCAT/ZEXT/SEXT/SUB to C++ casts and shifts. No leftover macros."""
+    s = code or ""
+    skipped: set[int] = set()
+    for _ in range(64):
+        matches = list(_RE_GHIDRA_PIECE.finditer(s))
+        if not matches:
+            return s
+        progressed = False
+        for cand in reversed(matches):
+            if cand.start() in skipped:
+                continue
+            close = _match_forward(s, cand.end() - 1, "(", ")")
+            if close < cand.end():
+                skipped.add(cand.start())
+                continue
+            args = _split_call_args(s[cand.end() : close])
+            exp = _expand_piece_call(cand.group(1), cand.group(2), args)
+            if not exp:
+                skipped.add(cand.start())
+                continue
+            s = s[: cand.start()] + exp + s[close + 1 :]
+            skipped.clear()
+            progressed = True
+            break
+        if not progressed:
+            return s
+    return s
+
+
 def sanitize_ghidra_cpp(code: str) -> str:
     """Rewrite Ghidra type spellings and member-call syntax into parseable C++."""
     t = code or ""
@@ -1051,4 +1154,5 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _RE_STACK_ADDR_ASSIGN.sub(r"(void)&", t)
     t = _RE_STACK_PTR_ASSIGN.sub(r"(void)(\2)", t)
     t = _outside_strings(t, _rewrite_in_stack_temps)
+    t = _outside_strings(t, _rewrite_ghidra_piece_ops)
     return t
