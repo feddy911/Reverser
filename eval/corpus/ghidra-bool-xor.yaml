@@ -1,0 +1,14 @@
+id: ghidra-bool-xor
+profile: generic
+recipe: sanitize
+ghidra_cpp: |
+  int bx(int a, int b)
+  {
+    return a ^^ b;
+  }
+contains:
+  - "a != b"
+not_contains:
+  - "^^"
+compile: true
+notes: "Ghidra Help BOOL_XOR token is not C++; replace with !="

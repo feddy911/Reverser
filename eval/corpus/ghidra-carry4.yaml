@@ -1,0 +1,14 @@
+id: ghidra-carry4
+profile: generic
+recipe: sanitize
+ghidra_cpp: |
+  int ovf(unsigned x, unsigned y)
+  {
+    return CARRY4(x, y);
+  }
+contains:
+  - "(unsigned)"
+not_contains:
+  - "CARRY4"
+compile: true
+notes: "Ghidra Help INT_CARRY: CARRY4(x,y) is unsigned add overflow; digit is operand size in bytes"

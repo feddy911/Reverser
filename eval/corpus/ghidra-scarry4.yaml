@@ -1,0 +1,14 @@
+id: ghidra-scarry4
+profile: generic
+recipe: sanitize
+ghidra_cpp: |
+  int ovf(int x, int y)
+  {
+    return SCARRY4(x, y);
+  }
+contains:
+  - "< 0"
+not_contains:
+  - "SCARRY4"
+compile: true
+notes: "Ghidra Help INT_SCARRY: SCARRY4(x,y) is signed add overflow; digit is operand size in bytes"

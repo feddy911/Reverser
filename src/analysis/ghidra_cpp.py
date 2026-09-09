@@ -969,10 +969,17 @@ def _rewrite_in_stack_temps(chunk: str) -> str:
     return _RE_IN_STACK.sub(lambda m: readable_in_stack_name(m.group(1)), chunk or "")
 
 
-# Ghidra Help (Decompiler Concepts): PIECE→CONCAT, INT_ZEXT→ZEXT, INT_SEXT→SEXT,
-# SUBPIECE→SUB. Trailing digits are sizes in bytes (CONCAT44 = 4+4, ZEXT14 = 1→4,
-# CONCAT412 = 4+12). Not a per-sample dictionary.
-_RE_GHIDRA_PIECE = re.compile(r"\b(CONCAT|ZEXT|SEXT|SUB)(\d+)\s*\(")
+# Ghidra Help (Decompiler Concepts) + typeop.cc print names. Not a per-sample
+# dictionary. PIECE→CONCAT, INT_ZEXT→ZEXT, INT_SEXT→SEXT, SUBPIECE→SUB (two size
+# digits: CONCAT44 = 4+4, ZEXT14 = 1→4, CONCAT412 = 4+12). INT_CARRY→CARRY,
+# INT_SCARRY→SCARRY, INT_SBORROW→SBORROW append one size (CARRY4). Unary
+# TypeOpFunc tokens have no size suffix. BOOL_XOR prints as ^^.
+_RE_GHIDRA_PIECE = re.compile(
+    r"\b(CONCAT|ZEXT|SEXT|SBORROW|SCARRY|CARRY|SUB)(\d+)\s*\("
+)
+_RE_GHIDRA_FUNC = re.compile(
+    r"\b(POPCOUNT|LZCOUNT|ABS|SQRT|NAN|CEIL|FLOOR|ROUND|TRUNC|INT2FLOAT|FLOAT2FLOAT)\s*\("
+)
 _UINT_CAST = {1: "unsigned char", 2: "unsigned short", 4: "unsigned", 8: "unsigned long long"}
 _SINT_CAST = {1: "signed char", 2: "short", 4: "int", 8: "long long"}
 
@@ -1012,7 +1019,34 @@ def _uint_cast(expr: str, nbytes: int) -> str:
     return f"({ty})({expr})"
 
 
+def _sint_cast(expr: str, nbytes: int) -> str:
+    ty = _SINT_CAST.get(nbytes, "long long")
+    return f"({ty})({expr})"
+
+
+def _overflow_size(digits: str) -> int | None:
+    if not digits.isdigit():
+        return None
+    n = int(digits)
+    if n not in _UINT_CAST:
+        return None
+    return n
+
+
 def _expand_piece_call(kind: str, digits: str, args: list[str]) -> str | None:
+    if kind in ("CARRY", "SCARRY", "SBORROW"):
+        n = _overflow_size(digits)
+        if n is None or len(args) != 2:
+            return None
+        x, y = args[0], args[1]
+        ux, uy = _uint_cast(x, n), _uint_cast(y, n)
+        if kind == "CARRY":
+            return f"(({ux} + {uy}) < {ux})"
+        if kind == "SCARRY":
+            inner = f"~({ux} ^ {uy}) & ({ux} ^ ({ux} + {uy}))"
+            return f"({_sint_cast(inner, n)} < 0)"
+        inner = f"({ux} ^ {uy}) & ({ux} ^ ({ux} - {uy}))"
+        return f"({_sint_cast(inner, n)} < 0)"
     sizes = _piece_sizes(digits)
     if not sizes:
         return None
@@ -1042,12 +1076,45 @@ def _expand_piece_call(kind: str, digits: str, args: list[str]) -> str | None:
     return None
 
 
-def _rewrite_ghidra_piece_ops(code: str) -> str:
-    """Expand CONCAT/ZEXT/SEXT/SUB to C++ casts and shifts. No leftover macros."""
+def _expand_func_call(kind: str, args: list[str]) -> str | None:
+    if len(args) != 1:
+        return None
+    x = args[0]
+    if kind == "POPCOUNT":
+        return (
+            "([](unsigned long long _v){int _n=0;for(;_v;_v>>=1)_n+=(int)(_v&1ull);"
+            "return _n;})((unsigned long long)(" + x + "))"
+        )
+    if kind == "LZCOUNT":
+        return (
+            "([](unsigned long long _v,int _bits){if(_v==0)return _bits;int _n=0;"
+            "for(int _i=_bits-1;_i>=0;--_i){if(_v&(1ull<<_i))break;++_n;}return _n;})"
+            f"((unsigned long long)({x}),(int)(sizeof(({x}))*8))"
+        )
+    if kind == "ABS":
+        return f"std::fabs((double)({x}))"
+    if kind == "SQRT":
+        return f"std::sqrt((double)({x}))"
+    if kind == "NAN":
+        return f"std::isnan((double)({x}))"
+    if kind == "CEIL":
+        return f"std::ceil((double)({x}))"
+    if kind == "FLOOR":
+        return f"std::floor((double)({x}))"
+    if kind == "ROUND":
+        return f"std::round((double)({x}))"
+    if kind == "TRUNC":
+        return f"(long long)({x})"
+    if kind in ("INT2FLOAT", "FLOAT2FLOAT"):
+        return f"(double)({x})"
+    return None
+
+
+def _rewrite_calls(code: str, rx: re.Pattern[str], expand) -> str:
     s = code or ""
     skipped: set[int] = set()
-    for _ in range(64):
-        matches = list(_RE_GHIDRA_PIECE.finditer(s))
+    for _ in range(128):
+        matches = list(rx.finditer(s))
         if not matches:
             return s
         progressed = False
@@ -1059,7 +1126,7 @@ def _rewrite_ghidra_piece_ops(code: str) -> str:
                 skipped.add(cand.start())
                 continue
             args = _split_call_args(s[cand.end() : close])
-            exp = _expand_piece_call(cand.group(1), cand.group(2), args)
+            exp = expand(cand, args)
             if not exp:
                 skipped.add(cand.start())
                 continue
@@ -1070,6 +1137,27 @@ def _rewrite_ghidra_piece_ops(code: str) -> str:
         if not progressed:
             return s
     return s
+
+
+def _rewrite_ghidra_piece_ops(code: str) -> str:
+    """Expand CONCAT/ZEXT/SEXT/SUB/CARRY/SCARRY/SBORROW to C++."""
+    return _rewrite_calls(
+        code,
+        _RE_GHIDRA_PIECE,
+        lambda m, args: _expand_piece_call(m.group(1), m.group(2), args),
+    )
+
+
+def _rewrite_ghidra_func_ops(code: str) -> str:
+    """Expand POPCOUNT/ABS/NAN/SQRT and other TypeOpFunc tokens to C++."""
+    return _rewrite_calls(
+        code, _RE_GHIDRA_FUNC, lambda m, args: _expand_func_call(m.group(1), args)
+    )
+
+
+def _rewrite_bool_xor(chunk: str) -> str:
+    """BOOL_XOR token ^^ is not C++ (Decompiler Concepts)."""
+    return (chunk or "").replace("^^", "!=")
 
 
 def sanitize_ghidra_cpp(code: str) -> str:
@@ -1155,4 +1243,6 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _RE_STACK_PTR_ASSIGN.sub(r"(void)(\2)", t)
     t = _outside_strings(t, _rewrite_in_stack_temps)
     t = _outside_strings(t, _rewrite_ghidra_piece_ops)
+    t = _outside_strings(t, _rewrite_ghidra_func_ops)
+    t = _outside_strings(t, _rewrite_bool_xor)
     return t

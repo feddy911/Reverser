@@ -1,0 +1,14 @@
+id: ghidra-popcount
+profile: generic
+recipe: sanitize
+ghidra_cpp: |
+  int bits(unsigned long long x)
+  {
+    return POPCOUNT(x);
+  }
+contains:
+  - "unsigned long long"
+not_contains:
+  - "POPCOUNT"
+compile: true
+notes: "Ghidra Help POPCOUNT: count 1-bits; TypeOpFunc name POPCOUNT with no size suffix"

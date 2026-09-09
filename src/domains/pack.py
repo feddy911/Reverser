@@ -7,6 +7,7 @@ from typing import List, Tuple
 # Базовые includes для любого восстановленного C++.
 BASE_INCLUDES: Tuple[str, ...] = (
     "#include <cstdint>",
+    "#include <cmath>",
     "#include <cstdio>",
     "#include <cstring>",
     "#include <cstdarg>",

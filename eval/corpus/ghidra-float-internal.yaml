@@ -1,0 +1,22 @@
+id: ghidra-float-internal
+profile: generic
+recipe: sanitize
+ghidra_cpp: |
+  double mag(double x)
+  {
+    if (NAN(x)) {
+      return INT2FLOAT(0);
+    }
+    return ABS(SQRT(x));
+  }
+contains:
+  - "std::isnan"
+  - "std::fabs"
+  - "std::sqrt"
+not_contains:
+  - "NAN("
+  - "ABS("
+  - "SQRT("
+  - "INT2FLOAT"
+compile: true
+notes: "Ghidra Help FLOAT_NAN/ABS/SQRT and INT2FLOAT print as functions; map to cmath/casts"

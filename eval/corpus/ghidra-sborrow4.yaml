@@ -1,0 +1,14 @@
+id: ghidra-sborrow4
+profile: generic
+recipe: sanitize
+ghidra_cpp: |
+  int ovf(int x, int y)
+  {
+    return SBORROW4(x, y);
+  }
+contains:
+  - "< 0"
+not_contains:
+  - "SBORROW4"
+compile: true
+notes: "Ghidra Help INT_SBORROW: SBORROW4(x,y) is signed sub overflow; digit is operand size in bytes"
