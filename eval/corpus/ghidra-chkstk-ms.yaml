@@ -1,0 +1,15 @@
+id: ghidra-chkstk-ms
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  int f(void)
+  {
+    ___chkstk_ms();
+    return 1;
+  }
+contains:
+  - "return 1"
+not_contains:
+  - "chkstk"
+compile: true
+notes: "MinGW/MSVC stack probe ___chkstk_ms is compiler-inserted; not present in human source and not needed to recompile."

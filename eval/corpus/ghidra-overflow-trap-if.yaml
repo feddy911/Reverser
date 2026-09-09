@@ -1,0 +1,20 @@
+id: ghidra-overflow-trap-if
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  int add(int x, int y)
+  {
+    int z;
+    z = x + y;
+    if (SCARRY4(x, y)) {
+      abort();
+    }
+    return z;
+  }
+contains:
+  - "x + y"
+not_contains:
+  - "SCARRY4"
+  - "abort"
+compile: true
+notes: "GCC -ftrapv / JO after add: Ghidra prints if (SCARRY4) abort. Human source is x+y; the compiler reinserts traps."

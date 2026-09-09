@@ -1,0 +1,17 @@
+id: ghidra-stack-chk-fail
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  int f(long canary)
+  {
+    if (canary != __stack_chk_guard) {
+      __stack_chk_fail();
+    }
+    return 0;
+  }
+contains:
+  - "return 0"
+not_contains:
+  - "stack_chk"
+compile: true
+notes: "GCC -fstack-protector compares the canary and calls __stack_chk_fail. Drop it; the compiler adds SSP again."

@@ -564,6 +564,30 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("(void)n", sret)
         self.assertIn("in_RCX", sret)
         self.assertNotIn("in_RDX", sret)
+        trap = sanitize_ghidra_cpp(
+            "int add(int x, int y)\n"
+            "{\n"
+            "  int z;\n"
+            "  z = x + y;\n"
+            "  if (SCARRY4(x, y)) {\n"
+            "    abort();\n"
+            "  }\n"
+            "  return z;\n"
+            "}\n"
+        )
+        self.assertIn("x + y", trap)
+        self.assertNotIn("SCARRY4", trap)
+        self.assertNotIn("abort", trap)
+        keep = sanitize_ghidra_cpp("return CARRY4(x, y);\n")
+        self.assertNotIn("CARRY4", keep)
+        self.assertIn("(unsigned)", keep)
+        probe = sanitize_ghidra_cpp("___chkstk_ms();\nreturn 1;\n")
+        self.assertNotIn("chkstk", probe)
+        ssp = sanitize_ghidra_cpp(
+            "if (canary != __stack_chk_guard) { __stack_chk_fail(); }\n"
+            "return 0;\n"
+        )
+        self.assertNotIn("stack_chk", ssp)
 
     def test_duration_cast_not_rewritten(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp

@@ -1298,6 +1298,94 @@ def _rewrite_msx64_incoming(code: str) -> str:
     return blob
 
 
+_TRAP_CALL = re.compile(
+    r"^(?:abort|__builtin_trap|__builtin_unreachable|__stack_chk_fail|"
+    r"___stack_chk_fail|__report_rangecheckfailure|_invalid_parameter|"
+    r"__ubsan_handle_[A-Za-z0-9_]+)\s*\([^;]*\)\s*;?\s*$",
+    re.I,
+)
+_RE_OVF_OP = re.compile(r"\b(?:CARRY|SCARRY|SBORROW)\d+\s*\(")
+_RE_COMPILER_GUARD = re.compile(
+    r"stack_chk|security_cookie|security_check_cookie|_RTC_",
+    re.I,
+)
+_RE_CHKSTK = re.compile(
+    r"[ \t]*\b_{0,3}(?:chkstk_ms|chkstk|alloca_probe)\s*\(\s*\)\s*;[ \t]*\n?",
+    re.I,
+)
+_RE_COOKIE_CALL = re.compile(
+    r"[ \t]*\b(?:__security_check_cookie|__security_init_cookie)\s*\([^;]*\)\s*;[ \t]*\n?"
+)
+
+
+def _is_trap_body(inner: str) -> bool:
+    s = re.sub(r"/\*.*?\*/", "", inner or "", flags=re.S)
+    s = re.sub(r"//.*?$", "", s, flags=re.M).strip()
+    if not s:
+        return True
+    stmts = [p.strip() + ";" for p in s.split(";") if p.strip()]
+    return bool(stmts) and all(_TRAP_CALL.match(st) for st in stmts)
+
+
+def _is_instrument_cond(cond: str) -> bool:
+    c = cond or ""
+    return bool(_RE_OVF_OP.search(c) or _RE_COMPILER_GUARD.search(c))
+
+
+def _strip_instrument_ifs(code: str) -> str:
+    """Drop compiler overflow/canary ifs whose body is only abort/trap/SSP fail."""
+    s = code or ""
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        m = re.search(r"\bif\s*\(", s[i:])
+        if not m:
+            out.append(s[i:])
+            break
+        start = i + m.start()
+        open_p = i + m.end() - 1
+        close_p = _match_forward(s, open_p, "(", ")")
+        if close_p < 0:
+            out.append(s[i : start + 1])
+            i = start + 1
+            continue
+        cond = s[open_p + 1 : close_p]
+        k = close_p + 1
+        while k < n and s[k] in " \t\n\r":
+            k += 1
+        end = -1
+        if _is_instrument_cond(cond):
+            if k < n and s[k] == "{":
+                close_b = _match_forward(s, k, "{", "}")
+                if close_b >= 0 and _is_trap_body(s[k + 1 : close_b]):
+                    end = close_b + 1
+            else:
+                semi = s.find(";", k)
+                if semi >= 0 and _is_trap_body(s[k : semi + 1]):
+                    end = semi + 1
+        if end < 0:
+            out.append(s[i : close_p + 1])
+            i = close_p + 1
+            continue
+        out.append(s[i:start])
+        i = end
+        while i < n and s[i] in " \t\n\r":
+            i += 1
+            if i < n and s[i] == "\n":
+                i += 1
+                break
+    return "".join(out)
+
+
+def _strip_compiler_instrumentation(code: str) -> str:
+    """Remove GCC/MSVC probes and overflow traps. Recompilation reinserts them."""
+    t = _strip_instrument_ifs(code or "")
+    t = _RE_CHKSTK.sub("", t)
+    t = _RE_COOKIE_CALL.sub("", t)
+    return t
+
+
 def sanitize_ghidra_cpp(code: str) -> str:
     """Rewrite Ghidra type spellings and member-call syntax into parseable C++."""
     t = code or ""
@@ -1382,6 +1470,7 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _RE_STACK_ADDR_ASSIGN.sub(r"(void)&", t)
     t = _RE_STACK_PTR_ASSIGN.sub(r"(void)(\2)", t)
     t = _outside_strings(t, _rewrite_in_stack_temps)
+    t = _outside_strings(t, _strip_compiler_instrumentation)
     t = _outside_strings(t, _rewrite_ghidra_piece_ops)
     t = _outside_strings(t, _rewrite_ghidra_func_ops)
     t = _outside_strings(t, _rewrite_bool_xor)
