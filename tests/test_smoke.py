@@ -880,6 +880,20 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertNotIn("basic_string", got2)
         self.assertNotIn("}}}}}}", client2.prompt)
         self.assertIn("std::basic_st", client2.prompt)
+        glued = continue_truncated_cpp(
+            type("C", (), {
+                "generate": staticmethod(
+                    lambda prompt, system="", json_mode=False: (
+                        '{"cpp_code_tail": "get_t x; return 0;\\n}"}'
+                    )
+                ),
+            })(),
+            "int f() {\n  std::wid",
+            "",
+        )
+        self.assertIn("std::widget_t", glued)
+        self.assertNotIn("std::wid\nget", glued)
+        self.assertNotIn("wstring", glued)
 
     def test_restore_live_omits_pcode_even_if_entry_has_it(self):
         from src.agents.restorer import CodeRestorerLLM, PCODE_SECTION_TITLE
@@ -901,6 +915,98 @@ class TestFidelitySmoke(unittest.TestCase):
         CodeRestorerLLM(client).restore(fn, fn["ghidra_code"])
         self.assertNotIn(PCODE_SECTION_TITLE, client.prompt)
         self.assertNotIn("COPY", client.prompt)
+        client2 = _Client()
+        CodeRestorerLLM(client2).restore(
+            fn, fn["ghidra_code"], pcode=fn["pcode"]
+        )
+        self.assertIn(PCODE_SECTION_TITLE, client2.prompt)
+        self.assertIn("COPY", client2.prompt)
+
+
+class TestEvalPcodeMini(unittest.TestCase):
+    def test_dry_run_and_judge_do_not_bump_live_ver(self):
+        from src.analysis.eval_pcode_mini import judge_cpp, run_mini
+        from src.pipeline.runner import LLM_PROMPT_VER
+
+        rec = run_mini(dry_run=True)
+        self.assertTrue(rec["ok"])
+        self.assertEqual(rec["live_prompt_ver"], "p4")
+        self.assertEqual(LLM_PROMPT_VER, "p4")
+        self.assertTrue(rec["prompt_has_pcode"])
+        leak = judge_cpp(
+            "(unique, 8, 0x1000) COPY (const, 8, 0x0)\n",
+            ghidra_code="printf(\"x\");",
+        )
+        self.assertFalse(leak["ok"])
+        self.assertTrue(leak["pcode_leak"])
+        good = judge_cpp(
+            "void f() { printf(\"hello\\n\"); }\n",
+            ghidra_code="printf(\"hello\\n\");",
+        )
+        self.assertTrue(good["ok"])
+
+    def test_restore_fixture_mock_keeps_c_not_pcode(self):
+        from src.analysis.eval_pcode_mini import restore_fixture
+
+        class _Client:
+            def generate(self, prompt, system="", json_mode=False):
+                self.prompt = prompt
+                return (
+                    '{"classification":"user_code",'
+                    '"cpp_code":"void FUN_140001000(void) { printf(\\"hello\\\\n\\"); }"}'
+                )
+
+        dump = _load_fixture()
+        fn = dump["functions"][0]
+        rec = restore_fixture(fn, client=_Client(), use_pcode=True)
+        self.assertTrue(rec["prompt_has_pcode"])
+        self.assertTrue(rec["judge"]["ok"])
+        self.assertNotIn("(unique,", rec["cpp_code"])
+
+
+class TestEvalTruncated(unittest.TestCase):
+    def test_scan_finds_basic_st_after_braces(self):
+        import tempfile
+        from src.analysis.eval_truncated import scan_truncated
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            path = root / "llm" / "p4" / "generic" / "m" / "restore" / "0x1.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({
+                    "cpp_code": "int fmt() {\n            std::basic_st\n}}}}}}",
+                    "guessed_name": "fmt",
+                    "address": "0x1",
+                }),
+                encoding="utf-8",
+            )
+            hits = scan_truncated(root)
+        self.assertEqual(len(hits), 1)
+        self.assertIn("basic_st", hits[0]["tail"])
+
+
+class TestEvalBehavior(unittest.TestCase):
+    def test_check_case_masks_elapsed_and_matches(self):
+        from src.analysis.eval_behavior import check_case, mask_stdout
+
+        self.assertIn("elapsed_us=<n>", mask_stdout("elapsed_us=123\n"))
+        case = {
+            "id": "fibtimer_n3",
+            "expect_contains": ["n=3", "fib(n)=2"],
+            "expect_exit": 0,
+        }
+        row = check_case(
+            case,
+            {"ok": True, "skipped": False, "stdout": "n=3\nfib(n)=2\n", "exit": 0},
+        )
+        self.assertTrue(row["ok"])
+        row_bad = check_case(
+            case,
+            {"ok": True, "skipped": False, "stdout": "n=9\n", "exit": 0},
+        )
+        self.assertFalse(row_bad["ok"])
+        self.assertIn("n=3", row_bad["missing"])
 
 
 class TestGhidraPrepass(unittest.TestCase):

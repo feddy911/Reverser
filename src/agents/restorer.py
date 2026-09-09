@@ -265,7 +265,7 @@ def ident_cut_head(code: str) -> Optional[str]:
         core = core[:-1].rstrip()
     if not core or not _QUAL_IDENT_END.search(core):
         return None
-    return core + "\n"
+    return core
 
 
 def looks_truncated_cpp(code: str) -> bool:
@@ -279,8 +279,12 @@ def looks_truncated_cpp(code: str) -> bool:
     return ident_cut_head(s) is not None
 
 
+def _is_ident_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_"
+
+
 def merge_cpp_continuation(head: str, tail: str) -> str:
-    """Append a continue-tail. Do not rewrite truncated identifiers."""
+    """Append a continue-tail. Glue a cut ident; do not rewrite it."""
     h = head or ""
     t = tail or ""
     if not t.strip():
@@ -290,7 +294,12 @@ def merge_cpp_continuation(head: str, tail: str) -> str:
     prefix = hs[: min(32, len(hs))]
     if prefix and ts.startswith(prefix) and len(ts) >= len(hs):
         return t if t.endswith("\n") else t + "\n"
-    out = h.rstrip() + "\n" + t.lstrip("\n")
+    left = h.rstrip()
+    right = t.lstrip("\n")
+    if left and right and _is_ident_char(left[-1]) and _is_ident_char(right[0]):
+        out = left + right
+    else:
+        out = left + "\n" + right
     if not out.endswith("\n"):
         out += "\n"
     return out
@@ -486,9 +495,15 @@ class CodeRestorerLLM:
         (self.dump_dir / (safe + ".prompt.txt")).write_text(prompt, encoding="utf-8")
         (self.dump_dir / (safe + ".response.txt")).write_text(raw, encoding="utf-8")
 
-    def restore(self, entry: Dict[str, Any], ghidra_code: str) -> Optional[Dict[str, Any]]:
+    def restore(
+        self,
+        entry: Dict[str, Any],
+        ghidra_code: str,
+        *,
+        pcode: str = "",
+    ) -> Optional[Dict[str, Any]]:
         prompt = build_restore_prompt(
-            entry, ghidra_code, profile=self.profile
+            entry, ghidra_code, profile=self.profile, pcode=pcode
         )
         raw = self.client.generate(prompt, system=self.system_prompt, json_mode=True)
         self._dump(entry.get("address", ""), prompt, raw)
