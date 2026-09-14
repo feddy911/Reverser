@@ -1,0 +1,172 @@
+# I5 candidate index for std_* / fs_* probes. Not a restore queue.
+# Not FEATURE_KEYS. Not eval/manifest. Do not freeze filenames (isnan, exists, …).
+# eval_behavior.CASES stays the 3 application originals. first_wave expect
+# snippets live in this file; they are not live restore and not recipes.
+
+schema: i5_probe_index_v1
+live_restore: []
+notes: >
+  274 std_* plus 26 fs_*. Golden stdout / dialect classes after one dump.
+  C++20 (format, coroutines) last. Path-like stdout must be masked.
+  14.09 fs_repr leftover 0; first_wave 6/6 leftover 0 and expect in this
+  file. fs_repr golden: current_path and file_size masked; fs_exists
+  skipped (create_symlink unimplemented). CASES still 3 originals.
+  14.09 iso_cxx20 leftover 0 (co_await / co_yield / consteval1; keywords
+  absent from Ghidra). Probe cohorts closed. CASES still 3 originals.
+
+buckets:
+  - id: first_wave_cxx17
+    n_hint: 6
+    i5: golden_index
+    mask: none
+    std: c++17
+    examples:
+      - std_abs1.cpp
+      - std_gcd.cpp
+      - std_copy.cpp
+      - std_accumulate.cpp
+      - std_all_of.cpp
+      - std_find.cpp
+    why: "deterministic numeric/algorithm stdout; no paths; no process death. std_count.cpp needs constexpr count_if (C++20)."
+    expect:
+      std_abs1:
+        exit: 0
+        contains:
+          - "abs(+3.0) = 3"
+          - "abs(-3.0) = 3"
+          - "abs(-Inf) = inf"
+          - "abs(-NaN) = nan"
+      std_gcd:
+        exit: 0
+        empty: true
+      std_copy:
+        exit: 0
+        contains:
+          - "to_vector contains: 0 1 2 3 4 5 6 7 8 9"
+          - "odd numbers in to_vector are: 1 3 5 7 9"
+          - "to_vector contains these multiples of 3: 0 3 6 9"
+      std_accumulate:
+        exit: 0
+        contains:
+          - "sum: 55"
+          - "product: 3628800"
+          - "dash-separated string: 1-2-3-4-5-6-7-8-9-10"
+          - "dash-separated string (right-folded): 10-9-8-7-6-5-4-3-2-1"
+      std_all_of:
+        exit: 0
+        contains:
+          - "Among the numbers: 2 4 6 8 10 12 14 16 18 20"
+          - "All numbers are even"
+          - "None of them are odd"
+          - "At least one number is divisible by 7"
+      std_find:
+        exit: 0
+        contains:
+          - "v contains 3"
+          - "v does not contain 5"
+          - "w contains an even number 4"
+          - "w does not contain even numbers"
+
+  - id: cmath_stable
+    i5: later
+    mask: none
+    std: c++17
+    examples:
+      - std_abs1.cpp
+      - std_floor.cpp
+      - std_hypot.cpp
+      - std_isnan.cpp
+    why: floating stdout; NaN/Inf spelling may need a mask later
+
+  - id: fs_mask_paths
+    n: 26
+    i5: golden_index
+    mask: paths
+    std: c++17
+    examples:
+      - fs_exists.cpp
+      - fs_file_size.cpp
+      - fs_current_path.cpp
+    why: "filesystem stdout prints paths; never a compile-gate. fs_exists create_symlink is unimplemented on this MinGW Windows host."
+    expect:
+      fs_exists:
+        skip: symlink_unimplemented
+      fs_file_size:
+        exit: 0
+        contains:
+          - "\"example.bin\" size = 1"
+          - "Attempt to get size of a directory:"
+          - "No such file or directory [/dev]"
+          - "\"/bin\\\\cat\" : No such file or directory"
+          - "\"/bin\\\\mouse\" : No such file or directory"
+      fs_current_path:
+        exit: 0
+        contains:
+          - "Current path is \"<path>\""
+
+  - id: cxx20_last
+    i5: last
+    mask: none
+    std: c++20
+    examples:
+      - std_format.cpp
+      - std_format_to.cpp
+      - std_format_to_n.cpp
+      - std_formatted_size.cpp
+      - co_await.cpp
+      - co_yield.cpp
+    why: "separate std flag; not live p4. 14.09 iso_cxx20 leftover 0; co_await stdout has thread ids (not a golden)."
+
+  - id: cxx20_bit
+    i5: later
+    mask: none
+    std: c++20
+    examples:
+      - std_bit_ceil.cpp
+      - std_has_single_bit.cpp
+      - std_countl_zero.cpp
+    why: header bit; same C++20 bucket as format unless the toolchain is 20
+
+  - id: process_death
+    i5: skip
+    examples:
+      - std_abort.cpp
+      - std_exit.cpp
+      - std_at_quick_exit.cpp
+    why: no golden stdout; not I5
+
+  - id: unstable
+    i5: skip
+    examples:
+      - std_clock.cpp
+      - std_getenv.cpp
+      - std_chrono_current_zone.cpp
+      - std_gmtime.cpp
+    why: host/time/env; not a golden
+
+  - id: concurrency
+    i5: skip
+    examples:
+      - std_async.cpp
+      - std_call_once.cpp
+      - std_atomic_fetch_add.cpp
+    why: scheduling; not a first I5
+
+  - id: cxx20_stdlib
+    i5: last
+    mask: none
+    std: c++20
+    examples:
+      - std_format.cpp
+      - std_bit_cast.cpp
+      - std_as_bytes.cpp
+      - std_cmp.cpp
+      - std_erase1.cpp
+      - std_compare_weak_order_fallback.cpp
+    why: C++17 compile fail on 14.09 std_repr. Cohort std_cxx20. Not live p4.
+
+do_not:
+  - live restore 300 binaries
+  - add FEATURE_KEYS for isnan / exists
+  - write sanitizer recipes from a std_* dump name
+  - treat this file as critic compile-gate

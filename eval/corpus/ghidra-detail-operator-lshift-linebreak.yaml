@@ -1,0 +1,16 @@
+id: ghidra-detail-operator-lshift-linebreak
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void mix(ostream *os, int n)
+  {
+    std::__detail::
+    operator<<_<char,_std::char_traits<char>_>(os, n);
+  }
+contains:
+  - "<< ("
+not_contains:
+  - "__detail::operator<<"
+  - "operator<<_"
+compile: true
+notes: "Ghidra quoted insert may break std::__detail:: and operator lshift across lines. Generic mix, not a sample name."

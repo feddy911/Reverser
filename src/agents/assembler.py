@@ -60,8 +60,11 @@ _KNOWN_TYPE_HEADS = frozenset({
     "__mpfr_struct", "mpfr_t", "mpfr_ptr", "mpfr_srcptr",
     "mpfr_exp_t", "mpfr_prec_t", "mpfr_rnd_t",
     "byte", "uchar", "ushort", "uint", "ulong", "ulonglong", "longlong",
-    "undefined", "undefined1", "undefined2", "undefined4", "undefined7", "undefined8",
-    "int1", "int2", "int4", "int8", "uint1", "uint2", "uint4", "uint8",
+    "undefined", "undefined1", "undefined2", "undefined3", "undefined4",
+    "undefined5", "undefined6", "undefined7", "undefined8",
+    "int1", "int2", "int3", "int4", "int5", "int6", "int7", "int8",
+    "uint1", "uint2", "uint3", "uint4", "uint5", "uint6", "uint7", "uint8",
+    "__uint64",
     "int8_t", "int16_t", "int32_t", "int64_t",
     "uint8_t", "uint16_t", "uint32_t", "uint64_t",
     "uintptr_t", "ptrdiff_t", "intmax_t", "uintmax_t",
@@ -149,9 +152,10 @@ def _clean_code(code: str, name: str = "") -> str:
     lines = [ln for ln in code.splitlines() if not RE_DEBUG_LINE.match(ln)]
     text = "\n".join(lines)
     text = text.replace("cout_exref", "std::cout").replace("cerr_exref", "std::cerr")
-    text = sanitize_ghidra_cpp(text)
     from src.agents.restorer import repair_restore_debris
+    # Close leftover quotes/braces before dialect so _outside_strings sees code.
     text = repair_restore_debris(text)
+    text = sanitize_ghidra_cpp(text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
@@ -342,6 +346,13 @@ def _ghidra_stubs(text: str) -> List[str]:
 
 
 _RE_STRUCT_NAME = re.compile(r"\bstruct\s+([A-Za-z_]\w*)")
+_RE_USING_ALIAS = re.compile(r"\busing\s+([A-Za-z_]\w*)\s*=")
+
+
+def _preamble_type_names(preamble: str) -> Set[str]:
+    """Names already bound in the TU preamble (`using X =` or `struct X`)."""
+    blob = preamble or ""
+    return set(_RE_STRUCT_NAME.findall(blob)) | set(_RE_USING_ALIAS.findall(blob))
 
 
 def type_stubs_for_snippet(
@@ -357,7 +368,7 @@ def type_stubs_for_snippet(
     come from the Ghidra dump, not hard-coded sample symbols.
     """
     blob = code or ""
-    already = set(_RE_STRUCT_NAME.findall(preamble or ""))
+    already = _preamble_type_names(preamble or "")
     already |= set(_RE_STRUCT_NAME.findall(blob))
     inferred = _infer_structs(blob, already)
     lines: List[str] = []
@@ -518,14 +529,15 @@ def assemble(
     ]
 
     parts: List[str] = list(preamble_lines) if preamble_lines is not None else _default_preamble()
+    already = set(best) | _preamble_type_names("\n".join(parts))
     parts.append("// ---- types (dedup) ----")
     for name in sorted(best):
         parts.append(best[name].strip())
         parts.append("")
     blob = "\n".join(c for _, _, c in cleaned)
-    inferred = _infer_structs(blob, set(best))
+    inferred = _infer_structs(blob, already)
     for name in sorted(inferred):
-        if name in best:
+        if name in best or name in already:
             continue
         parts.append(_format_inferred_struct(name, inferred[name]))
         parts.append("")

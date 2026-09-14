@@ -1,0 +1,18 @@
+id: ghidra-preamble-using-not-struct
+profile: gcc_pe_x64
+gcc_fingerprint: "using typedef-name .* after 'struct'"
+gcc_probe:
+  - "using typedef-name 'using __uint64 = long long unsigned int' after 'struct'"
+recipe: assemble
+guessed_name: mix
+ghidra_cpp: |
+  int mix(__uint64 z)
+  {
+    return (int)z;
+  }
+contains:
+  - "using __uint64"
+not_contains:
+  - "struct __uint64"
+compile: true
+notes: "Assembler must not invent struct X when the preamble already has using X."

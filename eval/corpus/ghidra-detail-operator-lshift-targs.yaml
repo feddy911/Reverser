@@ -1,0 +1,14 @@
+id: ghidra-detail-operator-lshift-targs
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void mix(ostream *os, int n)
+  {
+    std::__detail::operator<<_<char,_std::char_traits<char>_>(os, n);
+  }
+contains:
+  - "<< ("
+not_contains:
+  - "__detail::operator<<"
+compile: true
+notes: "Ghidra iomanip quoted insert is std::__detail::operator lshift with underscore targs. Generic mix, not a sample name."

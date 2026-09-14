@@ -1,0 +1,18 @@
+id: ghidra-operator-compl
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*operator~\\("
+gcc_probe:
+  - "no matching function for call to 'std::bitset<8>::operator~(std::bitset<8>*&)'"
+recipe: sanitize
+ghidra_cpp: |
+  unsigned mix(unsigned *lhs)
+  {
+    Bits::operator~(lhs);
+    return 0;
+  }
+contains:
+  - "~(*("
+not_contains:
+  - "::operator~"
+compile: true
+notes: "ISO compl lowers to operator~. Ghidra prints Type::operator~(this). Generic Bits, not a sample name."

@@ -30,6 +30,8 @@ class TestPreamble(unittest.TestCase):
         self.assertIn("#include <cstdint>", lines)
         self.assertIn("#include <cmath>", lines)
         self.assertFalse(any("CONCAT" in ln for ln in lines))
+        self.assertTrue(any("using int7 =" in ln for ln in lines))
+        self.assertTrue(any("using undefined3 =" in ln for ln in lines))
 
 
 class TestFeaturesSmoke(unittest.TestCase):
@@ -935,6 +937,10 @@ class TestEvalPcodeMini(unittest.TestCase):
         self.assertEqual(rec["live_prompt_ver"], "p4")
         self.assertEqual(LLM_PROMPT_VER, "p4")
         self.assertTrue(rec["prompt_has_pcode"])
+        self.assertTrue(rec["p5_prompt_has_pcode"])
+        self.assertFalse(rec["p4_prompt_has_pcode"])
+        self.assertTrue(rec["compare"]["live_stays_p4"])
+        self.assertFalse(rec["compare"]["p5_wins"])
         leak = judge_cpp(
             "(unique, 8, 0x1000) COPY (const, 8, 0x0)\n",
             ghidra_code="printf(\"x\");",
@@ -964,6 +970,22 @@ class TestEvalPcodeMini(unittest.TestCase):
         self.assertTrue(rec["prompt_has_pcode"])
         self.assertTrue(rec["judge"]["ok"])
         self.assertNotIn("(unique,", rec["cpp_code"])
+
+    def test_compare_ab_tie_and_p5_win_and_leak(self):
+        from src.analysis.eval_pcode_mini import compare_ab
+
+        ok = {"judge": {"ok": True, "pcode_leak": []}}
+        bad = {"judge": {"ok": False, "pcode_leak": []}}
+        leak = {"judge": {"ok": False, "pcode_leak": ["COPY ("]}}
+        tie = compare_ab(ok, ok)
+        self.assertFalse(tie["p5_wins"])
+        self.assertTrue(tie["live_stays_p4"])
+        win = compare_ab(bad, ok)
+        self.assertTrue(win["p5_wins"])
+        self.assertTrue(win["live_stays_p4"])
+        leaked = compare_ab(ok, leak)
+        self.assertFalse(leaked["p5_wins"])
+        self.assertTrue(leaked["live_stays_p4"])
 
 
 class TestEvalTruncated(unittest.TestCase):
@@ -1009,6 +1031,78 @@ class TestEvalBehavior(unittest.TestCase):
         )
         self.assertFalse(row_bad["ok"])
         self.assertIn("n=3", row_bad["missing"])
+
+    def test_mask_paths_replaces_root_and_abs(self):
+        from src.analysis.eval_behavior import ROOT, mask_paths
+
+        got = mask_paths(str(ROOT / "sandbox"))
+        self.assertNotIn(str(ROOT), got)
+        self.assertTrue(got.startswith("<path>"), got)
+        self.assertEqual(mask_paths(r"C:\Windows\Temp\x"), "<path>")
+
+    def test_mask_paths_quoted_libstd_and_keeps_bin(self):
+        from src.analysis.eval_behavior import ROOT, mask_paths
+
+        doubled = str(ROOT).replace("/", "\\").replace("\\", "\\\\")
+        sample = (
+            f'Current path is "{doubled}"\n'
+            'Current path is "C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Temp"\n'
+            '"/bin\\\\cat" : No such file or directory\n'
+        )
+        got = mask_paths(sample)
+        self.assertNotIn(str(ROOT), got)
+        self.assertIn('Current path is "<path>"', got)
+        self.assertIn('Current path is "<path>"', got.split("\n")[1])
+        self.assertIn('"/bin\\\\cat"', got)
+        self.assertNotIn("/bin<path>", got)
+
+    def test_eval_restored_matches_and_mismatches_golden(self):
+        import tempfile
+        from pathlib import Path
+
+        from src.analysis.compile_verify import find_cxx_compiler
+        from src.analysis.eval_behavior import eval_restored
+
+        cxx = find_cxx_compiler()
+        if not cxx or Path(cxx).stem.lower() == "cl":
+            self.skipTest("no g++/clang++ for I5 link")
+        case = {
+            "id": "mini_i5",
+            "argv": [],
+            "expect_contains": ["hello-i5"],
+            "expect_exit": 0,
+        }
+        src = (
+            "#include <cstdio>\n"
+            "int main() { std::puts(\"hello-i5\"); return 0; }\n"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "mini.cpp"
+            path.write_text(src, encoding="utf-8")
+            ok = eval_restored(path, case, "hello-i5\n")
+            self.assertFalse(ok.get("skipped"), ok)
+            self.assertTrue(ok.get("stdout_match"), ok)
+            self.assertTrue(ok.get("ok"), ok)
+            bad = eval_restored(path, case, "other\n")
+            self.assertTrue(bad.get("contains_ok"), bad)
+            self.assertFalse(bad.get("stdout_match"), bad)
+            self.assertFalse(bad.get("ok"), bad)
+
+    def test_i5_probe_index_examples_exist(self):
+        import yaml
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        data = yaml.safe_load(
+            (root / "eval" / "i5_probe_index.yaml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(data.get("live_restore"), [])
+        missing = []
+        for bucket in data.get("buckets") or []:
+            for name in bucket.get("examples") or []:
+                if not (root / "samples" / name).exists():
+                    missing.append(name)
+        self.assertEqual(missing, [])
 
 
 class TestGhidraPrepass(unittest.TestCase):

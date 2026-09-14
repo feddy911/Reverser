@@ -487,8 +487,9 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         concat = sanitize_ghidra_cpp("return CONCAT44(hi, lo);\n")
         self.assertNotIn("CONCAT44", concat)
         self.assertIn("<< 32", concat)
-        concat71 = sanitize_ghidra_cpp("return CONCAT71(x, y);\n")
+        concat71 = sanitize_ghidra_cpp("return CONCAT71((int7)x, y);\n")
         self.assertNotIn("CONCAT71", concat71)
+        self.assertIn("int7", concat71)
         self.assertIn("<< 8", concat71)
         zext = sanitize_ghidra_cpp("return ZEXT24(0xaabb);\n")
         self.assertNotIn("ZEXT24", zext)
@@ -682,6 +683,93 @@ int main(int argc, char **argv) { return 0; }
         self.assertIn("(*(dst) += (*(src)))", got)
         self.assertNotIn("::operator=", got)
         self.assertNotIn("::operator+=", got)
+
+    def test_operator_and_eq_rewrite(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "Bits::operator&=(lhs, rhs);\n"
+            "std::bitset<4>::operator&=((bitset<4> *)p, q);\n"
+        )
+        self.assertIn("(*(lhs) &= (*(rhs)))", got)
+        self.assertIn("&= (", got)
+        self.assertNotIn("::operator&=", got)
+        self.assertNotIn("and_eq", got)
+
+    def test_operator_bitand_rewrite(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "std::operator&<8>(lhs, rhs);\n"
+            "std::operator&<8>((bitset<8> *)p, q);\n"
+        )
+        self.assertIn("(*(lhs) & *(rhs))", got)
+        self.assertIn(" & *", got)
+        self.assertNotIn("std::operator&", got)
+        self.assertNotIn("bitand", got)
+        and_eq = sanitize_ghidra_cpp("Bits::operator&=(lhs, rhs);\n")
+        self.assertIn("(*(lhs) &= (*(rhs)))", and_eq)
+        self.assertNotIn("::operator&=", and_eq)
+
+    def test_operator_bitor_or_eq_compl(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        bitor = sanitize_ghidra_cpp("std::operator|<8>(lhs, rhs);\n")
+        self.assertIn("(*(lhs) | *(rhs))", bitor)
+        self.assertNotIn("std::operator|", bitor)
+        self.assertNotIn("bitor", bitor)
+        or_eq = sanitize_ghidra_cpp("Bits::operator|=(lhs, rhs);\n")
+        self.assertIn("(*(lhs) |= (*(rhs)))", or_eq)
+        self.assertNotIn("::operator|=", or_eq)
+        compl = sanitize_ghidra_cpp("Bits::operator~(lhs);\n")
+        self.assertIn("~(*(lhs))", compl)
+        self.assertNotIn("::operator~", compl)
+        self.assertNotIn("compl", compl)
+
+    def test_operator_lshift_underscore_targs(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "pbVar2 = std::operator<<_<char,_std::char_traits<char>,_8>(os, bits);\n"
+        )
+        self.assertIn("<< (", got)
+        self.assertNotIn("operator<<_", got)
+
+    def test_detail_operator_lshift_underscore_targs(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "pbVar4 = std::__detail::operator<<_<char,_std::char_traits<char>_>"
+            "(os, qs);\n"
+        )
+        self.assertIn("<< (", got)
+        self.assertNotIn("__detail::operator<<", got)
+
+    def test_detail_operator_lshift_linebreak(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "pbVar1 = std::__detail::\n"
+            "         operator<<_<char,_std::char_traits<char>,_std::basic_string<char>&>"
+            "(os, qs);\n"
+        )
+        self.assertIn("<< (", got)
+        self.assertNotIn("operator<<_", got)
+        self.assertNotIn("__detail::operator<<", got)
+
+    def test_filesystem_operator_lshift_underscore_targs(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "std::filesystem::__cxx11::operator<<_<char,_std::char_traits<char>_>"
+            "(os, p);\n"
+            "std::operator<<((ostream *)_refptr__ZSt4cout, \" exists\\n\");\n"
+        )
+        self.assertIn("<< (", got)
+        self.assertNotIn("filesystem::__cxx11::operator<<", got)
+        self.assertNotIn("filesystem::operator<<", got)
+        self.assertIn("&std::cout", got)
+        self.assertNotIn("_refptr__ZSt4cout", got)
 
     def test_string_ctor_deref_alloc_ident(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -1222,7 +1310,7 @@ class TestCompileVerify(unittest.TestCase):
             self.skipTest("no C++ compiler on PATH")
         preamble = make_preamble("// test", [], [])
         src = "\n".join(preamble) + (
-            "int f(undefined8 x, longlong y, __uint64 z) { return (int)(x + y + z); }\n"
+            "int f(undefined8 x, longlong y, __uint64 z, int7 w) { return (int)(x + y + z + w); }\n"
         )
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "ghidra_types.cpp"
@@ -1352,6 +1440,41 @@ class TestCompileVerify(unittest.TestCase):
         self.assertIn("ghidra_word DAT_abc", got)
         self.assertNotIn("uint32_t DAT_14003b02e", got)
         self.assertNotIn("__CheckForDebuggerJustMyCode", got)
+
+    def test_assemble_does_not_struct_preamble_using_alias(self):
+        from src.agents.assembler import assemble
+
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "mix",
+            "ghidra_name": "FUN_1",
+            "cpp_code": "int mix(__uint64 z) { return (int)z; }\n",
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertIn("using __uint64", text)
+        self.assertNotIn("struct __uint64", text)
+
+    def test_assemble_strips_structstd_glue(self):
+        from src.agents.assembler import assemble
+
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "print_n",
+            "ghidra_name": "FUN_1",
+            "cpp_code": (
+                "void print_n(int n) {\n"
+                "  std::basic_ostream<char,structstd::char_traits<char>> *p;\n"
+                "  (void)n; (void)p;\n"
+                "}\n"
+            ),
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertNotIn("structstd", text)
+        self.assertIn("std::char_traits", text)
 
 
 if __name__ == "__main__":

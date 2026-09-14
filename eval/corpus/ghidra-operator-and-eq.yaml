@@ -1,0 +1,18 @@
+id: ghidra-operator-and-eq
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*operator&="
+gcc_probe:
+  - "no matching function for call to 'std::bitset<4>::operator&=(std::bitset<4>*&, std::bitset<4>*&)'"
+recipe: sanitize
+ghidra_cpp: |
+  unsigned mix(unsigned *lhs, unsigned *rhs)
+  {
+    Bits::operator&=(lhs, rhs);
+    return 0;
+  }
+contains:
+  - "&= ("
+not_contains:
+  - "::operator&="
+compile: true
+notes: "ISO and_eq lowers to operator&=. Ghidra prints Type::operator&=(this, rhs). Generic Bits, not a sample name."

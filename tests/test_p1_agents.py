@@ -15,7 +15,13 @@ from src.agents.compiler import (
     tu_compiler_action,
     write_proposal,
 )
-from src.agents.critic import review_compile_fix, review_function, review_run
+from src.agents.critic import (
+    ROLE_RANK,
+    director_contract,
+    review_compile_fix,
+    review_function,
+    review_run,
+)
 from src.analysis.corpus import load_corpus
 from src.analysis.gen_corpus import (
     MINI_PROGRAMS,
@@ -788,6 +794,11 @@ class TestCritic(unittest.TestCase):
         self.assertTrue(verdict.fidelity_ok)
         self.assertTrue(verdict.accept)
         self.assertNotIn("assembled TU did not compile", verdict.reasons)
+        self.assertTrue(director_contract(verdict))
+        kinds = {s["sanction"] for s in verdict.sanctions}
+        self.assertIn("tu_report_fail", kinds)
+        self.assertNotIn("run_reject", kinds)
+        self.assertEqual(verdict.to_dict()["max_sanction_rank"], ROLE_RANK["assembler"])
 
     def test_per_fn_fail_rejects_despite_green_tu(self):
         restored = [{
@@ -812,6 +823,11 @@ class TestCritic(unittest.TestCase):
         self.assertTrue(verdict.assembled_ok)
         self.assertFalse(verdict.accept)
         self.assertIn("per-fn syntax failed", verdict.reasons)
+        self.assertTrue(director_contract(verdict))
+        run_hit = [s for s in verdict.sanctions if s["sanction"] == "run_reject"]
+        self.assertEqual(len(run_hit), 1)
+        self.assertEqual(run_hit[0]["rank"], ROLE_RANK["critic"])
+        self.assertEqual(verdict.to_dict()["max_sanction_rank"], ROLE_RANK["critic"])
 
     def test_tu_gate_when_per_fn_missing(self):
         restored = [{
@@ -833,6 +849,16 @@ class TestCritic(unittest.TestCase):
         self.assertFalse(verdict.compile_ok)
         self.assertFalse(verdict.accept)
         self.assertIn("assembled TU did not compile", verdict.reasons)
+        self.assertTrue(director_contract(verdict))
+        self.assertEqual(verdict.to_dict()["max_sanction_rank"], ROLE_RANK["critic"])
+
+    def test_director_contract_forbids_false_accept(self):
+        from src.agents.critic import RunVerdict
+
+        bad = RunVerdict(accept=True, compile_ok=False, identity_ok=True, fidelity_ok=True)
+        self.assertFalse(director_contract(bad))
+        ok = RunVerdict(accept=True, compile_ok=True, identity_ok=True, fidelity_ok=True)
+        self.assertTrue(director_contract(ok))
 
 
 if __name__ == "__main__":

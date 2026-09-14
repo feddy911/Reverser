@@ -1,0 +1,18 @@
+id: ghidra-operator-bitand
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*operator&<"
+gcc_probe:
+  - "no matching function for call to 'operator&<8>(std::bitset<8>*&, std::bitset<8>*&)'"
+recipe: sanitize
+ghidra_cpp: |
+  unsigned mix(unsigned *lhs, unsigned *rhs)
+  {
+    std::operator&<8>(lhs, rhs);
+    return 0;
+  }
+contains:
+  - " & *"
+not_contains:
+  - "std::operator&"
+compile: true
+notes: "ISO bitand lowers to operator&. Ghidra prints std::operator&<N>(T*, T*). Generic mix, not a sample name."

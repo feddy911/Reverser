@@ -319,5 +319,51 @@ class TestDialectLoop(unittest.TestCase):
         self.assertEqual(rec["emit"], [])
 
 
+class TestProbeCohort(unittest.TestCase):
+    def test_iso_cxx17_skips_coroutines_and_has_sources(self):
+        from src.analysis.probe_cohort import cohort_stems, list_cohorts
+
+        iso = cohort_stems("iso_cxx17")
+        self.assertNotIn("co_await", iso)
+        self.assertNotIn("co_yield", iso)
+        self.assertNotIn("consteval1", iso)
+        self.assertIn("bitor", iso)
+        self.assertIn("compl", iso)
+        self.assertEqual(len(iso), 15)
+        cxx20 = cohort_stems("iso_cxx20")
+        self.assertEqual(sorted(cxx20), ["co_await", "co_yield", "consteval1"])
+        for stem in cxx20:
+            self.assertTrue((ROOT / "samples" / f"{stem}.cpp").exists(), stem)
+        for stem in iso:
+            self.assertTrue(
+                (ROOT / "samples" / f"{stem}.cpp").exists(), stem
+            )
+        cohorts = list_cohorts()
+        self.assertGreaterEqual(len(cohorts["std_repr"]), 8)
+        self.assertLess(len(cohorts["std_repr"]), 80)
+        self.assertNotIn("co_await", cohorts["std_repr"])
+        for stem in cohort_stems("std_cxx20"):
+            self.assertNotIn(stem, cohorts["std_repr"])
+        self.assertIn("std_format", cohorts["std_cxx20"])
+        first = cohorts["i5_first_wave"]
+        self.assertEqual(len(first), 6)
+        self.assertIn("std_copy", first)
+        self.assertNotIn("std_count", first)
+        self.assertIn("std_abs1", first)
+        self.assertEqual(cohorts["fs_repr"], ["fs_exists", "fs_file_size", "fs_current_path"])
+        from src.analysis.probe_cohort import _expect_for_stem, _stems_from_index
+
+        stems = _stems_from_index("first_wave_cxx17")
+        for stem in stems:
+            self.assertTrue(_expect_for_stem("first_wave_cxx17", stem), stem)
+        fs_stems = _stems_from_index("fs_mask_paths")
+        for stem in fs_stems:
+            self.assertTrue(_expect_for_stem("fs_mask_paths", stem), stem)
+        self.assertEqual(
+            _expect_for_stem("fs_mask_paths", "fs_exists").get("skip"),
+            "symlink_unimplemented",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

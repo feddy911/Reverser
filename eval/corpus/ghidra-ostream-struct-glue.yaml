@@ -1,0 +1,20 @@
+id: ghidra-ostream-struct-glue
+profile: gcc_pe_x64
+gcc_fingerprint: "'structstd' was not declared"
+gcc_probe:
+  - "'structstd' was not declared in this scope; did you mean 'struct'?"
+recipe: assemble
+guessed_name: print_n
+ghidra_cpp: |
+  void print_n(int n)
+  {
+    std::basic_ostream<char,structstd::char_traits<char>> *pbVar4;
+    (void)n;
+    (void)pbVar4;
+  }
+contains:
+  - "std::char_traits"
+not_contains:
+  - "structstd"
+compile: true
+notes: "structstd glue must not survive assemble. Not from a user exe dump."

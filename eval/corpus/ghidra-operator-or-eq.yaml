@@ -1,0 +1,18 @@
+id: ghidra-operator-or-eq
+profile: gcc_pe_x64
+gcc_fingerprint: "no matching function for call to.*operator\\|="
+gcc_probe:
+  - "no matching function for call to 'std::bitset<8>::operator|=(std::bitset<8>*&, std::bitset<8>*&)'"
+recipe: sanitize
+ghidra_cpp: |
+  unsigned mix(unsigned *lhs, unsigned *rhs)
+  {
+    Bits::operator|=(lhs, rhs);
+    return 0;
+  }
+contains:
+  - "|= ("
+not_contains:
+  - "::operator|="
+compile: true
+notes: "Ghidra Type::operator|=(this, rhs). Same family as operator&=. Generic Bits, not a sample name."

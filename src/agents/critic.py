@@ -2,11 +2,18 @@ from __future__ import annotations
 
 """Critic: accept / reject / rollback. Does not generate C++.
 
-A green glued TU is not the compile gate. ``compile_ok`` is per-function
-syntax of LLM user_code targets. The assembled TU is ``assembled_ok``
-(report only) and does not block ACCEPT. Reject if restore swapped the
-function for a different well-known algorithm (starts_with to std::sort)
-or dropped Ghidra facts (fidelity).
+Director of the existing-agent department: may punish subordinates
+(function reject, run REJECT) and may not write C++. A green glued TU
+is not the compile gate. ``compile_ok`` is per-function syntax of LLM
+user_code targets. The assembled TU is ``assembled_ok`` (report only)
+and does not block ACCEPT.
+
+Higher rank → harsher sanction (see ROLE_RANK). Director's own crime
+(ACCEPT while identity/fidelity/per-fn failed) is illegal; tests assert
+``director_contract``.
+
+Reject if restore swapped the function for a different well-known
+algorithm (starts_with to std::sort) or dropped Ghidra facts (fidelity).
 """
 
 import re
@@ -42,6 +49,16 @@ FAMOUS_FN_NAMES = frozenset({
 })
 
 _FIDELITY_OK = 0.85
+
+# Higher number = harsher punishment. Director (5) may REJECT the run.
+# Assembler (3) only fails the TU report; per-fn green still ACCEPT.
+ROLE_RANK = {
+    "polisher": 1,
+    "restorer": 2,
+    "assembler": 3,
+    "compiler": 4,
+    "critic": 5,
+}
 
 
 def _haystacks(entry: Dict[str, Any]) -> str:
@@ -140,8 +157,10 @@ class RunVerdict:
     fidelity_ok: bool = True
     functions: List[FunctionVerdict] = field(default_factory=list)
     reasons: List[str] = field(default_factory=list)
+    sanctions: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
+        ranks = [int(s.get("rank") or 0) for s in self.sanctions]
         return {
             "accept": self.accept,
             "compile_ok": self.compile_ok,
@@ -152,6 +171,8 @@ class RunVerdict:
             "n_functions": len(self.functions),
             "n_reject": sum(1 for f in self.functions if not f.accept),
             "functions": [f.to_dict() for f in self.functions],
+            "sanctions": list(self.sanctions),
+            "max_sanction_rank": max(ranks) if ranks else 0,
         }
 
 
@@ -173,6 +194,64 @@ def per_fn_compile_ok(restored: Sequence[Dict[str, Any]]) -> Optional[bool]:
     if not flags:
         return None
     return all(flags)
+
+
+def collect_sanctions(verdict: RunVerdict) -> List[Dict[str, Any]]:
+    """Map gates to punishments. Higher rank is a harsher sentence.
+
+    Rank 3 (assembler TU) does not REJECT the run. Rank 5 (director)
+    REJECT is identity, fidelity, or per-fn compile failure.
+    """
+    out: List[Dict[str, Any]] = []
+    for fn in verdict.functions:
+        if fn.identity_ok and fn.fidelity_ok:
+            continue
+        out.append({
+            "issuer": "critic",
+            "target": "restorer",
+            "rank": ROLE_RANK["restorer"],
+            "scope": "function",
+            "sanction": "function_reject",
+            "address": fn.address,
+            "reason": "; ".join(fn.reasons[:3]),
+        })
+    if verdict.assembled_ok is False:
+        out.append({
+            "issuer": "critic",
+            "target": "assembler",
+            "rank": ROLE_RANK["assembler"],
+            "scope": "tu",
+            "sanction": "tu_report_fail",
+            "reason": "assembled TU failed syntax; not the ACCEPT gate",
+        })
+    if not verdict.accept:
+        reason = ""
+        for item in verdict.reasons:
+            if "syntax" in item or "compile" in item or "TU " in item:
+                reason = item
+                break
+        if not reason:
+            reason = (verdict.reasons[0] if verdict.reasons else "run rejected")
+        out.append({
+            "issuer": "critic",
+            "target": "restorer",
+            "rank": ROLE_RANK["critic"],
+            "scope": "run",
+            "sanction": "run_reject",
+            "reason": reason,
+        })
+    return out
+
+
+def director_contract(verdict: RunVerdict) -> bool:
+    """Director must not ACCEPT a run that failed identity, fidelity, or per-fn."""
+    if verdict.accept and verdict.compile_ok is False:
+        return False
+    if verdict.accept and not verdict.identity_ok:
+        return False
+    if verdict.accept and not verdict.fidelity_ok:
+        return False
+    return True
 
 
 def review_function(
@@ -281,7 +360,7 @@ def review_run(
         else:
             reasons.append("assembled TU did not compile")
         accept = False
-    return RunVerdict(
+    verdict = RunVerdict(
         accept=accept,
         compile_ok=gate,
         assembled_ok=assembled_ok,
@@ -290,6 +369,8 @@ def review_run(
         functions=fns,
         reasons=reasons,
     )
+    verdict.sanctions = collect_sanctions(verdict)
+    return verdict
 
 
 def review_compile_fix(

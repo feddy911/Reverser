@@ -1,0 +1,14 @@
+id: ghidra-operator-lshift-targs
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void mix(ostream *os, int n)
+  {
+    std::operator<<_<char,_std::char_traits<char>,_8>(os, n);
+  }
+contains:
+  - "<< ("
+not_contains:
+  - "operator<<_"
+compile: true
+notes: "Ghidra bitset insert prints std::operator lshift with underscore targs. Confirmed on ISO alt-token dumps. Not a sample name."

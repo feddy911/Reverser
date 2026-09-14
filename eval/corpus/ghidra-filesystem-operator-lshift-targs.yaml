@@ -1,0 +1,15 @@
+id: ghidra-filesystem-operator-lshift-targs
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void mix(ostream *os, int n)
+  {
+    std::filesystem::__cxx11::operator<<_<char,_std::char_traits<char>_>(os, n);
+  }
+contains:
+  - "<< ("
+not_contains:
+  - "filesystem::__cxx11::operator<<"
+  - "filesystem::operator<<"
+compile: true
+notes: "Ghidra path insert is std::filesystem operator lshift with underscore targs. Generic mix, not a sample name."

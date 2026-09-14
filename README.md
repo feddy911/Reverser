@@ -36,7 +36,7 @@ remain valid. Do not bump the prompt version until live restore consumes IR.
 
 ```bash
 py -m src.analysis.eval_pcode_mini --dry-run
-py -m src.analysis.eval_pcode_mini
+py -m src.analysis.eval_pcode_mini --ab
 ```
 
 Ghidra headless does not run RecoverClassesFromRTTI, DWARF, or FID before decompile.
@@ -54,6 +54,7 @@ CLI golden runs of original samples (I5, not a compile-gate):
 
 ```bash
 py -m src.analysis.eval_behavior
+py -m src.analysis.eval_behavior --restored output/logs/<run>/restored_final.cpp --case pointcloud_default
 ```
 
 ## Triage and prompt profiles
@@ -103,7 +104,7 @@ L1O: `output/scorer_l1o.json`. `train_scorer` is not a compile oracle and does n
 
 New rewrites in `ghidra_cpp.py` / `assembler.py` are not added from a single exe run.
 First a fixture in `eval/corpus/<id>.yaml` (snippet + recipe + contains / not_contains), then the recipe.
-Field schema: `eval/corpus/_schema.yaml`. There are currently **161** loadable fixtures.
+Field schema: `eval/corpus/_schema.yaml`. There are currently **186** loadable fixtures.
 
 ```bash
 py -m src.analysis.eval_corpus

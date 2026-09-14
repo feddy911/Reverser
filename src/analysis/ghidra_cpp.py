@@ -66,7 +66,8 @@ _BARE_NODE_ITER = (
     (re.compile(r"(?<![:\w])_Node_iterator\s*<"), "std::__detail::_Node_iterator<"),
 )
 _OPERATOR_TAILS = (
-    "+=", "!=", "==", "<=", ">=", "->", "++", "--", "[]", "=", "*", "-",
+    "&=", "|=", "^=", "&", "|", "^", "~", "+=", "!=", "==", "<=", ">=",
+    "->", "++", "--", "[]", "=", "*", "-",
 )
 
 _BARE_IOS = re.compile(
@@ -78,7 +79,7 @@ _RE_IOS_OPENMODE = (
     (re.compile(r"\b_S_app\b"), "std::ios::app"),
 )
 _RE_MINGW_STDIO_OBJ = re.compile(
-    r"__fu\d+__ZSt4(cout|cerr|cin|clog)\b"
+    r"(?:__fu\d+|_refptr)__ZSt4(cout|cerr|cin|clog)\b"
 )
 # Ghidra NTTP: std::ratio<1,_1000000> → std::ratio<1, 1000000>
 _RE_GHIDRA_NTTP = re.compile(r"\b_(\d{3,})\b")
@@ -356,6 +357,28 @@ def _rewrite_one_call(
         else:
             rhs = _deref_if_ident(rhs)
         return f"(*({recv}) += ({rhs}))"
+    if meth == "operator&=" and len(args) >= 2:
+        recv, rhs = args[0], args[1].strip()
+        if rhs.startswith("&"):
+            rhs = rhs[1:].strip()
+        else:
+            rhs = _deref_if_ident(rhs)
+        return f"(*({recv}) &= ({rhs}))"
+    if meth == "operator|=" and len(args) >= 2:
+        recv, rhs = args[0], args[1].strip()
+        if rhs.startswith("&"):
+            rhs = rhs[1:].strip()
+        else:
+            rhs = _deref_if_ident(rhs)
+        return f"(*({recv}) |= ({rhs}))"
+    if meth == "operator&" and len(args) >= 2:
+        # ISO bitand / Ghidra std::operator&<N>(T*, T*).
+        return f"(*({args[0]}) & *({args[1]}))"
+    if meth == "operator|" and len(args) >= 2:
+        # ISO bitor / Ghidra std::operator|<N>(T*, T*).
+        return f"(*({args[0]}) | *({args[1]}))"
+    if meth == "operator~" and args:
+        return f"(~(*({args[0]})))"
     if meth == "operator[]" and len(args) >= 2:
         idx = args[1].strip()
         if last in _ASSOC_INDEX:
@@ -847,9 +870,30 @@ def rewrite_ghidra_ostream(code: str) -> str:
     return s
 
 
+_RE_LSHIFT_LINEBREAK = re.compile(
+    r"(std(?:::\w+)*::)\s+(operator<<)"
+)
+
+
 def _rewrite_std_free_lshift(s: str) -> str:
-    """Ghidra `std::operator<<(ostream*, x)` → `&((*lhs) << rhs)`."""
-    needle = "std::operator<<"
+    """Ghidra `std::operator<<(ostream*, x)` → `&((*lhs) << rhs)`.
+
+    Also `std::operator<<_<char, traits, _N>` (bitset),
+    `std::__detail::operator<<_` (quoted), and
+    `std::filesystem::operator<<_` (path insert; __cxx11 stripped earlier).
+    Ghidra may break `std::__detail::` and `operator<<_` across lines.
+    """
+    s = _RE_LSHIFT_LINEBREAK.sub(r"\1\2", s)
+    for needle in (
+        "std::filesystem::operator<<",
+        "std::__detail::operator<<",
+        "std::operator<<",
+    ):
+        s = _rewrite_free_lshift_needle(s, needle)
+    return s
+
+
+def _rewrite_free_lshift_needle(s: str, needle: str) -> str:
     n = len(s)
     out: list[str] = []
     copied = 0
@@ -861,6 +905,18 @@ def _rewrite_std_free_lshift(s: str) -> str:
         t = k + len(needle)
         while t < n and s[t] in " \t\n\r":
             t += 1
+        if t < n and s[t] == "_":
+            t += 1
+            while t < n and s[t] in " \t\n\r":
+                t += 1
+        if t < n and s[t] == "<":
+            close_a = _match_forward(s, t, "<", ">")
+            if close_a < 0:
+                i = k + 2
+                continue
+            t = close_a + 1
+            while t < n and s[t] in " \t\n\r":
+                t += 1
         if t >= n or s[t] != "(":
             i = k + 2
             continue
@@ -1389,12 +1445,15 @@ def _strip_compiler_instrumentation(code: str) -> str:
 def sanitize_ghidra_cpp(code: str) -> str:
     """Rewrite Ghidra type spellings and member-call syntax into parseable C++."""
     t = code or ""
+    # Even if an earlier quote makes _outside_strings skip a chunk.
+    t = t.replace("structstd::", "std::")
 
     def _types(chunk: str) -> str:
         # Ghidra: pair<const_std::basic_string,…>. Strip _std:: only after
         # splitting const from std, or it becomes the token conststd.
         chunk = apply_lexical(chunk, "before_underscore_std")
         chunk = chunk.replace("_std::", "std::")
+        chunk = chunk.replace("::__cxx11::", "::")
         chunk = chunk.replace("std::__cxx11::", "std::")
         chunk = re.sub(r"_+(?=>)", "", chunk)
         for old, new in _UNDERSCORE_TYPES:

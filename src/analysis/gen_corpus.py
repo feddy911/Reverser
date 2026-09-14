@@ -49,8 +49,11 @@ _PROTECTED_EXTRA = frozenset({
     "cout", "cerr", "endl", "cin", "string", "wstring", "vector",
     "basic_ostream", "char_traits", "allocator", "basic_string",
     "mpz_t", "mpz_ptr", "mpz_srcptr", "mpf_t", "mpq_t",
-    "ghidra_word", "undefined", "undefined1", "undefined2", "undefined4",
-    "undefined8", "longlong", "ulonglong", "size_type", "unsigned_char",
+    "ghidra_word", "undefined", "undefined1", "undefined2", "undefined3",
+    "undefined4", "undefined5", "undefined6", "undefined7", "undefined8",
+    "int1", "int2", "int3", "int4", "int5", "int6", "int7", "int8",
+    "uint1", "uint2", "uint3", "uint4", "uint5", "uint6", "uint7", "uint8",
+    "__uint64", "longlong", "ulonglong", "size_type", "unsigned_char",
     "include",     "printf", "sprintf", "fprintf", "puts", "main",
     "initializer_list", "cmath", "cstdio", "cstring", "cstdint", "cstdlib",
     "algorithm", "iostream", "fstream", "chrono", "vector", "map", "set",
@@ -105,7 +108,16 @@ def _is_protected(ident: str) -> bool:
     if ident.startswith((
         "DAT_", "thunk_", "FUN_", "std", "local_", "param_",
         "in_stack", "in_stk_", "auStack", "mpz_", "long_long",
+        "CONCAT", "ZEXT", "SEXT", "SUB", "CARRY", "SCARRY", "SBORROW",
+        "POPCOUNT", "LZCOUNT", "INT2FLOAT", "FLOAT2FLOAT",
+        "in_RCX", "in_RDX", "in_R8", "in_R9", "in_ECX", "in_EDX",
+        "in_CX", "in_DX",
     )):
+        return True
+    if ident in {
+        "ABS", "SQRT", "NAN", "CEIL", "FLOOR", "ROUND", "TRUNC",
+        "abort",
+    }:
         return True
     return False
 

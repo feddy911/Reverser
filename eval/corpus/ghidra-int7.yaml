@@ -1,0 +1,20 @@
+id: ghidra-int7
+profile: gcc_pe_x64
+gcc_fingerprint: "'int7' was not declared"
+gcc_probe:
+  - "'int7' was not declared in this scope; did you mean 'int8'?"
+recipe: sanitize
+guessed_name: mix
+ghidra_cpp: |
+  unsigned long long mix(int7 x, char y)
+  {
+    return CONCAT71((int7)x, y);
+  }
+contains:
+  - "<< 8"
+  - "int7"
+not_contains:
+  - "CONCAT71"
+  - "struct int7"
+compile: true
+notes: "Ghidra 7-byte signed type; CONCAT may leave an int7 cast. Alias like undefined7."
