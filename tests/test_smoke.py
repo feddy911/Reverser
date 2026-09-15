@@ -84,6 +84,9 @@ class TestFeaturesSmoke(unittest.TestCase):
         self.assertGreaterEqual(len(lines), 1)
         self.assertTrue(any("COPY" in ln or "RETURN" in ln for ln in lines))
         self.assertNotIn(PCODE_KEY, FEATURE_KEYS)
+        from src.analysis.features import FEATURE_KEYS_V2
+        self.assertNotIn(PCODE_KEY, FEATURE_KEYS_V2)
+        self.assertIn("n_pcode_ops", FEATURE_KEYS_V2)
         self.assertNotIn("pcode", USER_PROMPT.lower())
         live = build_restore_prompt(fn, fn["ghidra_code"])
         self.assertNotIn(PCODE_SECTION_TITLE, live)
@@ -663,6 +666,112 @@ class TestFidelitySmoke(unittest.TestCase):
         rep = check_function(entry, restore, toks)
         self.assertNotIn("_Node_const_iterator", rep["missing_calls"])
 
+    def test_vector_type_callee_not_required(self):
+        from src.analysis.fidelity import check_function
+
+        entry = {"address": "0x1", "literals": [], "ext_calls": [], "ghidra_code": ""}
+        toks = [("vector", ["vector", "FUN_140004660"])]
+        restore = "int main() { std::vector<int> lines; return 0; }\n"
+        rep = check_function(entry, restore, toks)
+        self.assertNotIn("vector", rep["missing_calls"])
+        self.assertFalse(rep["scored"])
+
+    def test_size_t_is_not_size_call(self):
+        from src.analysis.fidelity import check_function
+
+        entry = {
+            "address": "0x1",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": "sVar2 = s->size();",
+        }
+        toks = [("size", ["size"])]
+        bad = check_function(entry, "bool f(){ size_t x=0; return true; }", toks)
+        self.assertIn("size", bad["missing_calls"])
+        ok = check_function(entry, "bool f(){ return s->size()==0; }", toks)
+        self.assertEqual(ok["missing_calls"], [])
+
+    def test_for_begin_ident_is_not_begin_call(self):
+        from src.analysis.fidelity import check_function
+
+        entry = {
+            "address": "0x1",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": "n = begin(p);",
+        }
+        toks = [("begin", ["begin"])]
+        restore = "void f() { const_iterator __for_begin; }\n"
+        rep = check_function(entry, restore, toks)
+        self.assertIn("begin", rep["missing_calls"])
+
+    def test_compare_is_dump_call_not_noise(self):
+        from src.analysis.fidelity import build_call_tokens, check_function
+
+        toks = build_call_tokens(
+            ["0x10"], name_by_addr={"0x10": "compare"}, thunk_target={},
+        )
+        self.assertEqual([n for n, _ in toks], ["compare"])
+        entry = {
+            "address": "0x1",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": "iVar1 = s->compare(0, n, p);",
+        }
+        ok = check_function(
+            entry, "bool f(){ return s->compare(0, n, *p)==0; }", toks,
+        )
+        self.assertEqual(ok["missing_calls"], [])
+        bad = check_function(
+            entry, "bool f(){ size_t n = s->size(); return n>0; }", toks,
+        )
+        self.assertIn("compare", bad["missing_calls"])
+
+    def test_templated_emplace_back_counts_as_call(self):
+        from src.analysis.fidelity import check_function
+
+        entry = {"address": "0x1", "literals": [], "ext_calls": [], "ghidra_code": ""}
+        toks = [("emplace_back<char*&>", ["emplace_back<char*&>", "emplace_back"])]
+        restore = "void f() { lines->emplace_back<char*&>(p); }\n"
+        rep = check_function(entry, restore, toks)
+        self.assertEqual(rep["missing_calls"], [])
+
+    def test_empty_fact_bag_is_not_perfect(self):
+        from src.analysis.fidelity import check_function, should_skip_polish
+
+        entry = {"address": "0x1", "literals": [], "ext_calls": [], "ghidra_code": ""}
+        code = "int f(){ return 1; }"
+        rep = check_function(entry, code, [])
+        self.assertFalse(rep["scored"])
+        self.assertEqual(rep["fidelity"], 0.0)
+        self.assertFalse(should_skip_polish(rep, code))
+
+    def test_missing_user_callee_fails_dump_facts(self):
+        from src.analysis.fidelity import check_function, dump_facts_ok
+
+        toks = [("print_n", ["print_n"])]
+        entry = {
+            "address": "0x1",
+            "literals": ["hi"],
+            "ext_calls": [],
+            "ghidra_code": 'print_n("hi");',
+        }
+        bad = check_function(entry, 'void f(){ puts("hi"); }', toks)
+        self.assertIn("print_n", bad["missing_user_calls"])
+        self.assertFalse(dump_facts_ok(bad))
+        ok = check_function(entry, 'void f(){ print_n("hi"); }', toks)
+        self.assertTrue(dump_facts_ok(ok))
+
+    def test_residue_blocks_polish_skip(self):
+        from src.analysis.fidelity import should_skip_polish
+
+        fid = {"fidelity": 1.0, "scored": True}
+        self.assertFalse(should_skip_polish(fid, "int main(){ in_stk_n8 = 0; }"))
+        self.assertFalse(
+            should_skip_polish(fid, "undefined1 auStack_20[16]; auStack_20._8_8_ = 1;")
+        )
+        self.assertTrue(should_skip_polish(fid, "int main(){ return 0; }"))
+
     def test_keep_dump_literals_comments_missing(self):
         from src.agents.restorer import keep_dump_literals
         from src.analysis.fidelity import literal_in_code
@@ -1088,6 +1197,78 @@ class TestEvalBehavior(unittest.TestCase):
             self.assertFalse(bad.get("stdout_match"), bad)
             self.assertFalse(bad.get("ok"), bad)
 
+    def test_case_for_binary_matches_stem_not_arbitrary_exe(self):
+        from src.analysis.eval_behavior import case_for_binary
+
+        self.assertEqual(
+            (case_for_binary("samples/PointCloud.exe") or {}).get("id"),
+            "pointcloud_default",
+        )
+        self.assertEqual(
+            (case_for_binary("output/foo/FibTimer.exe") or {}).get("id"),
+            "fibtimer_n3",
+        )
+        self.assertIsNone(case_for_binary("samples/EchoFilter.exe"))
+        self.assertIsNone(case_for_binary("user.bin"))
+
+    def test_eval_restored_crash_is_metric_not_gate(self):
+        import tempfile
+        from pathlib import Path
+
+        from src.agents.compiler import SKIP_FOREVER
+        from src.agents.critic import director_contract, review_run
+        from src.analysis.compile_verify import find_cxx_compiler
+        from src.analysis.eval_behavior import _crash_reason, eval_restored, i5_summary
+
+        self.assertIsNotNone(_crash_reason(3221225477))
+        self.assertIsNotNone(_crash_reason(-1073741819))
+        self.assertIsNotNone(_crash_reason(-11))
+        blob = " ".join(p[0] for p in SKIP_FOREVER)
+        self.assertNotIn("ACCESS_VIOLATION", blob)
+        self.assertNotIn("STATUS_ACCESS", blob)
+
+        cxx = find_cxx_compiler()
+        if not cxx or Path(cxx).stem.lower() == "cl":
+            self.skipTest("no g++/clang++ for I5 link")
+        case = {
+            "id": "crash_i5",
+            "argv": [],
+            "expect_contains": ["never-printed"],
+            "expect_exit": 0,
+        }
+        src = "int main() { volatile int *p = 0; return *p; }\n"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "crash.cpp"
+            path.write_text(src, encoding="utf-8")
+            rec = eval_restored(path, case, "never-printed\n")
+        self.assertFalse(rec.get("skipped"), rec)
+        self.assertTrue((rec.get("link") or {}).get("ok"), rec)
+        self.assertEqual(rec.get("kind"), "crash")
+        self.assertFalse(rec.get("ok"), rec)
+        slim = i5_summary(rec)
+        self.assertTrue(slim.get("not_compile_gate"))
+        self.assertTrue(slim.get("not_recipe_source"))
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "walk_keys",
+            "ghidra_name": "FUN_1",
+            "name": "FUN_1",
+            "cpp_code": 'void walk_keys() { puts("k"); }\n',
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": 'void FUN_1() { puts("k"); }',
+            "compile_ok": True,
+        }]
+        verdict = review_run(
+            restored,
+            tu_text='void walk_keys() { puts("k"); }',
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertTrue(verdict.accept)
+        self.assertTrue(director_contract(verdict))
+
     def test_i5_probe_index_examples_exist(self):
         import yaml
         from pathlib import Path
@@ -1161,6 +1342,50 @@ class TestExtractFeatures(unittest.TestCase):
         ft = extract_features(idx, dump["functions"][0])
         self.assertGreaterEqual(ft["n_domain"], 1)
         self.assertGreaterEqual(ft["n_iostream"], 1)
+        self.assertGreaterEqual(ft["n_code_chars"], 1)
+        self.assertGreaterEqual(ft["n_pcode_ops"], 1)
+        self.assertIn("n_stack_dialect", ft)
+        self.assertIn("n_ctrl", ft)
+        self.assertIn("n_user_callees", ft)
+
+
+class TestCommandments(unittest.TestCase):
+    """Pipeline restore must not ingest original sources. Failure is hell."""
+
+    _RESTORE_PATH = (
+        ROOT / "src" / "analysis" / "ghidra_cpp.py",
+        ROOT / "src" / "agents" / "assembler.py",
+        ROOT / "src" / "agents" / "compiler.py",
+        ROOT / "src" / "agents" / "restorer.py",
+        ROOT / "src" / "analysis" / "prompts.py",
+        ROOT / "src" / "analysis" / "fidelity.py",
+    )
+    _STEMS = (
+        "EchoFilter", "PointCloud", "MyCollatz", "IniMini", "XorCipher",
+        "FibTimer", "TaskBoard", "NetPath", "GammaFn",
+    )
+
+    def test_restore_path_has_no_application_stems(self):
+        import re
+
+        pat = re.compile(r"\b(" + "|".join(self._STEMS) + r")\b")
+        hits = []
+        for path in self._RESTORE_PATH:
+            text = path.read_text(encoding="utf-8")
+            for m in pat.finditer(text):
+                hits.append(f"{path.name}:{m.group(0)}")
+        self.assertEqual(hits, [], hits)
+
+    def test_restorer_prompt_has_no_samples_tree(self):
+        from src.agents.restorer import USER_PROMPT
+        from src.analysis.prompts import system_prompt_for
+
+        self.assertNotIn("samples/", USER_PROMPT)
+        self.assertNotIn("samples\\", USER_PROMPT)
+        for profile in ("gcc_pe_x64", "generic"):
+            sp = system_prompt_for(profile)
+            self.assertNotIn("samples/", sp)
+            self.assertNotIn(".cpp", sp)
 
 
 if __name__ == "__main__":

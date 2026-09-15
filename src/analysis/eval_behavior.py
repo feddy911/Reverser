@@ -103,6 +103,70 @@ CASES: List[Dict[str, Any]] = [
 ]
 
 
+_WIN_AV = 0xC0000005
+
+
+def _crash_reason(exit_code: Any) -> Optional[str]:
+    """Windows AV and Unix SIGSEGV. Not a sanitizer class."""
+    if exit_code is None:
+        return None
+    try:
+        n = int(exit_code)
+    except (TypeError, ValueError):
+        return None
+    if n == -11 or n == 139:
+        return "process crashed (SIGSEGV)"
+    u = n + (1 << 32) if n < 0 else n
+    if (u & 0xFFFFFFFF) == _WIN_AV:
+        return "process crashed (STATUS_ACCESS_VIOLATION)"
+    return None
+
+
+def case_for_binary(path: Path | str) -> Optional[Dict[str, Any]]:
+    """Match a sample exe stem to CASES. Unknown binaries have no I5 golden."""
+    stem = Path(path).stem.lower()
+    if not stem:
+        return None
+    for case in CASES:
+        if Path(case["exe"]).stem.lower() == stem:
+            return case
+    return None
+
+
+def restored_kind(rec: Dict[str, Any]) -> str:
+    if rec.get("skipped"):
+        return "skipped"
+    if rec.get("ok"):
+        return "match"
+    link = rec.get("link") or {}
+    if link.get("skipped"):
+        return "skipped"
+    if not link.get("ok"):
+        return "link_fail"
+    if _crash_reason(rec.get("exit")):
+        return "crash"
+    if rec.get("stdout_match") is False:
+        return "stdout_mismatch"
+    return "fail"
+
+
+def i5_summary(rec: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": rec.get("id"),
+        "ok": bool(rec.get("ok")),
+        "skipped": bool(rec.get("skipped")),
+        "kind": rec.get("kind") or restored_kind(rec),
+        "reason": rec.get("reason") or "",
+        "exit": rec.get("exit"),
+        "stdout_match": bool(rec.get("stdout_match")),
+        "contains_ok": bool(rec.get("contains_ok")),
+        "exit_ok": bool(rec.get("exit_ok")),
+        "link_ok": bool((rec.get("link") or {}).get("ok")),
+        "not_compile_gate": True,
+        "not_recipe_source": True,
+    }
+
+
 def case_by_id(case_id: str) -> Optional[Dict[str, Any]]:
     for case in CASES:
         if case["id"] == case_id:
@@ -260,9 +324,11 @@ def eval_restored(
         if link.get("skipped"):
             rec["skipped"] = True
             rec["reason"] = link.get("reason") or "link skipped"
+            rec["kind"] = restored_kind(rec)
             return rec
         if not link.get("ok"):
             rec["reason"] = link.get("reason") or "link failed"
+            rec["kind"] = restored_kind(rec)
             rec["stderr"] = (link.get("stderr") or "")[-800:]
             return rec
         env = os.environ.copy()
@@ -270,17 +336,18 @@ def eval_restored(
         rec["stdout"] = run.get("stdout") or ""
         rec["exit"] = run.get("exit")
         rec["reason"] = run.get("reason") or ""
-        if not rec["reason"] and rec["exit"] not in (0, None):
-            if rec["exit"] == 3221225477:
-                rec["reason"] = "process crashed (STATUS_ACCESS_VIOLATION)"
-            else:
-                rec["reason"] = f"exit={rec['exit']}"
+        crash = _crash_reason(rec["exit"])
+        if crash:
+            rec["reason"] = crash
+        elif not rec["reason"] and rec["exit"] not in (0, None):
+            rec["reason"] = f"exit={rec['exit']}"
         checked = check_case(case, run)
         rec["missing"] = checked.get("missing") or []
         rec["contains_ok"] = bool(checked.get("ok"))
         rec["exit_ok"] = bool(checked.get("exit_ok"))
         rec["stdout_match"] = mask_stdout(rec["stdout"]) == mask_stdout(golden_stdout)
         rec["ok"] = bool(rec["stdout_match"] and rec["exit_ok"] and not run.get("skipped"))
+        rec["kind"] = restored_kind(rec)
         if run.get("skipped"):
             rec["skipped"] = True
         return rec

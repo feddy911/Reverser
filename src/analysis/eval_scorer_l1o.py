@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-"""Leave-one-binary-out scoring eval. Same 22 FEATURE_KEYS. Not compile-gate.
+"""Leave-one-binary-out scoring eval. Live 22 FEATURE_KEYS. Not compile-gate.
 
   py -m src.analysis.eval_scorer_l1o --manifest eval/manifest.yaml
+  py -m src.analysis.eval_scorer_l1o --keys v2 --out output/scorer_l1o_v2.json
 
-Trains logreg / RF / DecisionTree(max_depth=4) on every binary except one,
-then measures filtered recall@15 on the held-out dump. Heuristic has no
-fit — it is the WEIGHTS scorer on that dump. Does not read gcc diagnostics
-and does not write corpus recipes.
+I6 ``--keys v2`` is offline. Do not write the extra keys into runner or
+``train_scorer`` until FUN_* addr recall wins L1O. gcc text is not a feature.
 """
 
 import argparse
@@ -33,7 +32,7 @@ from src.analysis.eval_harness import (
     _score_dump,
     load_address_labels,
 )
-from src.analysis.features import FEATURE_KEYS
+from src.analysis.features import FEATURE_KEYS, FEATURE_KEYS_V2
 from src.analysis.scorer import apply_runtime_noise_penalty, select_llm_targets
 
 MODEL_ORDER = ("heuristic", "logreg", "rf", "dtree")
@@ -41,11 +40,31 @@ MODEL_ORDER = ("heuristic", "logreg", "rf", "dtree")
 _GCC_SUBSTRINGS = ("gcc", "error", "diagnostic", "fingerprint")
 
 
+_KEYSETS = {
+    "live": FEATURE_KEYS,
+    "v2": FEATURE_KEYS_V2,
+}
+
+
 def assert_scoring_features() -> None:
     """Q6 L1O uses the live 22 keys. gcc text is not a feature."""
     if len(FEATURE_KEYS) != 22:
         raise RuntimeError(f"FEATURE_KEYS length {len(FEATURE_KEYS)}, expected 22")
-    lowered = [k.lower() for k in FEATURE_KEYS]
+    _assert_no_gcc(FEATURE_KEYS)
+
+
+def assert_scoring_features_v2() -> None:
+    """I6 extras are dump-derived. Live 22 stay a prefix. Not gcc."""
+    assert_scoring_features()
+    if FEATURE_KEYS_V2[: len(FEATURE_KEYS)] != FEATURE_KEYS:
+        raise RuntimeError("FEATURE_KEYS_V2 must start with live FEATURE_KEYS")
+    if len(FEATURE_KEYS_V2) <= len(FEATURE_KEYS):
+        raise RuntimeError("FEATURE_KEYS_V2 must add offline keys")
+    _assert_no_gcc(FEATURE_KEYS_V2)
+
+
+def _assert_no_gcc(keys: Sequence[str]) -> None:
+    lowered = [k.lower() for k in keys]
     bad = [k for k in lowered if any(s in k for s in _GCC_SUBSTRINGS)]
     if bad:
         raise RuntimeError(f"gcc-like keys in FEATURE_KEYS: {bad}")
@@ -63,8 +82,8 @@ class BinaryPack:
     family: str = ""
 
 
-def _row(ft: Dict[str, Any]) -> List[float]:
-    return [float(ft.get(k, 0) or 0) for k in FEATURE_KEYS]
+def _row(ft: Dict[str, Any], keys: Sequence[str] = FEATURE_KEYS) -> List[float]:
+    return [float(ft.get(k, 0) or 0) for k in keys]
 
 
 def _label_row(name: str, user_names: Sequence[str]) -> int:
@@ -104,6 +123,28 @@ def load_binary(
         y_source=y_source,
         family=str(family or ""),
     )
+
+
+def _apply_keys(packs: Sequence[BinaryPack], keys: Sequence[str]) -> None:
+    """Rebuild pack.X for an offline keyset. Scored rows already have extras."""
+    key_list = list(keys)
+    for pack in packs:
+        pack.X = np.asarray(
+            [_row(s, key_list) for s in pack.scored],
+            dtype=np.float64,
+        )
+
+
+def _resolve_keys(keys: Sequence[str]) -> Tuple[str, Tuple[str, ...]]:
+    key_tup = tuple(keys)
+    if key_tup == FEATURE_KEYS:
+        assert_scoring_features()
+        return "live", key_tup
+    if key_tup == FEATURE_KEYS_V2:
+        assert_scoring_features_v2()
+        return "v2", key_tup
+    _assert_no_gcc(key_tup)
+    return "custom", key_tup
 
 
 def load_manifest_packs(manifest_path: Path) -> Tuple[List[BinaryPack], List[Dict[str, Any]]]:
@@ -257,6 +298,7 @@ def eval_held_out(
     train: Sequence[BinaryPack],
     *,
     top_k: int,
+    keys: Sequence[str] = FEATURE_KEYS,
 ) -> Dict[str, Any]:
     per_model: Dict[str, Any] = {}
     per_model["heuristic"] = _recall(
@@ -296,13 +338,13 @@ def eval_held_out(
             )
             if name == "dtree":
                 rec["tree_rules"] = export_text(
-                    clf, feature_names=list(FEATURE_KEYS), max_depth=4,
+                    clf, feature_names=list(keys), max_depth=4,
                 )
             if name == "rf":
                 rec["importances"] = [
                     {"key": k, "value": round(float(v), 4)}
                     for k, v in sorted(
-                        zip(FEATURE_KEYS, clf.feature_importances_),
+                        zip(keys, clf.feature_importances_),
                         key=lambda t: -t[1],
                     )[:8]
                 ]
@@ -339,13 +381,16 @@ def run_l1o(
     *,
     top_k: int = 15,
     skipped: Optional[List[Dict[str, Any]]] = None,
+    keys: Sequence[str] = FEATURE_KEYS,
 ) -> Dict[str, Any]:
-    assert_scoring_features()
+    keyset, key_tup = _resolve_keys(keys)
+    _apply_keys(packs, key_tup)
     folds = [
         eval_held_out(
             held,
             _train_packs(held, packs),
             top_k=top_k,
+            keys=key_tup,
         )
         for held in packs
     ]
@@ -397,8 +442,9 @@ def run_l1o(
         "track": "scoring_l1o",
         "not_compile_gate": True,
         "top_k": top_k,
-        "feature_keys": list(FEATURE_KEYS),
-        "n_feature_keys": len(FEATURE_KEYS),
+        "keyset": keyset,
+        "feature_keys": list(key_tup),
+        "n_feature_keys": len(key_tup),
         "models": list(MODEL_ORDER),
         "n_binaries": len(packs),
         "n_named_binaries": len(named_folds),
@@ -414,9 +460,14 @@ def run_l1o(
     }
 
 
-def run_manifest(manifest_path: Path, out_path: Path, top_k: int = 15) -> Dict[str, Any]:
+def run_manifest(
+    manifest_path: Path,
+    out_path: Path,
+    top_k: int = 15,
+    keys: Sequence[str] = FEATURE_KEYS,
+) -> Dict[str, Any]:
     packs, skipped = load_manifest_packs(manifest_path)
-    report = run_l1o(packs, top_k=top_k, skipped=skipped)
+    report = run_l1o(packs, top_k=top_k, skipped=skipped, keys=keys)
     report["manifest"] = str(manifest_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
@@ -433,7 +484,8 @@ def _print_report(report: Dict[str, Any], out: Path) -> None:
         f"OK: scoring L1O binaries={report.get('n_binaries')} "
         f"named={report.get('n_named_binaries')} "
         f"addr={report.get('n_addr_binaries')} "
-        f"skip={report.get('n_skip', 0)} keys={report.get('n_feature_keys')} "
+        f"skip={report.get('n_skip', 0)} "
+        f"keyset={report.get('keyset')} keys={report.get('n_feature_keys')} "
         f"-> {out}"
     )
     print(
@@ -486,10 +538,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Output report path",
     )
     parser.add_argument("--top-k", type=int, default=15)
+    parser.add_argument(
+        "--keys",
+        choices=sorted(_KEYSETS),
+        default="live",
+        help="live = 22 FEATURE_KEYS. v2 is I6 offline extras; do not train_scorer.",
+    )
     args = parser.parse_args(argv)
 
-    report = run_manifest(Path(args.manifest), Path(args.out), top_k=int(args.top_k))
-    _print_report(report, Path(args.out))
+    keys = _KEYSETS[args.keys]
+    out = args.out
+    if args.keys == "v2" and out == "output/scorer_l1o.json":
+        out = "output/scorer_l1o_v2.json"
+    report = run_manifest(
+        Path(args.manifest),
+        Path(out),
+        top_k=int(args.top_k),
+        keys=keys,
+    )
+    _print_report(report, Path(out))
     return 0
 
 

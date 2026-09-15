@@ -280,6 +280,11 @@ def review_function(
                 "missing ext_calls: "
                 + ", ".join(str(x) for x in (fid.get("missing_ext") or [])[:3])
             )
+        if fid.get("missing_user_calls"):
+            reasons.append(
+                "missing calls: "
+                + ", ".join(str(x) for x in (fid.get("missing_user_calls") or [])[:3])
+            )
     elif not score_ok:
         reasons.append(
             f"fidelity {fid.get('fidelity')} drift={fid.get('drift')}"

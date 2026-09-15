@@ -61,6 +61,72 @@ def _llm_cache_key(
     return f"llm/{LLM_PROMPT_VER}/{safe_profile}/{safe_model}/{kind}/{addr}"
 
 
+def _record_i5_metric(
+    metrics: RunMetrics,
+    run_dir: Path,
+    source_cpp: Optional[Path],
+    binary_path: Path,
+) -> None:
+    """I5 restored vs original stdout. Metric only: not ACCEPT, not a recipe."""
+    from src.analysis.eval_behavior import (
+        ROOT,
+        case_for_binary,
+        eval_restored,
+        i5_summary,
+        run_exe,
+    )
+
+    if source_cpp is None or not source_cpp.exists():
+        return
+    case = case_for_binary(binary_path)
+    if case is None:
+        return
+    t0 = time.perf_counter()
+    try:
+        golden = run_exe(
+            ROOT / case["exe"],
+            list(case.get("argv") or []),
+            cwd=ROOT,
+        )
+        rec = eval_restored(
+            source_cpp,
+            case,
+            golden.get("stdout") or "",
+            root=ROOT,
+        )
+        slim = i5_summary(rec)
+        metrics.i5 = slim
+        _save_json(
+            run_dir / "behavior.json",
+            {
+                "not_compile_gate": True,
+                "not_recipe_source": True,
+                "golden_ok": bool(golden.get("ok")),
+                "restored": rec,
+                "summary": slim,
+            },
+        )
+        print()
+        print("=== I5 BEHAVIOR ===")
+        flag = "OK" if rec.get("ok") else ("SKIP" if rec.get("skipped") else "FAIL")
+        print(
+            f"{flag}: {slim.get('id')} kind={slim.get('kind')} "
+            f"reason={slim.get('reason')!r}"
+        )
+        print("  metric only; not critic ACCEPT and not a recipe")
+    except Exception as exc:
+        logger.warning("I5 restored metric failed: %s", exc)
+        metrics.i5 = {
+            "ok": False,
+            "skipped": True,
+            "kind": "error",
+            "reason": str(exc),
+            "not_compile_gate": True,
+            "not_recipe_source": True,
+        }
+    metrics.mark_stage("i5", t0)
+
+
 def _corpus_cases() -> List[Any]:
     try:
         from src.analysis.corpus import load_corpus
@@ -382,7 +448,7 @@ def run(config: AppConfig) -> int:
         if config.use_llm:
             from src.agents.assembler import assemble, user_emit_order
             from src.agents.restorer import CodeRestorerLLM
-            from src.analysis.fidelity import check_function
+            from src.analysis.fidelity import check_function, should_skip_polish
             from src.llm.client import OllamaClient
 
             client = OllamaClient(
@@ -640,7 +706,7 @@ def run(config: AppConfig) -> int:
                             entry["ghidra_code"] = src["ghidra_code"]
                         fid_v2 = check_function(entry, v2_code, call_tokens)
 
-                        if fid_v2["fidelity"] >= 0.95:
+                        if should_skip_polish(fid_v2, v2_code):
                             logger.info(
                                 "Skipping polish for %s: fidelity already %.3f",
                                 addr, fid_v2["fidelity"],
@@ -931,6 +997,8 @@ def run(config: AppConfig) -> int:
                 )
                 for reason in verdict.reasons[:8]:
                     print(f"  {reason}")
+
+                _record_i5_metric(metrics, run_dir, source_cpp, binary_path)
 
     except Exception:
         logger.exception("Pipeline failed")

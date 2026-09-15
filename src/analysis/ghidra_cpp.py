@@ -727,6 +727,19 @@ _RE_STACK_ADDR_ASSIGN = re.compile(
 _RE_STACK_PTR_ASSIGN = re.compile(
     r"\b(padding|auStack\w*|local_[0-9A-Fa-f]+)\s*\[[^\]]+\]\s*=\s*(\1\s*\+[^;]+)"
 )
+_RE_STACK_OVERLAY = re.compile(
+    r"\b((?:auStack\w*|padding|local_[0-9A-Fa-f]+))\._(\d+)_(\d+)_"
+)
+_OVERLAY_TYPE = {
+    "1": "undefined1",
+    "2": "undefined2",
+    "3": "undefined3",
+    "4": "undefined4",
+    "5": "undefined5",
+    "6": "undefined6",
+    "7": "undefined7",
+    "8": "undefined8",
+}
 
 
 def _rewrite_duration_cast(code: str) -> str:
@@ -1023,6 +1036,17 @@ def readable_in_stack_name(hexpart: str) -> str:
 
 def _rewrite_in_stack_temps(chunk: str) -> str:
     return _RE_IN_STACK.sub(lambda m: readable_in_stack_name(m.group(1)), chunk or "")
+
+
+def _rewrite_stack_overlay(chunk: str) -> str:
+    """Ghidra ``auStack._off_width_`` overlay on ``undefined1[N]`` → byte offset."""
+
+    def repl(m: re.Match[str]) -> str:
+        name, off, wid = m.group(1), m.group(2), m.group(3)
+        ty = _OVERLAY_TYPE.get(wid, "undefined8")
+        return f"(*({ty} *)((char *)({name}) + {off}))"
+
+    return _RE_STACK_OVERLAY.sub(repl, chunk or "")
 
 
 # Ghidra Help (Decompiler Concepts) + typeop.cc print names. Not a per-sample
@@ -1528,6 +1552,7 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _RE_STL_PRIV_FIELD.sub("", t)
     t = _RE_STACK_ADDR_ASSIGN.sub(r"(void)&", t)
     t = _RE_STACK_PTR_ASSIGN.sub(r"(void)(\2)", t)
+    t = _outside_strings(t, _rewrite_stack_overlay)
     t = _outside_strings(t, _rewrite_in_stack_temps)
     t = _outside_strings(t, _strip_compiler_instrumentation)
     t = _outside_strings(t, _rewrite_ghidra_piece_ops)

@@ -3,8 +3,10 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Set, Tuple
 
+from src.analysis.pcode import entry_pcode, op_lines
 from src.analysis.platform import (
     CRT_NAMES, STDIO_NAMES, is_system_dll, is_user_literal,
+    looks_like_user_restore_name,
 )
 
 
@@ -86,6 +88,16 @@ def extract_features(index: FeatureIndex, f: Dict[str, Any]) -> Dict[str, Any]:
     thunk_callees = [
         c for c in callees if index.name_by_addr.get(c, "").startswith("thunk_")
     ]
+    n_user_callees = sum(
+        1
+        for c in callees
+        if looks_like_user_restore_name(index.name_by_addr.get(c, "") or "")
+    )
+    n_ctrl = len(re.findall(r"\b(?:if|while|for|switch)\b", code))
+    n_stack_dialect = len(re.findall(
+        r"\b(?:in_stk_|in_stack_|auStack|param_\d+)\b|_\d+_\d+_",
+        code,
+    ))
 
     return {
         "address": f.get("address"),
@@ -115,6 +127,12 @@ def extract_features(index: FeatureIndex, f: Dict[str, Any]) -> Dict[str, Any]:
         "n_callers": len(index.callers.get(f.get("address"), [])),
         "literals": literals[:8],
         "domain_dlls": sorted({d for d in dlls if d and not is_system_dll(d)})[:4],
+        # I6 offline only. Live FEATURE_KEYS stays 22.
+        "n_code_chars": min(len(code), 100_000),
+        "n_pcode_ops": len(op_lines(entry_pcode(f))),
+        "n_stack_dialect": n_stack_dialect,
+        "n_ctrl": n_ctrl,
+        "n_user_callees": n_user_callees,
     }
 
 FEATURE_KEYS = (
@@ -124,6 +142,15 @@ FEATURE_KEYS = (
     "is_crt_name", "is_stl_name", "is_lib_name",
     "hot_callers", "hot_callees",
     "own_hot", "hot_caller_ratio",
+)
+
+# Offline I6. Not wired into runner / train_scorer until L1O addr recall wins.
+FEATURE_KEYS_V2 = FEATURE_KEYS + (
+    "n_code_chars",
+    "n_pcode_ops",
+    "n_stack_dialect",
+    "n_ctrl",
+    "n_user_callees",
 )
 
 

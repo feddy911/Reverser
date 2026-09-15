@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -40,6 +40,7 @@ class RunMetrics:
     compiler_proposals: int = 0
     critic_accept: bool = True
     critic_reject: int = 0
+    i5: Optional[Dict[str, Any]] = None
 
     def mark_stage(self, name: str, started_at: float) -> None:
         self.stages_sec[name] = round(time.perf_counter() - started_at, 3)
@@ -61,7 +62,7 @@ class RunMetrics:
                 }
             )
         llm_total = max(1, self.llm_attempted)
-        return {
+        out: Dict[str, Any] = {
             "domain_pack": self.domain_pack,
             "triage_profile": self.triage_profile,
             "scoring_mode": self.scoring_mode,
@@ -103,6 +104,9 @@ class RunMetrics:
             },
             "runtime_filtered": self.runtime_filtered,
         }
+        if self.i5 is not None:
+            out["i5"] = dict(self.i5)
+        return out
 
     def summary_lines(self) -> List[str]:
         d = self.to_dict()
@@ -157,5 +161,11 @@ class RunMetrics:
         if crit.get("reject") or crit.get("accept") is False:
             lines.append(
                 f"  critic: accept={crit.get('accept')} reject={crit.get('reject', 0)}"
+            )
+        i5 = d.get("i5") or {}
+        if i5:
+            lines.append(
+                f"  i5: {i5.get('id')} kind={i5.get('kind')} ok={i5.get('ok')} "
+                f"reason={i5.get('reason')!r}"
             )
         return lines

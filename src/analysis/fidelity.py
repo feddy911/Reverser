@@ -4,7 +4,11 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from src.analysis.platform import is_noise_call, is_noise_constant
+from src.analysis.platform import (
+    is_noise_call,
+    is_noise_constant,
+    looks_like_user_restore_name,
+)
 
 NUM_RE = re.compile(r"\b(?:0x[0-9a-fA-F]{3,}|[1-9][0-9]{2,})\b")
 GMP_PREFIX_RE = re.compile(r"^_+g?mpz_")
@@ -37,6 +41,82 @@ def _call_base(name: str) -> str:
 
 def _is_range_for_method(name: str) -> bool:
     return _call_base(name) in _RANGE_FOR_METHODS
+
+
+# Short STL methods: substring "size" hits size_t; "begin" hits __for_begin.
+_CALL_SHAPE_METHODS = frozenset({
+    "size", "begin", "end", "cbegin", "cend", "rbegin", "rend",
+    "empty", "compare", "push_back", "pop_back", "emplace_back",
+    "clear", "data", "c_str", "front", "back", "insert", "erase",
+    "find", "substr", "append", "assign", "swap", "resize",
+    "reserve", "at", "count", "get",
+})
+_STL_TYPE_CALLEES = frozenset({
+    "vector", "string", "map", "set", "list", "deque",
+    "optional", "tuple", "pair", "unordered_map", "unordered_set",
+})
+_RE_DUMP_RESIDUE = re.compile(
+    r"\b(?:in_stk_|in_stack_|auStack|param_\d+)"
+    r"|\b(?:in_ECX|in_RDX|in_RCX)\b"
+    r"|_\d+_\d+_"
+)
+
+
+def _is_stl_type_callee(name: str) -> bool:
+    """Ghidra lists container ctors as callees; the type name is not a call."""
+    return _call_base(name) in _STL_TYPE_CALLEES
+
+
+def _ident_in_code(name: str, code: str) -> bool:
+    if not name or not code:
+        return False
+    if name.startswith("0x") or not re.match(r"^[A-Za-z_]\w*$", name):
+        return name in code
+    return bool(re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", code))
+
+
+def _call_shaped_in_code(name: str, code: str) -> bool:
+    """True if name is invoked, not a type fragment (size_t, __for_begin).
+
+    Ghidra keeps template args: emplace_back<char&>(ptr).
+    """
+    if not name or not code:
+        return False
+    targs = r"(?:<[^;()]*>)?"
+    return bool(re.search(
+        rf"(?:->|\.|::)\s*{re.escape(name)}\s*{targs}\s*\("
+        rf"|(?<![A-Za-z0-9_]){re.escape(name)}\s*{targs}\s*\(",
+        code,
+    ))
+
+
+def token_in_restore(tok: str, code: str) -> bool:
+    """Match a callee token without counting type-name false friends."""
+    if not tok or not code:
+        return False
+    base = _call_base(tok)
+    if base in _CALL_SHAPE_METHODS:
+        return _call_shaped_in_code(base, code)
+    if _ident_in_code(tok, code):
+        return True
+    return bool(base and base != tok and _ident_in_code(base, code))
+
+
+def dump_has_residue(code: str) -> bool:
+    """Ghidra stack/register dialect still in restore. Not a sample name."""
+    return bool(_RE_DUMP_RESIDUE.search(code or ""))
+
+
+def should_skip_polish(fid: Dict[str, Any], code: str) -> bool:
+    """Skip polish only when dump-facts are scored high and dialect is gone.
+
+    Unscored (empty bag) and residue are not 1.0-heaven.
+    """
+    if dump_has_residue(code):
+        return False
+    if not fid.get("scored"):
+        return False
+    return float(fid.get("fidelity") or 0) >= 0.95
 
 
 def _gmp_key(t: str) -> str:
@@ -176,10 +256,16 @@ def check_function(
         and not (skip_range and _call_base(name) == "get")
         and not (skip_duration and _is_duration_cast_callee(name))
         and not _is_stl_iterator_type_callee(name)
+        and not _is_stl_type_callee(name)
     ]
     missing_calls = [
         name for name, toks in required_calls
-        if not any(t in code for t in toks)
+        if not any(token_in_restore(t, code) for t in toks)
+    ]
+    missing_user_calls = [
+        name for name, toks in required_calls
+        if looks_like_user_restore_name(name)
+        and not any(token_in_restore(t, code) for t in toks)
     ]
 
     gconsts = _constants(entry.get("ghidra_code") or "")
@@ -198,19 +284,27 @@ def check_function(
     )
     return {
         "address": entry.get("address"),
-        "fidelity": round(1.0 - missing / total, 3) if total else 1.0,
+        "fidelity": round(1.0 - missing / total, 3) if total else 0.0,
+        "scored": bool(total),
+        "n_facts": total,
         "drift": drift,
         "missing_literals": missing_literals,
         "missing_ext": missing_ext,
         "missing_calls": missing_calls,
+        "missing_user_calls": missing_user_calls,
         "missing_consts": missing_consts[:10],
     }
 
 
 def dump_facts_ok(fid: Dict[str, Any]) -> bool:
-    """Literals and ext_calls from the dump must appear in restore.
+    """Hard dump facts must appear: literals, ext_calls, user callees.
 
-    The numeric score is not a substitute: many constants can keep
+    STL methods are soft (score/drift only). Empty bag is not a pass token.
+    Numeric score is not a substitute: many constants can keep
     fidelity >= 0.85 while a string or import is gone.
     """
-    return not (fid.get("missing_literals") or fid.get("missing_ext"))
+    return not (
+        fid.get("missing_literals")
+        or fid.get("missing_ext")
+        or fid.get("missing_user_calls")
+    )

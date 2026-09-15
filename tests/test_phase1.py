@@ -481,6 +481,26 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("in_stack_98", got)
         self.assertNotIn("in_stack_ffffffffffffff58", got)
 
+    def test_austack_overlay_slot_is_byte_offset_cast(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "undefined1 auStack_20[16];\n"
+            "undefined1 padding[32];\n"
+            "undefined1 local_a0[8];\n"
+            "auStack_20._8_8_ = 1;\n"
+            "padding._0_4_ = 2;\n"
+            "local_a0._2_2_ = 3;\n"
+            "hold._80_12_ = 0;\n"
+        )
+        self.assertIn("(*(undefined8 *)((char *)(auStack_20) + 8))", got)
+        self.assertIn("(*(undefined4 *)((char *)(padding) + 0))", got)
+        self.assertIn("(*(undefined2 *)((char *)(local_a0) + 2))", got)
+        self.assertNotIn("._8_8_", got)
+        self.assertIn("hold._80_12_", got)
+        lit = sanitize_ghidra_cpp('const char *s = "auStack_20._8_8_";\n')
+        self.assertIn("auStack_20._8_8_", lit)
+
     def test_ghidra_piece_ops_expand_to_cpp(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 

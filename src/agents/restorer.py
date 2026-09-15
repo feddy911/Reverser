@@ -561,7 +561,7 @@ class CodeRestorerLLM:
         )
         fidelity = check_function(entry, data.get("cpp_code", ""), call_tokens)
 
-        if fidelity["fidelity"] >= 0.85:
+        if not fidelity.get("scored") or float(fidelity.get("fidelity") or 0) >= 0.85:
             return data
 
         logger.info(
@@ -639,7 +639,11 @@ class CodeRestorerLLM:
             attempt += 1
 
         n_extra = max(1, int(best_of)) - 1
-        while n_extra > 0 and fidelity["fidelity"] < 0.85:
+        while (
+            n_extra > 0
+            and fidelity.get("scored")
+            and float(fidelity.get("fidelity") or 0) < 0.85
+        ):
             n_extra -= 1
             alt = self.restore(entry, ghidra_code)
             if not alt:

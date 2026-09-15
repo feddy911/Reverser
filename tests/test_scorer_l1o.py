@@ -10,10 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.analysis.features import FEATURE_KEYS
+from src.analysis.features import FEATURE_KEYS, FEATURE_KEYS_V2
 from src.analysis.eval_scorer_l1o import (
     MODEL_ORDER,
     assert_scoring_features,
+    assert_scoring_features_v2,
     load_binary,
     run_l1o,
     run_manifest,
@@ -43,6 +44,54 @@ class TestScorerL1O(unittest.TestCase):
         self.assertNotIn("compile_verify", src)
         self.assertNotIn("match_errors", src)
 
+    def test_feature_keys_v2_offline_not_live(self):
+        from src.analysis.pcode import PCODE_KEY
+        from src.pipeline.runner import LLM_PROMPT_VER, GHIDRA_CACHE_KEY
+
+        assert_scoring_features_v2()
+        self.assertEqual(len(FEATURE_KEYS), 22)
+        self.assertEqual(FEATURE_KEYS_V2[:22], FEATURE_KEYS)
+        self.assertGreater(len(FEATURE_KEYS_V2), 22)
+        blob = " ".join(FEATURE_KEYS_V2).lower()
+        self.assertNotIn("gcc", blob)
+        self.assertNotIn(PCODE_KEY, FEATURE_KEYS_V2)
+        self.assertIn("n_pcode_ops", FEATURE_KEYS_V2)
+        self.assertEqual(LLM_PROMPT_VER, "p4")
+        self.assertEqual(GHIDRA_CACHE_KEY, "ghidra_full_v6")
+        runner = (ROOT / "src" / "pipeline" / "runner.py").read_text(encoding="utf-8")
+        self.assertNotIn("FEATURE_KEYS_V2", runner)
+        train = (ROOT / "src" / "analysis" / "train_scorer.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("FEATURE_KEYS_V2", train)
+
+    def test_l1o_v2_rebuilds_x_without_changing_live_keys(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            a = td_path / "a.json"
+            b = td_path / "b.json"
+            a.write_bytes(FIXTURE.read_bytes())
+            _alt_dump(FIXTURE, b, "FUN_140001000", "parse_ini")
+            packs = [
+                load_binary("mini_a", a, ["FUN_140001000"]),
+                load_binary("mini_b", b, ["parse_ini"]),
+            ]
+            self.assertEqual(packs[0].X.shape[1], 22)
+            self.assertIn("n_pcode_ops", packs[0].scored[0])
+            report = run_l1o(packs, top_k=15, keys=FEATURE_KEYS_V2)
+            self.assertEqual(report["keyset"], "v2")
+            self.assertEqual(report["feature_keys"], list(FEATURE_KEYS_V2))
+            self.assertEqual(packs[0].X.shape[1], len(FEATURE_KEYS_V2))
+            live = run_l1o(packs, top_k=15)
+            self.assertEqual(live["keyset"], "live")
+            self.assertEqual(live["n_feature_keys"], 22)
+            self.assertEqual(live["feature_keys"], list(FEATURE_KEYS))
+            self.assertEqual(packs[0].X.shape[1], 22)
+            for fold in report["folds"]:
+                dtree = fold["models"]["dtree"]
+                self.assertNotIn("error", dtree)
+                self.assertGreaterEqual(dtree["recall_at_k_names_filtered"], 1.0)
+
     def test_l1o_two_minis_all_models(self):
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
@@ -56,6 +105,7 @@ class TestScorerL1O(unittest.TestCase):
             ]
             report = run_l1o(packs, top_k=15)
             self.assertTrue(report["not_compile_gate"])
+            self.assertEqual(report["keyset"], "live")
             self.assertEqual(report["feature_keys"], list(FEATURE_KEYS))
             self.assertEqual(report["n_binaries"], 2)
             names = {row["name"] for row in report["table"]}

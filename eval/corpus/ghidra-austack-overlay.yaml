@@ -1,0 +1,27 @@
+id: ghidra-austack-overlay
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "request for member '_\\d+_\\d+_' in '(?:auStack\\w*|padding|local_[0-9A-Fa-f]+)'"
+gcc_probe:
+  - "request for member '_8_8_' in 'auStack_20', which is of non-class type 'undefined1 [16]'"
+ghidra_cpp: |
+  int overlay_slot(void)
+  {
+    undefined1 auStack_20[16];
+    undefined1 padding[32];
+    undefined1 local_a0[8];
+    auStack_20._8_8_ = 1;
+    padding._0_4_ = 2;
+    local_a0._2_2_ = 3;
+    return (int)auStack_20._8_8_;
+  }
+contains:
+  - "(*(undefined8 *)((char *)(auStack_20) + 8))"
+  - "(*(undefined4 *)((char *)(padding) + 0))"
+  - "(*(undefined2 *)((char *)(local_a0) + 2))"
+not_contains:
+  - "._8_8_"
+  - "._0_4_"
+  - "._2_2_"
+compile: true
+notes: "Ghidra overlays a typed slot on undefined1[N] as name._off_width_; rewrite to a byte-offset cast. Mix of auStack/padding/local hex. Not a sample name."

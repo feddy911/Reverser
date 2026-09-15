@@ -57,7 +57,6 @@ _NOISE_CALL_EXACT = {
     "_RTC_Shutdown",
     "DebuggerProbe",
     "DebuggerRuntime",
-    "compare",
     "__main",
     "__mingw_printf",
 }
@@ -116,7 +115,7 @@ _RUNTIME_NOISE_EXACT = {
     "__main", "fprintf", "vfprintf", "printf", "sprintf",
     "memcpy", "memset", "malloc", "free", "exit", "abort",
     "cpp_unhandled_exception_filter",
-    # demangled STL/container methods (EchoFilter leftover in LLM top)
+    # demangled one-word STL/container methods (not user restore names)
     "compare", "back", "front", "end", "begin", "size", "empty",
     "clear", "data", "c_str", "reserve", "resize", "push_back",
     "pop_back", "insert", "erase", "swap", "assign", "append", "allocate",
