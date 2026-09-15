@@ -1,0 +1,17 @@
+id: msvc-jmc-helper-undeclared
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "'checkForDebuggerJustMyCode' was not declared in this scope"
+gcc_probe:
+  - "'checkForDebuggerJustMyCode' was not declared in this scope"
+ghidra_cpp: |
+  void go(void)
+  {
+    checkForDebuggerJustMyCode();
+  }
+contains:
+  - "checkForDebuggerJustMyCode()"
+not_contains:
+  - "void checkForDebuggerJustMyCode"
+compile: false
+notes: "MSVC /JMC helper leaks into Ghidra dumps; do not invent a stub. Mix, not a sample name."

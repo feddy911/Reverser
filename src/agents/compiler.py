@@ -63,7 +63,8 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "opaque iterator vs vector const_iterator",
     ),
     (
-        r"invalid conversion from '(?:longlong|undefined8)' .+ to 'mpz_(?:ptr|srcptr)'",
+        r"invalid conversion from '(?:longlong|undefined8|long long unsigned int|"
+        r"unsigned long long)'(?: \{aka '[^']+'\})? to 'mpz_(?:ptr|srcptr)'",
         "ghidra word vs mpz_ptr",
     ),
     (
@@ -95,7 +96,7 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "const void* vs pointer",
     ),
     (
-        r"'(?:p[bcilus]Var\d+|var_\d+|local_\d+|in_stk_n?\d+|"
+        r"'(?:p[bcilus]Var\d+|var_\d+|local_\d+|param_\d+|in_stk_n?\d+|"
         r"in_stack_[0-9A-Fa-f]+|in_RCX|in_RDX|"
         r"in_R8D|in_R9D|in_RAX|in_R8|in_R9)' was not declared in this scope",
         "undeclared ghidra temp",
@@ -115,6 +116,50 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
     (
         r"cannot convert 'std::vector<.*\*' to '[A-Z][A-Za-z0-9_]*\*'",
         "vector* vs user struct*",
+    ),
+    (
+        r"cannot convert '.*value_type' \{aka '[^']+'\} to '[A-Z][A-Za-z0-9_]*\*'",
+        "value_type T vs T*",
+    ),
+    (
+        r"invalid initialization of (?:non-const )?reference of type '[^']+'"
+        r"(?: \{aka '[^']+'\})? from expression of type '[^']+\*'",
+        "T* vs T&",
+    ),
+    (
+        r"invalid conversion from 'const std::(?:string|__cxx11::basic_string<char>)\*'"
+        r"(?: \{aka '[^']+'\})? to 'std::string\*'",
+        "const string* vs string*",
+    ),
+    (
+        r"invalid conversion from 'int' to 'mpfr_rnd_t'",
+        "int vs mpfr_rnd_t",
+    ),
+    (
+        r"invalid conversion from '(?:undefined8|longlong|long long unsigned int)'"
+        r"(?: \{aka '[^']+'\})? to 'char\*'",
+        "word vs char*",
+    ),
+    (
+        r"invalid conversion from 'undefined\d*'(?: \{aka '[^']+'\})? to 'undefined\d*\*'",
+        "undefined vs undefined*",
+    ),
+    (
+        r"invalid conversion from 'unsigned char\*' to 'char\*'",
+        "unsigned char* vs char*",
+    ),
+    (
+        r"invalid conversion from 'std::vector<.+>::size_type'"
+        r"(?: \{aka '[^']+'\})? to 'std::vector<.+>\*'",
+        "size_type vs vector*",
+    ),
+    (
+        r"'value_type' is not a member of '[A-Z][A-Za-z0-9_]*'",
+        "value_type not a member of T",
+    ),
+    (
+        r"'checkForDebuggerJustMyCode' was not declared in this scope",
+        "MSVC JMC helper",
     ),
     (
         r"base operand of '->' has non-pointer type '.*value_type' \{aka 'std::pair",
@@ -148,6 +193,8 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
     (
         r"iterator_traits<ghidra_word>|iterator_category.*ghidra_word|"
         r"cannot convert 'ghidra_word\*' to 'std::vector<|"
+        r"cannot convert 'ghidra_word\*' to '(?:const )?char\*|"
+        r"invalid cast from type 'ghidra_word' to type '(?:const )?char\*|"
         r"no match for call to '\(ghidra_word\) \(\)'|"
         r"'using value_type = struct ghidra_word' \{aka 'struct ghidra_word'\} "
         r"has no member named|"
@@ -161,7 +208,7 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "user struct* vs mpfr_ptr",
     ),
     (
-        r"'int [A-Za-z_]\w*' redeclared as different kind of entity",
+        r"'[A-Za-z_]\w*(?: [A-Za-z_]\w*)*' redeclared as different kind of entity",
         "ident redeclared as different kind",
     ),
     (

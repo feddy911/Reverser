@@ -1,0 +1,17 @@
+id: ghidra-int-as-mpfr-rnd
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "invalid conversion from 'int' to 'mpfr_rnd_t'"
+gcc_probe:
+  - "invalid conversion from 'int' to 'mpfr_rnd_t' [-fpermissive]"
+ghidra_cpp: |
+  void g1(mpfr_ptr out, mpfr_srcptr in)
+  {
+    mpfr_gamma(out, in, 0);
+  }
+contains:
+  - "mpfr_gamma(out, in, 0)"
+not_contains:
+  - "MPFR_RND"
+compile: false
+notes: "Ghidra passes a literal 0 where mpfr wants mpfr_rnd_t; do not invent MPFR_RNDN. Mix, not a sample name."

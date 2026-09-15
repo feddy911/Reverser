@@ -107,12 +107,18 @@ def dump_has_residue(code: str) -> bool:
     return bool(_RE_DUMP_RESIDUE.search(code or ""))
 
 
-def should_skip_polish(fid: Dict[str, Any], code: str) -> bool:
-    """Skip polish only when dump-facts are scored high and dialect is gone.
+def should_skip_polish(
+    fid: Dict[str, Any],
+    code: str,
+    *,
+    compile_ok: Optional[bool] = None,
+) -> bool:
+    """Skip polish when dump-facts are scored high and the body already compiles.
 
-    Unscored (empty bag) and residue are not 1.0-heaven.
+    Residue forces polish only if per-fn syntax failed or is unknown.
+    Unscored (empty bag) is not 1.0-heaven.
     """
-    if dump_has_residue(code):
+    if dump_has_residue(code) and compile_ok is not True:
         return False
     if not fid.get("scored"):
         return False
@@ -303,6 +309,8 @@ def dump_facts_ok(fid: Dict[str, Any]) -> bool:
     Numeric score is not a substitute: many constants can keep
     fidelity >= 0.85 while a string or import is gone.
     """
+    if not fid.get("scored"):
+        return False
     return not (
         fid.get("missing_literals")
         or fid.get("missing_ext")

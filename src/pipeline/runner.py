@@ -706,7 +706,11 @@ def run(config: AppConfig) -> int:
                             entry["ghidra_code"] = src["ghidra_code"]
                         fid_v2 = check_function(entry, v2_code, call_tokens)
 
-                        if should_skip_polish(fid_v2, v2_code):
+                        if should_skip_polish(
+                            fid_v2,
+                            v2_code,
+                            compile_ok=r.get("compile_ok"),
+                        ):
                             logger.info(
                                 "Skipping polish for %s: fidelity already %.3f",
                                 addr, fid_v2["fidelity"],

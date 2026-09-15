@@ -878,6 +878,7 @@ def rewrite_ghidra_ostream(code: str) -> str:
         i = copied
     out.append(s[copied:])
     s = _rewrite_std_free_lshift("".join(out))
+    s = _rewrite_unqualified_ostream_ptr_lshift(s)
     s = _wrap_ostream_lshift_assign(s)
     s = _RE_OSTREAM_ARRAY.sub(r"undefined1 \1\2", s)
     return s
@@ -947,6 +948,64 @@ def _rewrite_free_lshift_needle(s: str, needle: str) -> str:
         i = copied
     out.append(s[copied:])
     return "".join(out)
+
+
+def _rewrite_unqualified_ostream_ptr_lshift(s: str) -> str:
+    """Ghidra `operator<<((ostream *&)os, x)` without std:: / Type:: prefix."""
+    needle = "operator<<"
+    n = len(s)
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while True:
+        k = s.find(needle, i)
+        if k < 0:
+            break
+        if k >= 2 and s[k - 2:k] == "::":
+            i = k + 2
+            continue
+        t = k + len(needle)
+        while t < n and s[t] in " \t\n\r":
+            t += 1
+        if t < n and s[t] == "_":
+            i = k + 2
+            continue
+        if t < n and s[t] == "<":
+            i = k + 2
+            continue
+        if t >= n or s[t] != "(":
+            i = k + 2
+            continue
+        close_p = _match_forward(s, t, "(", ")")
+        if close_p < 0:
+            i = k + 2
+            continue
+        args = _split_top_args(s[t + 1:close_p])
+        if len(args) != 2:
+            i = k + 2
+            continue
+        a0 = args[0]
+        if "ostream" not in a0 or "*" not in a0:
+            i = k + 2
+            continue
+        this = _ostream_ptr_this(a0)
+        out.append(s[copied:k])
+        out.append(f"(&((*({this})) << ({args[1]})))")
+        copied = close_p + 1
+        i = copied
+    out.append(s[copied:])
+    return "".join(out)
+
+
+_RE_OSTREAM_PTR_THIS = re.compile(
+    r"^\(\s*(?:std::)?(?:basic_)?w?ostream(?:\s*<[^>]*>)?\s*\*&?\s*\)\s*"
+    r"([A-Za-z_]\w*)\s*$"
+)
+
+
+def _ostream_ptr_this(arg: str) -> str:
+    m = _RE_OSTREAM_PTR_THIS.match((arg or "").strip())
+    return m.group(1) if m else arg
 
 
 _RE_OSTREAM_LSHIFT_ASSIGN = re.compile(

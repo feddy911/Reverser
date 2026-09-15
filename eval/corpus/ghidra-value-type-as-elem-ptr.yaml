@@ -1,0 +1,18 @@
+id: ghidra-value-type-as-elem-ptr
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "cannot convert '.*value_type' \\{aka '[^']+'\\} to '[A-Z][A-Za-z0-9_]*\\*'"
+gcc_probe:
+  - "cannot convert '__gnu_cxx::__alloc_traits<std::allocator<Item>, Item>::value_type' {aka 'Item'} to 'Item*'"
+ghidra_cpp: |
+  struct Item { int x; };
+  void take_item(Item **dst, vector<Item> *xs)
+  {
+    *dst = (*xs)[0];
+  }
+contains:
+  - "*dst = (*xs)[0]"
+not_contains:
+  - "&(*xs)[0]"
+compile: false
+notes: "Ghidra stores vector operator[] T in a T* slot; do not invent &elem. Mix Item, not a sample name."

@@ -100,6 +100,47 @@ class TestCorpusEval(unittest.TestCase):
         self.assertTrue(any("_M_current" in p for p in probes))
         self.assertTrue(all("is protected" in p or "was not declared" in p for p in probes))
 
+    def test_value_type_mix_fixture_is_loaded(self):
+        cases = {c.id: c for c in load_corpus()}
+        case = cases["ghidra-value-type-as-elem-ptr"]
+        self.assertFalse(case.compile)
+        self.assertEqual(case.recipe, "sanitize")
+        self.assertIn("Item", "\n".join(case.gcc_probe))
+        self.assertNotIn("Point", case.ghidra_cpp)
+        self.assertNotIn("PointCloud", case.ghidra_cpp)
+
+    def test_word_star_and_vector_ref_mix_fixtures_are_loaded(self):
+        cases = {c.id: c for c in load_corpus()}
+        word = cases["ghidra-word-star-as-cstr"]
+        self.assertFalse(word.compile)
+        self.assertIn("ghidra_word", word.ghidra_cpp)
+        self.assertNotIn("PointCloud", word.ghidra_cpp)
+        vec = cases["ghidra-vector-star-as-const-ref"]
+        self.assertFalse(vec.compile)
+        self.assertIn("Item", vec.ghidra_cpp)
+        self.assertNotIn("PointCloud", vec.ghidra_cpp)
+
+    def test_evening_mix_fixtures_have_no_sample_stems(self):
+        cases = {c.id: c for c in load_corpus()}
+        for cid in (
+            "ghidra-word-cast-as-cstr",
+            "ghidra-string-star-as-const-ref",
+            "ghidra-const-string-star-as-string-star",
+            "ghidra-int-as-mpfr-rnd",
+            "ghidra-ostream-star-ref-shift",
+            "ghidra-word-as-char-star",
+            "ghidra-undefined-as-undefined-star",
+            "ghidra-uchar-star-as-char-star",
+            "ghidra-size-type-as-vector-star",
+            "ghidra-value-type-not-member-of-user",
+            "msvc-jmc-helper-undeclared",
+        ):
+            blob = cases[cid].ghidra_cpp
+            self.assertNotIn("PointCloud", blob, cid)
+            self.assertNotIn("XorCipher", blob, cid)
+            self.assertNotIn("MyCollatz", blob, cid)
+            self.assertNotIn("GammaFn", blob, cid)
+
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):
     def test_restore_body_and_cache_stay_put(self):

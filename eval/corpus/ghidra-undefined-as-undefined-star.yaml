@@ -1,0 +1,17 @@
+id: ghidra-undefined-as-undefined-star
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "invalid conversion from 'undefined\\d*'(?: \\{aka '[^']+'\\})? to 'undefined\\d*\\*'"
+gcc_probe:
+  - "invalid conversion from 'undefined1' {aka 'unsigned char'} to 'undefined1*' {aka 'unsigned char*'} [-fpermissive]"
+ghidra_cpp: |
+  void take_b(undefined1 v, undefined1 **dst)
+  {
+    *dst = v;
+  }
+contains:
+  - "*dst = v"
+not_contains:
+  - "&v"
+compile: false
+notes: "Ghidra stores an undefined byte in an undefined* slot; do not invent &v. Mix, not a sample name."

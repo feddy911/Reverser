@@ -737,14 +737,16 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertEqual(rep["missing_calls"], [])
 
     def test_empty_fact_bag_is_not_perfect(self):
-        from src.analysis.fidelity import check_function, should_skip_polish
+        from src.analysis.fidelity import check_function, dump_facts_ok, should_skip_polish
 
         entry = {"address": "0x1", "literals": [], "ext_calls": [], "ghidra_code": ""}
         code = "int f(){ return 1; }"
         rep = check_function(entry, code, [])
         self.assertFalse(rep["scored"])
         self.assertEqual(rep["fidelity"], 0.0)
+        self.assertFalse(dump_facts_ok(rep))
         self.assertFalse(should_skip_polish(rep, code))
+        self.assertFalse(should_skip_polish(rep, code, compile_ok=True))
 
     def test_missing_user_callee_fails_dump_facts(self):
         from src.analysis.fidelity import check_function, dump_facts_ok
@@ -766,10 +768,12 @@ class TestFidelitySmoke(unittest.TestCase):
         from src.analysis.fidelity import should_skip_polish
 
         fid = {"fidelity": 1.0, "scored": True}
-        self.assertFalse(should_skip_polish(fid, "int main(){ in_stk_n8 = 0; }"))
+        residue = "int main(){ in_stk_n8 = 0; }"
+        self.assertFalse(should_skip_polish(fid, residue))
         self.assertFalse(
             should_skip_polish(fid, "undefined1 auStack_20[16]; auStack_20._8_8_ = 1;")
         )
+        self.assertTrue(should_skip_polish(fid, residue, compile_ok=True))
         self.assertTrue(should_skip_polish(fid, "int main(){ return 0; }"))
 
     def test_keep_dump_literals_comments_missing(self):

@@ -1,0 +1,19 @@
+id: ghidra-word-star-as-cstr
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "cannot convert 'ghidra_word\\*' to '(?:const )?char\\*'"
+gcc_probe:
+  - "cannot convert 'ghidra_word*' to 'const char*' in assignment"
+  - "cannot convert 'ghidra_word*' to 'char*' in assignment"
+ghidra_cpp: |
+  void say_wp(ghidra_word *w)
+  {
+    const char *p;
+    p = w;
+  }
+contains:
+  - "p = w"
+not_contains:
+  - "c_str"
+compile: false
+notes: "Ghidra stores a dummy word* in a C-string slot; do not invent c_str. Mix, not a sample name."

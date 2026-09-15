@@ -1,0 +1,18 @@
+id: ghidra-word-cast-as-cstr
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "invalid cast from type 'ghidra_word' to type '(?:const )?char\\*'"
+gcc_probe:
+  - "invalid cast from type 'ghidra_word' to type 'const char*'"
+ghidra_cpp: |
+  void say_w(ghidra_word w)
+  {
+    const char *p;
+    p = reinterpret_cast<const char *>(w);
+  }
+contains:
+  - "reinterpret_cast<const char *>(w)"
+not_contains:
+  - "c_str"
+compile: false
+notes: "Dummy word reinterpreted as a C-string; do not invent c_str. Mix, not a sample name."

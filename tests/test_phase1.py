@@ -501,6 +501,72 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         lit = sanitize_ghidra_cpp('const char *s = "auStack_20._8_8_";\n')
         self.assertIn("auStack_20._8_8_", lit)
 
+    def test_value_type_elem_ptr_is_not_ampersand_invent(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "struct Item { int x; };\n"
+            "void take_item(Item **dst, vector<Item> *xs)\n"
+            "{\n"
+            "  *dst = (*xs)[0];\n"
+            "}\n"
+        )
+        self.assertIn("*dst = (*xs)[0]", got)
+        self.assertNotIn("&(*xs)[0]", got)
+        self.assertNotIn("&xs[0]", got)
+
+    def test_word_star_cstr_slot_is_not_cstr_invent(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "void say_wp(ghidra_word *w)\n"
+            "{\n"
+            "  const char *p;\n"
+            "  p = w;\n"
+            "}\n"
+        )
+        self.assertIn("p = w", got)
+        self.assertNotIn("c_str", got)
+
+    def test_vector_star_const_ref_is_not_deref_invent(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "struct Item { int x; };\n"
+            "void take_xs(vector<Item> *xs)\n"
+            "{\n"
+            "  const vector<Item> &ref = xs;\n"
+            "  (void)ref;\n"
+            "}\n"
+        )
+        self.assertIn("&ref = xs", got)
+        self.assertNotIn("&ref = *xs", got)
+
+    def test_unqualified_ostream_star_ref_becomes_insert(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "void report_n(ostream *os, ulonglong n)\n"
+            "{\n"
+            "  operator<<((ostream *&)os, n);\n"
+            "}\n"
+        )
+        self.assertIn("<< (", got)
+        self.assertNotIn("operator<<((", got)
+        self.assertIn("*(os)", got)
+
+    def test_undefined_byte_slot_is_not_ampersand_invent(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "void take_b(undefined1 v, undefined1 **dst)\n"
+            "{\n"
+            "  *dst = v;\n"
+            "}\n"
+        )
+        self.assertIn("*dst = v", got)
+        self.assertNotIn("&v", got)
+
     def test_ghidra_piece_ops_expand_to_cpp(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 

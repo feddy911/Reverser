@@ -1,0 +1,20 @@
+id: ghidra-vector-star-as-const-ref
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "invalid initialization of reference of type '(?:const )?std::vector<.+>&' from expression of type 'std::vector<.+>\\*'"
+gcc_probe:
+  - "invalid initialization of reference of type 'const std::vector<Item>&' from expression of type 'std::vector<Item>*'"
+  - "invalid initialization of reference of type 'std::vector<Item>&' from expression of type 'std::vector<Item>*'"
+ghidra_cpp: |
+  struct Item { int x; };
+  void take_xs(vector<Item> *xs)
+  {
+    const vector<Item> &ref = xs;
+    (void)ref;
+  }
+contains:
+  - "&ref = xs"
+not_contains:
+  - "&ref = *xs"
+compile: false
+notes: "Ghidra types a vector* where a vector& slot is declared; do not invent *xs. Mix Item, not a sample name."

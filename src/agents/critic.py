@@ -270,6 +270,8 @@ def review_function(
     fidelity_ok = bool(facts_ok and score_ok)
     reasons = list(ident_reasons)
     if not facts_ok:
+        if not fid.get("scored"):
+            reasons.append("empty dump-fact bag (unscored)")
         if fid.get("missing_literals"):
             reasons.append(
                 "missing literals: "

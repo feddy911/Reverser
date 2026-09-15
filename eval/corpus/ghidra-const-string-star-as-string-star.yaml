@@ -1,0 +1,18 @@
+id: ghidra-const-string-star-as-string-star
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "invalid conversion from 'const std::(?:string|__cxx11::basic_string<char>)\\*'(?: \\{aka '[^']+'\\})? to 'std::string\\*'"
+gcc_probe:
+  - "invalid conversion from 'const std::string*' {aka 'const std::__cxx11::basic_string<char>*'} to 'std::string*' {aka 'std::__cxx11::basic_string<char>*'} [-fpermissive]"
+  - "invalid conversion from 'const std::__cxx11::basic_string<char>*' to 'std::string*' {aka 'std::__cxx11::basic_string<char>*'} [-fpermissive]"
+ghidra_cpp: |
+  void take_s(const string *src, string **dst)
+  {
+    *dst = src;
+  }
+contains:
+  - "*dst = src"
+not_contains:
+  - "const_cast"
+compile: false
+notes: "Ghidra assigns const string* into a string* slot; do not invent const_cast. Mix, not a sample name."

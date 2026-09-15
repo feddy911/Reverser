@@ -206,6 +206,17 @@ class TestCompilerAgent(unittest.TestCase):
         )
         self.assertFalse(decision.need_llm)
         self.assertIn("ghidra word vs mpz_ptr", decision.skip_forever_reasons)
+        ull = match_errors(
+            [{
+                "message": (
+                    "invalid conversion from 'long long unsigned int' "
+                    "to 'mpz_ptr' {aka '__mpz_struct*'} [-fpermissive]"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(ull.need_llm)
+        self.assertIn("ghidra word vs mpz_ptr", ull.skip_forever_reasons)
 
     def test_skip_forever_char_star_vs_string_star(self):
         decision = match_errors(
@@ -374,6 +385,8 @@ class TestCompilerAgent(unittest.TestCase):
             "'var_10' was not declared in this scope",
             "'var_20' was not declared in this scope",
             "'local_68' was not declared in this scope",
+            "'param_2' was not declared in this scope",
+            "'param_1' was not declared in this scope",
         ):
             decision = match_errors([{"message": msg}], cases=[])
             self.assertFalse(decision.need_llm, msg)
@@ -464,6 +477,139 @@ class TestCompilerAgent(unittest.TestCase):
             self.assertFalse(decision.need_llm, dest)
             self.assertIn("vector* vs user struct*", decision.skip_forever_reasons)
 
+    def test_skip_forever_value_type_vs_elem_ptr(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "cannot convert '__gnu_cxx::__alloc_traits<std::allocator<Item>, "
+                    "Item>::value_type' {aka 'Item'} to 'Item*'"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("value_type T vs T*", decision.skip_forever_reasons)
+
+    def test_skip_forever_vector_star_vs_vector_ref(self):
+        for msg in (
+            "invalid initialization of reference of type "
+            "'const std::vector<Item>&' from expression of type "
+            "'std::vector<Item>*'",
+            "invalid initialization of reference of type "
+            "'std::vector<Item>&' from expression of type "
+            "'std::vector<Item>*'",
+        ):
+            decision = match_errors([{"message": msg}], cases=[])
+            self.assertFalse(decision.need_llm, msg)
+            self.assertIn("T* vs T&", decision.skip_forever_reasons)
+
+    def test_skip_forever_string_star_vs_string_ref(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "invalid initialization of reference of type "
+                    "'const std::string&' {aka 'const std::__cxx11::basic_string<char>&'} "
+                    "from expression of type 'std::string*' "
+                    "{aka 'std::__cxx11::basic_string<char>*'}"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("T* vs T&", decision.skip_forever_reasons)
+
+    def test_skip_forever_const_string_star_vs_string_star(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "invalid conversion from 'const std::string*' "
+                    "{aka 'const std::__cxx11::basic_string<char>*'} "
+                    "to 'std::string*' {aka 'std::__cxx11::basic_string<char>*'} "
+                    "[-fpermissive]"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("const string* vs string*", decision.skip_forever_reasons)
+
+    def test_skip_forever_int_vs_mpfr_rnd(self):
+        decision = match_errors(
+            [{"message": "invalid conversion from 'int' to 'mpfr_rnd_t' [-fpermissive]"}],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("int vs mpfr_rnd_t", decision.skip_forever_reasons)
+
+    def test_skip_forever_word_vs_char_star(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "invalid conversion from 'undefined8' "
+                    "{aka 'long long unsigned int'} to 'char*' [-fpermissive]"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("word vs char*", decision.skip_forever_reasons)
+
+    def test_skip_forever_undefined_vs_undefined_star(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "invalid conversion from 'undefined1' {aka 'unsigned char'} "
+                    "to 'undefined1*' {aka 'unsigned char*'} [-fpermissive]"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("undefined vs undefined*", decision.skip_forever_reasons)
+
+    def test_skip_forever_uchar_star_vs_char_star(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "invalid conversion from 'unsigned char*' to 'char*' "
+                    "[-fpermissive]"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("unsigned char* vs char*", decision.skip_forever_reasons)
+
+    def test_skip_forever_size_type_vs_vector_star(self):
+        decision = match_errors(
+            [{
+                "message": (
+                    "invalid conversion from 'std::vector<unsigned char>::size_type' "
+                    "{aka 'long long unsigned int'} to 'std::vector<unsigned char>*' "
+                    "[-fpermissive]"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("size_type vs vector*", decision.skip_forever_reasons)
+
+    def test_skip_forever_value_type_not_member_of_user(self):
+        decision = match_errors(
+            [{"message": "'value_type' is not a member of 'Item'"}],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("value_type not a member of T", decision.skip_forever_reasons)
+
+    def test_skip_forever_msvc_jmc_helper(self):
+        decision = match_errors(
+            [{"message": "'checkForDebuggerJustMyCode' was not declared in this scope"}],
+            cases=[],
+        )
+        self.assertFalse(decision.need_llm)
+        self.assertIn("MSVC JMC helper", decision.skip_forever_reasons)
+
     def test_skip_forever_struct_before_header_typedef(self):
         decision = match_errors(
             [{
@@ -505,6 +651,18 @@ class TestCompilerAgent(unittest.TestCase):
             (
                 "cannot convert 'ghidra_word*' to 'std::vector<int>*'",
                 "vector*",
+            ),
+            (
+                "cannot convert 'ghidra_word*' to 'const char*' in assignment",
+                "const char*",
+            ),
+            (
+                "cannot convert 'ghidra_word*' to 'char*' in assignment",
+                "char*",
+            ),
+            (
+                "invalid cast from type 'ghidra_word' to type 'const char*'",
+                "reinterpret cstr",
             ),
             (
                 "no match for 'operator+' (operand types are "
@@ -617,6 +775,12 @@ class TestCompilerAgent(unittest.TestCase):
         )
         self.assertFalse(decision.need_llm)
         self.assertIn("ident redeclared as different kind", decision.skip_forever_reasons)
+        also = match_errors(
+            [{"message": "'bool is_open' redeclared as different kind of entity"}],
+            cases=[],
+        )
+        self.assertFalse(also.need_llm)
+        self.assertIn("ident redeclared as different kind", also.skip_forever_reasons)
 
 
 class TestCritic(unittest.TestCase):
@@ -859,6 +1023,30 @@ class TestCritic(unittest.TestCase):
         self.assertFalse(director_contract(bad))
         ok = RunVerdict(accept=True, compile_ok=True, identity_ok=True, fidelity_ok=True)
         self.assertTrue(director_contract(ok))
+
+    def test_empty_fact_bag_is_not_fidelity_ok(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "walk_keys",
+            "ghidra_name": "FUN_1",
+            "name": "FUN_1",
+            "cpp_code": "int walk_keys() { return 1; }\n",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": "int FUN_1() { return 1; }",
+            "compile_ok": True,
+        }]
+        verdict = review_run(
+            restored,
+            tu_text="int walk_keys() { return 1; }",
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertFalse(verdict.fidelity_ok)
+        self.assertFalse(verdict.accept)
+        self.assertTrue(any("unscored" in r for r in verdict.reasons))
+        self.assertTrue(director_contract(verdict))
 
 
 if __name__ == "__main__":

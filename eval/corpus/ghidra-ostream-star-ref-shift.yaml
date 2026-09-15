@@ -1,0 +1,18 @@
+id: ghidra-ostream-star-ref-shift
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "no matching function for call to 'operator<<\\(std::ostream\\*&"
+gcc_probe:
+  - "no matching function for call to 'operator<<(std::ostream*&, ulonglong&)'"
+  - "no matching function for call to 'operator<<(std::ostream*&, long unsigned int&)'"
+ghidra_cpp: |
+  void report_n(ostream *os, ulonglong n)
+  {
+    operator<<((ostream *&)os, n);
+  }
+contains:
+  - "<< ("
+not_contains:
+  - "operator<<(("
+compile: true
+notes: "Ghidra calls unqualified operator<< with ostream*& this-pointer; rewrite to a stream insert. Mix, not a sample name."

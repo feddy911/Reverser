@@ -1,0 +1,17 @@
+id: ghidra-size-type-as-vector-star
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "invalid conversion from 'std::vector<.+>::size_type'(?: \\{aka '[^']+'\\})? to 'std::vector<.+>\\*'"
+gcc_probe:
+  - "invalid conversion from 'std::vector<unsigned char>::size_type' {aka 'long long unsigned int'} to 'std::vector<unsigned char>*' [-fpermissive]"
+ghidra_cpp: |
+  void take_n(vector<unsigned char> *xs, vector<unsigned char> **dst)
+  {
+    *dst = (xs)->size();
+  }
+contains:
+  - "*dst = (xs)->size()"
+not_contains:
+  - "&xs"
+compile: false
+notes: "Ghidra stores vector::size() (size_type) in a vector* slot; do not invent a pointer. Mix, not a sample name."

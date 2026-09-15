@@ -1,0 +1,18 @@
+id: ghidra-string-star-as-const-ref
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "invalid initialization of reference of type '(?:const )?std::string&'(?: \\{aka '[^']+'\\})? from expression of type 'std::string\\*'"
+gcc_probe:
+  - "invalid initialization of reference of type 'const std::string&' {aka 'const std::__cxx11::basic_string<char>&'} from expression of type 'std::string*' {aka 'std::__cxx11::basic_string<char>*'}"
+ghidra_cpp: |
+  void take_s(string *s)
+  {
+    const string &ref = s;
+    (void)ref;
+  }
+contains:
+  - "&ref = s"
+not_contains:
+  - "&ref = *s"
+compile: false
+notes: "Ghidra types a string* where a string& slot is declared; do not invent *s. Mix, not a sample name."

@@ -1,0 +1,19 @@
+id: ghidra-value-type-not-member-of-user
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "'value_type' is not a member of '[A-Z][A-Za-z0-9_]*'"
+gcc_probe:
+  - "'value_type' is not a member of 'Item'"
+ghidra_cpp: |
+  struct Item { int x; };
+  void take_v(void)
+  {
+    Item::value_type v;
+    (void)v;
+  }
+contains:
+  - "Item::value_type"
+not_contains:
+  - "using value_type"
+compile: false
+notes: "Ghidra names Item::value_type where Item is a user struct without that member; do not invent a nested typedef. Mix Item, not a sample name."
