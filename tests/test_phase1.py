@@ -481,6 +481,62 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("in_stack_98", got)
         self.assertNotIn("in_stack_ffffffffffffff58", got)
 
+    def test_msx64_stack_homes_bind_unused_formals(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "struct Items { int n; };\n"
+            "int walk_items(Items *xs, Rec *q)\n"
+            "{\n"
+            "  Rec *in_stack_ffffffffffffffb8;\n"
+            "  Rec *in_stack_ffffffffffffffc0;\n"
+            "  if (in_stack_ffffffffffffffb8 == 0) {\n"
+            "    return 0;\n"
+            "  }\n"
+            "  return in_stack_ffffffffffffffc0->n;\n"
+            "}\n"
+        )
+        self.assertIn("xs == 0", got)
+        self.assertIn("q->n", got)
+        self.assertNotIn("in_stack_", got)
+        self.assertNotIn("in_stk_", got)
+        one = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "struct Items { int n; };\n"
+            "int walk_items(Items *xs)\n"
+            "{\n"
+            "  Rec *in_stack_ffffffffffffffb8;\n"
+            "  Rec *in_stack_ffffffffffffffc0;\n"
+            "  (void)in_stack_ffffffffffffffb8;\n"
+            "  (void)in_stack_ffffffffffffffc0;\n"
+            "}\n"
+        )
+        self.assertIn("(void)xs", one)
+        self.assertNotIn("in_stack_ffffffffffffffb8", one)
+        self.assertIn("in_stk_n64", one)
+        assigned = sanitize_ghidra_cpp(
+            "int take(int *p)\n"
+            "{\n"
+            "  int *in_stack_ffffffffffffff58;\n"
+            "  int in_stack_98;\n"
+            "  in_stack_ffffffffffffff58 = p;\n"
+            "  return *in_stack_ffffffffffffff58 + in_stack_98;\n"
+            "}\n"
+        )
+        self.assertIn("in_stk_n168", assigned)
+        self.assertIn("in_stack_98", assigned)
+        self.assertIn("= p", assigned)
+        bare = sanitize_ghidra_cpp(
+            "int walk_items(Items *xs)\n"
+            "{\n"
+            "  return xs->n + in_stack_ffffffffffffffb8->n;\n"
+            "}\n"
+        )
+        self.assertIn("xs->n", bare)
+        self.assertNotIn("return xs->n + xs->n", bare)
+        self.assertIn("in_stk_n72", bare)
+
     def test_austack_overlay_slot_is_byte_offset_cast(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 
@@ -631,6 +687,21 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         )
         self.assertIn("strncpy(d, s, 3)", abi)
         self.assertNotIn("in_RCX", abi)
+        opaque = sanitize_ghidra_cpp(
+            "struct Rec { unsigned long long a; unsigned long long b; "
+            "unsigned long long c; };\n"
+            "void show_rec(Rec *p)\n"
+            "{\n"
+            "  undefined8 *in_RCX;\n"
+            "  if (in_RCX[2] == 0) {\n"
+            "    return;\n"
+            "  }\n"
+            "  (void)*in_RCX;\n"
+            "}\n"
+        )
+        self.assertIn("p[2] == 0", opaque)
+        self.assertIn("*p", opaque)
+        self.assertNotIn("in_RCX", opaque)
         pair = sanitize_ghidra_cpp(
             "int first_of(std::pair<int, int> *p)\n"
             "{\n"
@@ -766,6 +837,23 @@ int main(int argc, char **argv) { return 0; }
         )
         self.assertIn("this->n", member)
         self.assertNotIn("ghidra_this", member)
+
+    def test_emit_sanitized_restore_keeps_raw(self):
+        from src.analysis.ghidra_cpp import emit_sanitized_restore
+
+        raw = (
+            "void show_rec(Rec *p) {\n"
+            "  undefined8 *in_RCX;\n"
+            "  (void)*in_RCX;\n"
+            "}\n"
+        )
+        data = {"cpp_code": raw}
+        emit_sanitized_restore(data)
+        self.assertEqual(data["cpp_code_raw"], raw)
+        self.assertNotIn("in_RCX", data["cpp_code"])
+        self.assertIn("*p", data["cpp_code"])
+        emit_sanitized_restore(data)
+        self.assertEqual(data["cpp_code_raw"], raw)
 
     def test_operator_assign_rewrite(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp

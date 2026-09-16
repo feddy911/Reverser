@@ -141,6 +141,27 @@ class TestCorpusEval(unittest.TestCase):
             self.assertNotIn("MyCollatz", blob, cid)
             self.assertNotIn("GammaFn", blob, cid)
 
+    def test_opaque_ptr_reg_fixture_is_loaded(self):
+        cases = {c.id: c for c in load_corpus()}
+        case = cases["ghidra-msx64-opaque-ptr-reg"]
+        self.assertTrue(case.compile)
+        self.assertEqual(case.recipe, "sanitize")
+        self.assertIn("undefined8 *in_RCX", case.ghidra_cpp)
+        self.assertIn("(void)*in_RCX", case.ghidra_cpp)
+        self.assertNotIn("Point", case.ghidra_cpp)
+        self.assertNotIn("PointCloud", case.ghidra_cpp)
+        self.assertNotIn("print_point", case.ghidra_cpp)
+
+    def test_stack_home_args_fixture_is_loaded(self):
+        cases = {c.id: c for c in load_corpus()}
+        case = cases["ghidra-msx64-stack-home-args"]
+        self.assertTrue(case.compile)
+        self.assertEqual(case.recipe, "sanitize")
+        self.assertIn("in_stack_ffffffffffffffb8", case.ghidra_cpp)
+        self.assertNotIn("Point", case.ghidra_cpp)
+        self.assertNotIn("PointCloud", case.ghidra_cpp)
+        self.assertNotIn("nearest_index", case.ghidra_cpp)
+
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):
     def test_restore_body_and_cache_stay_put(self):

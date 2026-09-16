@@ -1,0 +1,23 @@
+id: ghidra-msx64-stack-home-args
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  struct Items { int n; };
+  int walk_items(Items *xs, Rec *q)
+  {
+    Rec *in_stack_ffffffffffffffb8;
+    Rec *in_stack_ffffffffffffffc0;
+    if (in_stack_ffffffffffffffb8 == 0) {
+      return 0;
+    }
+    return in_stack_ffffffffffffffc0->n;
+  }
+contains:
+  - "xs == 0"
+  - "q->n"
+not_contains:
+  - "in_stack_"
+  - "in_stk_"
+compile: true
+notes: "Microsoft x64: Ghidra names unused formals' home slots in_stack_*; dump-declared homes are the formals. No decl, no bind."

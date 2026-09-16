@@ -1313,6 +1313,11 @@ _MS64_INT_REGS = (
 _PTR_AS_INT = frozenset({
     "undefined8", "ulonglong", "unsignedlonglong", "__uint64", "uint8",
 })
+# Ghidra types a pointer register as undefined8* / void*; that is the formal.
+_OPAQUE_PTR_BASE = frozenset({
+    "undefined", "undefined8", "ulonglong", "unsignedlonglong", "__uint64",
+    "void",
+})
 _INT_AS_INT = frozenset({
     "int", "uint", "unsigned", "unsignedint", "int4", "uint4", "undefined4",
     "unsignedchar", "uchar", "char", "byte", "short", "ushort", "undefined2",
@@ -1343,7 +1348,41 @@ def _abi_types_compatible(decl_ty: str, param_ty: str) -> bool:
         return True
     if a in _INT_AS_INT and b in _INT_AS_INT:
         return True
+    if "*" in a and "*" in b:
+        a_base, b_base = a.replace("*", ""), b.replace("*", "")
+        if a_base in _OPAQUE_PTR_BASE or b_base in _OPAQUE_PTR_BASE:
+            return True
     return False
+
+
+def leftover_msx64_in_regs(code: str) -> list[str]:
+    """Incoming-register aliases still in the body after msx64 bind.
+
+    String literals and // comments are ignored. in_stack_* is not this lever.
+    """
+    blob = re.sub(r'"(?:\\.|[^"\\])*"', " ", code or "")
+    blob = re.sub(r"//.*?$", " ", blob, flags=re.M)
+    found: list[str] = []
+    for aliases in _MS64_INT_REGS:
+        for name in aliases:
+            if re.search(rf"\b{re.escape(name)}\b", blob):
+                found.append(name)
+    return found
+
+
+def emit_sanitized_restore(data: dict) -> None:
+    """Sanitize the run body. Does not write the restore cache key.
+
+    Keeps cpp_code_raw once so the cached LLM text stays comparable.
+    """
+    raw = data.get("cpp_code") or ""
+    if not str(raw).strip():
+        return
+    emitted = sanitize_ghidra_cpp(raw)
+    if emitted == raw:
+        return
+    data.setdefault("cpp_code_raw", raw)
+    data["cpp_code"] = emitted
 
 
 def _looks_msx64_sret(ret: str) -> bool:
@@ -1434,6 +1473,94 @@ def _rewrite_msx64_incoming(code: str) -> str:
     spans = list(_iter_function_defs(blob, skip_qualified=True))
     for ident, t0, close, end in reversed(spans):
         blob = _rewrite_one_msx64_fn(blob, ident, t0, close, end)
+    return blob
+
+
+_RE_STACK_HOME_IDENT = re.compile(
+    r"\b(in_stack_[0-9A-Fa-f]+|in_stk_n?\d+)\b"
+)
+
+
+def _abi_both_pointers(decl_ty: str, param_ty: str) -> bool:
+    a, b = _norm_abi_type(decl_ty), _norm_abi_type(param_ty)
+    return "*" in a and "*" in b
+
+
+def _list_stack_home_decls(body: str) -> list[tuple[str, str]]:
+    """Dump-declared in_stack / in_stk locals, first-occurrence order."""
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for m in _RE_STACK_HOME_IDENT.finditer(body or ""):
+        name = m.group(1)
+        if name in seen:
+            continue
+        seen.add(name)
+        ty = _in_reg_decl_type(body, name)
+        if ty is None:
+            continue
+        out.append((name, ty))
+    return out
+
+
+def _rewrite_one_msx64_stack_homes(
+    blob: str, ident: str, t0: int, close: int, end: int
+) -> str:
+    """Bind dump-declared stack homes to unused formals. Skip main.
+
+    Ghidra often types the home as Point* while the prototype is vector*.
+    Both-pointer is enough; do not invent a source identifier. No decl — no
+    bind (undeclared in_stack transplant is a known regression).
+    """
+    if ident == "main":
+        return blob
+    mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
+    if not mname:
+        return blob
+    name_at = t0 + mname.start()
+    open_p = t0 + mname.end() - 1
+    formals = _parse_param_decls(blob[open_p + 1 : close])
+    if not formals:
+        return blob
+    brace = _brace_after_params(blob, close)
+    if brace < 0:
+        return blob
+    body = blob[brace : end + 1]
+    homes = _list_stack_home_decls(body)
+    if not homes:
+        return blob
+    repl: dict[str, str] = {}
+    for i, (_pty, pname) in enumerate(formals):
+        if i >= len(homes):
+            break
+        alias, decl_ty = homes[i]
+        if re.search(rf"\b{re.escape(pname)}\b", body):
+            continue
+        if not (
+            _abi_types_compatible(decl_ty, _pty) or _abi_both_pointers(decl_ty, _pty)
+        ):
+            continue
+        repl[alias] = pname
+    if not repl:
+        return blob
+    new_body = body
+    for alias, pname in sorted(repl.items(), key=lambda kv: -len(kv[0])):
+        new_body = re.sub(rf"\b{re.escape(alias)}\b", pname, new_body)
+        new_body = re.sub(
+            rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(pname)}\s*;[ \t]*\n?",
+            "",
+            new_body,
+            count=1,
+            flags=re.M,
+        )
+    return blob[:brace] + new_body + blob[end + 1 :]
+
+
+def _rewrite_msx64_stack_homes(code: str) -> str:
+    """Bind Ghidra in_stack homes to formals when the dump declared them."""
+    blob = code or ""
+    spans = list(_iter_function_defs(blob, skip_qualified=True))
+    for ident, t0, close, end in reversed(spans):
+        blob = _rewrite_one_msx64_stack_homes(blob, ident, t0, close, end)
     return blob
 
 
@@ -1624,6 +1751,7 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = rewrite_ghidra_member_calls(t)
     t = _outside_strings(t, _strip_empty_allocator_dtors)
     t = _rewrite_msx64_incoming(t)
+    t = _rewrite_msx64_stack_homes(t)
     t = _rewrite_const_iter_begin_assign(t)
     t = _rewrite_string_ref_deref(t)
     t = _rewrite_const_ref_arrow(t)

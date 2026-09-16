@@ -1,0 +1,18 @@
+id: ghidra-msx64-opaque-ptr-reg
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec {
+    unsigned long long a;
+  };
+  void show_rec(Rec *p)
+  {
+    undefined8 *in_RCX;
+    (void)*in_RCX;
+  }
+contains:
+  - "(void)*p"
+not_contains:
+  - "in_RCX"
+compile: true
+notes: "Microsoft x64: Ghidra types the first pointer arg as undefined8*; that local is the formal."

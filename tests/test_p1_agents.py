@@ -958,6 +958,39 @@ class TestCritic(unittest.TestCase):
         kept = review_function(entry, compact, [])
         self.assertTrue(kept.identity_ok)
 
+    def test_leftover_in_reg_is_identity_fail(self):
+        entry = {
+            "address": "0x1",
+            "guessed_name": "show_rec",
+            "ghidra_name": "show_rec",
+            "name": "show_rec",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": "void show_rec(Rec *p) { (void)p; }",
+        }
+        leftover = (
+            "void show_rec(Rec *p) {\n"
+            "  undefined8 *in_RCX;\n"
+            "  (void)*in_RCX;\n"
+            "}\n"
+        )
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(any("restore leftover in_REG" in r for r in verdict.reasons))
+        bound = "void show_rec(Rec *p) { (void)*p; }\n"
+        ok = review_function(entry, bound, [])
+        self.assertTrue(ok.identity_ok)
+        stack_only = (
+            "void show_rec(Rec *p) {\n"
+            "  Rec *in_stack_ffffffffffffffb8;\n"
+            "  (void)p;\n"
+            "}\n"
+        )
+        stack = review_function(entry, stack_only, [])
+        self.assertTrue(stack.identity_ok)
+        quoted = 'void show_rec(Rec *p) { (void)p; const char *s = "in_RCX"; }\n'
+        self.assertTrue(review_function(entry, quoted, []).identity_ok)
+
     def test_restore_ellipsis_stub_is_identity_fail(self):
         entry = {
             "address": "0x1",

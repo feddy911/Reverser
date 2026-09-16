@@ -617,6 +617,12 @@ def run(config: AppConfig) -> int:
                     data["cpp_code"] = swapped
                     data["dump_stub_swap"] = True
 
+                from src.analysis.ghidra_cpp import emit_sanitized_restore
+
+                # After cache.put: dialect bind lives on the run body, not the
+                # restore cache key.
+                emit_sanitized_restore(data)
+
                 cls = data.get("classification", "unknown")
                 guess = data.get("guessed_name") or "-"
                 conf = data.get("confidence", 0)
@@ -738,6 +744,14 @@ def run(config: AppConfig) -> int:
                         if r.get("dump_stub_swap"):
                             logger.info(
                                 "Skipping polish for %s: stub replaced with dump",
+                                addr,
+                            )
+                            metrics.polish_skipped += 1
+                            code = v2_code
+                            fid_v3 = fid_v2
+                        elif r.get("cpp_code_raw"):
+                            logger.info(
+                                "Skipping polish for %s: emitted sanitize already applied",
                                 addr,
                             )
                             metrics.polish_skipped += 1

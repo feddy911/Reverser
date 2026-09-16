@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from src.analysis.fidelity import build_call_tokens, check_function, dump_facts_ok
-from src.analysis.ghidra_cpp import _first_function_span
+from src.analysis.ghidra_cpp import _first_function_span, leftover_msx64_in_regs
 
 FAMOUS_ALGOS: Tuple[str, ...] = (
     "std::sort",
@@ -151,6 +151,9 @@ def identity_issues(entry: Dict[str, Any], code: str) -> List[str]:
         and _bare_stmt_count(code) <= _STUB_MAX_BARE_STMTS
     ):
         reasons.append("restore stub vs dump size")
+    leftover = leftover_msx64_in_regs(code)
+    if leftover:
+        reasons.append("restore leftover in_REG " + leftover[0])
     return reasons
 
 
