@@ -49,7 +49,7 @@ _PROTECTED_EXTRA = frozenset({
     "cout", "cerr", "endl", "cin", "string", "wstring", "vector",
     "basic_ostream", "char_traits", "allocator", "basic_string",
     "mpz_t", "mpz_ptr", "mpz_srcptr", "mpf_t", "mpq_t",
-    "ghidra_word", "undefined", "undefined1", "undefined2", "undefined3",
+    "ghidra_word", "ghidra_this", "undefined", "undefined1", "undefined2", "undefined3",
     "undefined4", "undefined5", "undefined6", "undefined7", "undefined8",
     "int1", "int2", "int3", "int4", "int5", "int6", "int7", "int8",
     "uint1", "uint2", "uint3", "uint4", "uint5", "uint6", "uint7", "uint8",

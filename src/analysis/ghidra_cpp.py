@@ -1437,6 +1437,32 @@ def _rewrite_msx64_incoming(code: str) -> str:
     return blob
 
 
+def _rewrite_one_this_local(
+    blob: str, _ident: str, t0: int, close: int, end: int
+) -> str:
+    """Ghidra `T *this;` in a free function is a local, not C++ this."""
+    from src.analysis.ghidra_prepass import proto_has_this
+
+    brace = _brace_after_params(blob, close)
+    if brace < 0:
+        return blob
+    if proto_has_this(blob[t0:brace]):
+        return blob
+    body = blob[brace : end + 1]
+    if _in_reg_decl_type(body, "this") is None:
+        return blob
+    new_body = re.sub(r"\bthis\b", "ghidra_this", body)
+    return blob[:brace] + new_body + blob[end + 1 :]
+
+
+def _rewrite_ghidra_this_local(code: str) -> str:
+    blob = code or ""
+    spans = list(_iter_function_defs(blob, skip_qualified=False))
+    for ident, t0, close, end in reversed(spans):
+        blob = _rewrite_one_this_local(blob, ident, t0, close, end)
+    return blob
+
+
 _TRAP_CALL = re.compile(
     r"^(?:abort|__builtin_trap|__builtin_unreachable|__stack_chk_fail|"
     r"___stack_chk_fail|__report_rangecheckfailure|_invalid_parameter|"
@@ -1617,4 +1643,5 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _outside_strings(t, _rewrite_ghidra_piece_ops)
     t = _outside_strings(t, _rewrite_ghidra_func_ops)
     t = _outside_strings(t, _rewrite_bool_xor)
+    t = _rewrite_ghidra_this_local(t)
     return t

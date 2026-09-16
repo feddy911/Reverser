@@ -12,8 +12,10 @@ ghidra_cpp: |
     this = &std::cout;
   }
 contains:
-  - "ostream *this"
+  - "ostream *ghidra_this"
+  - "ghidra_this = &std::cout"
 not_contains:
   - "this_"
-compile: false
-notes: "Ghidra names an ostream* local this; do not rename this globally"
+  - "ostream *this"
+compile: true
+notes: "Ghidra names an ostream* local this; rename only that dump-declared local in a free function"

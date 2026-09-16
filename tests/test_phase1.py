@@ -747,6 +747,26 @@ int main(int argc, char **argv) { return 0; }
         self.assertNotIn("::operator<<", got)
         self.assertIn("(&((", got)
 
+    def test_free_fn_dump_this_local_renamed(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "void put_n(void) {\n"
+            "  std::ostream *this;\n"
+            "  this = &std::cout;\n"
+            "}\n"
+        )
+        self.assertIn("ghidra_this", got)
+        self.assertNotIn("ostream *this", got)
+        self.assertNotIn("this_", got)
+        member = sanitize_ghidra_cpp(
+            "void Foo::bar(Foo *this) {\n"
+            "  this->n = 1;\n"
+            "}\n"
+        )
+        self.assertIn("this->n", member)
+        self.assertNotIn("ghidra_this", member)
+
     def test_operator_assign_rewrite(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 
