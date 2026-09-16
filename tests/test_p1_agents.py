@@ -981,6 +981,37 @@ class TestCritic(unittest.TestCase):
         blob = " ".join(verdict.reasons)
         self.assertTrue("restore stub name" in blob or "restore ellipsis stub" in blob)
 
+    def test_prefer_dump_if_stub_replaces_ellipsis(self):
+        from src.agents.critic import prefer_dump_if_stub
+
+        dump = (
+            'void walk_keys(int n) {\n'
+            '  puts("k");\n'
+            '  puts("k");\n'
+            '  for (int i = 0; i < n; i++) puts("k");\n'
+            '  return;\n'
+            '}\n'
+        )
+        entry = {
+            "guessed_name": "walk_keys",
+            "ghidra_name": "walk_keys",
+            "name": "walk_keys",
+            "ghidra_code": dump,
+        }
+        stub = (
+            'void sub_14000100() {\n'
+            '    // ... (body omitted)\n'
+            '    puts("k");\n'
+            '}\n'
+        )
+        got = prefer_dump_if_stub(entry, stub)
+        self.assertNotIn("...", got)
+        self.assertNotIn("sub_14000100", got)
+        self.assertIn("walk_keys", got)
+        self.assertIn("for", got)
+        kept = prefer_dump_if_stub(entry, dump)
+        self.assertEqual(kept, dump)
+
     def test_run_rejects_green_tu_with_swap(self):
         restored = [{
             "classification": "user_code",

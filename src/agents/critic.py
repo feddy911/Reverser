@@ -154,6 +154,39 @@ def identity_issues(entry: Dict[str, Any], code: str) -> List[str]:
     return reasons
 
 
+_STUB_IDENTITY_MARKERS = (
+    "restore stub name",
+    "restore ellipsis stub",
+    "restore stub vs dump size",
+)
+
+
+def is_restore_stub(entry: Dict[str, Any], code: str) -> bool:
+    return any(
+        any(r.startswith(m) for m in _STUB_IDENTITY_MARKERS)
+        for r in identity_issues(entry, code)
+    )
+
+
+def prefer_dump_if_stub(entry: Dict[str, Any], code: str) -> str:
+    """Replace an identity stub with sanitized dump C++. No new LLM call.
+
+    Dump must itself not look like a stub after sanitize. Does not invent
+    identifiers from samples.
+    """
+    if not is_restore_stub(entry, code):
+        return code
+    dump = (entry.get("ghidra_code") or "").strip()
+    if not dump:
+        return code
+    from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+    swapped = (sanitize_ghidra_cpp(dump) or "").strip()
+    if not swapped or is_restore_stub(entry, swapped):
+        return code
+    return swapped
+
+
 @dataclass
 class FunctionVerdict:
     address: str = ""

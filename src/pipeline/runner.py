@@ -601,6 +601,21 @@ def run(config: AppConfig) -> int:
                         ghidra_code=gh_code,
                         function_names=dump_fn_names,
                     )
+                from src.agents.critic import prefer_dump_if_stub
+
+                swapped = prefer_dump_if_stub(
+                    {
+                        "guessed_name": data.get("guessed_name") or s.get("name") or "",
+                        "ghidra_name": s.get("name") or "",
+                        "name": s.get("name") or "",
+                        "ghidra_code": gh_code,
+                    },
+                    data.get("cpp_code") or "",
+                )
+                if swapped != (data.get("cpp_code") or ""):
+                    logger.info("Replacing stub restore with sanitized dump for %s", addr)
+                    data["cpp_code"] = swapped
+                    data["dump_stub_swap"] = True
 
                 cls = data.get("classification", "unknown")
                 guess = data.get("guessed_name") or "-"
@@ -720,7 +735,15 @@ def run(config: AppConfig) -> int:
                             entry["ghidra_code"] = src["ghidra_code"]
                         fid_v2 = check_function(entry, v2_code, call_tokens)
 
-                        if should_skip_polish(
+                        if r.get("dump_stub_swap"):
+                            logger.info(
+                                "Skipping polish for %s: stub replaced with dump",
+                                addr,
+                            )
+                            metrics.polish_skipped += 1
+                            code = v2_code
+                            fid_v3 = fid_v2
+                        elif should_skip_polish(
                             fid_v2,
                             v2_code,
                             compile_ok=r.get("compile_ok"),
