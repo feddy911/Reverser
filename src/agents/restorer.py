@@ -498,7 +498,9 @@ def _dump_qualified_method(ghidra_code: str, meth: str) -> Optional[Tuple[str, s
             if close > 0:
                 t0 = _type_start(blob, j)
                 if 0 <= t0 < j:
-                    call = re.sub(r"[ \t]*\n[ \t]*", "", blob[t0 : close + 1]).strip()
+                    call = re.sub(
+                        r"[ \t]*\r?\n[ \t]*", "", blob[t0 : close + 1]
+                    ).replace("\r", "").strip()
                     args = _split_top_args(blob[k + 1 : close])
                     recv = (args[0] if args else "").strip()
                     if call and recv:
@@ -521,6 +523,46 @@ def _recv_idents(recv: str) -> List[str]:
     ]
 
 
+def _stack_canon(tok: str) -> str:
+    m = re.fullmatch(r"in_stack_([0-9A-Fa-f]+)", tok or "", re.I)
+    if not m:
+        return ""
+    from src.analysis.ghidra_cpp import readable_in_stack_name
+
+    return readable_in_stack_name(m.group(1))
+
+
+def _tok_in_restore(tok: str, code: str) -> bool:
+    if re.search(rf"\b{re.escape(tok)}\b", code or ""):
+        return True
+    canon = _stack_canon(tok)
+    return bool(canon) and bool(re.search(rf"\b{re.escape(canon)}\b", code or ""))
+
+
+def _dump_recv_decl(dump: str, tok: str) -> Optional[str]:
+    """Dump's own ``<type> tok;`` or None. Does not invent a type."""
+    from src.analysis.ghidra_cpp import _in_reg_decl_type
+
+    ty = _in_reg_decl_type(dump or "", tok)
+    if not ty:
+        return None
+    return f"{ty} {tok};"
+
+
+def _insert_dump_decls(code: str, decls: Sequence[str]) -> str:
+    if not decls:
+        return code
+    from src.analysis.ghidra_cpp import _brace_after_params, _iter_function_defs
+
+    block = "".join(f"\n  {d}" for d in decls)
+    for _ident, _t0, close, _end in _iter_function_defs(code or "", skip_qualified=False):
+        brace = _brace_after_params(code, close)
+        if brace < 0:
+            continue
+        return code[: brace + 1] + block + code[brace + 1 :]
+    return "\n".join(decls) + "\n" + (code or "")
+
+
 def repair_method_on_callee_name(
     code: str,
     *,
@@ -529,13 +571,18 @@ def repair_method_on_callee_name(
 ) -> str:
     """If restore does callee.method() and the dump has Type::method(recv),
     put the dump call back so sanitize can rewrite it. Dump-faithful.
-    Does not invent dump temps that are not already in the restore body.
-    Does not bump the restore prompt.
+
+    Recv may be missing from restore only when the dump itself declares it;
+    the declaration is inserted in the same edit as the call. No half
+    transplant (07:01 undeclared dump temp). Does not invent a receiver the
+    dump never declared. Does not bump the restore prompt.
     """
     names = {n for n in (function_names or []) if n and re.fullmatch(r"[A-Za-z_]\w*", n)}
     if not code or not names:
         return code
     dump_cache: Dict[str, Optional[Tuple[str, str]]] = {}
+    pending: List[str] = []
+    seen_decl: Set[str] = set()
 
     def _sub(m: re.Match[str]) -> str:
         ident, meth = m.group(1), m.group(2)
@@ -548,11 +595,31 @@ def repair_method_on_callee_name(
             return m.group(0)
         call, recv = hit
         needed = _recv_idents(recv)
-        if not needed or any(tok not in code for tok in needed):
+        if not needed:
             return m.group(0)
+        inserts: List[Tuple[str, str]] = []
+        for tok in needed:
+            if _tok_in_restore(tok, code) or tok in seen_decl:
+                continue
+            decl = _dump_recv_decl(ghidra_code, tok)
+            if not decl:
+                return m.group(0)
+            inserts.append((tok, decl))
+        for tok, decl in inserts:
+            seen_decl.add(tok)
+            pending.append(decl)
         return call
 
-    return _RE_DOT_METHOD.sub(_sub, code)
+    out = _RE_DOT_METHOD.sub(_sub, code)
+    # Dedup decls while keeping order.
+    uniq: List[str] = []
+    hit: Set[str] = set()
+    for d in pending:
+        if d in hit:
+            continue
+        hit.add(d)
+        uniq.append(d)
+    return _insert_dump_decls(out, uniq)
 
 
 def _norm(code: str) -> str:

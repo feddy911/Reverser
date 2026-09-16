@@ -852,6 +852,27 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertIn("series_fn.back()", skipped)
         self.assertNotIn("in_stack_ffffffffffffff78", skipped)
 
+        dump_decl = (
+            "void walk_main() {\n"
+            "  vector<int,_std::allocator<int>_> *in_stack_ffffffffffffff78;\n"
+            "  " + dump +
+            "}\n"
+        )
+        grafted = repair_method_on_callee_name(
+            missing_recv, ghidra_code=dump_decl, function_names=names,
+        )
+        self.assertNotIn("series_fn.back()", grafted)
+        self.assertIn("in_stack_ffffffffffffff78", grafted)
+        self.assertIn(
+            "std::vector<int,_std::allocator<int>_>::back(in_stack_ffffffffffffff78)",
+            grafted,
+        )
+        self.assertIn("vector<int,_std::allocator<int>_> * in_stack_ffffffffffffff78;", grafted)
+        self.assertIn("local.back()", grafted)
+        san_graft = sanitize_ghidra_cpp(grafted)
+        self.assertNotIn("series_fn.back()", san_graft)
+        self.assertIn("back()", san_graft)
+
         present = (
             "int main() {\n"
             "  auto *in_stack_ffffffffffffff78 = series_fn(n);\n"
