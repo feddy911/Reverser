@@ -914,6 +914,73 @@ class TestCritic(unittest.TestCase):
         self.assertTrue(verdict.fidelity_ok)
         self.assertTrue(verdict.accept)
 
+    def test_restore_stub_name_is_identity_fail(self):
+        entry = {
+            "address": "0x1",
+            "guessed_name": "walk_keys",
+            "ghidra_name": "walk_keys",
+            "name": "walk_keys",
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": 'int walk_keys(int n) { puts("k"); return n; }',
+        }
+        verdict = review_function(entry, 'void func() { puts("k"); }\n', [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertFalse(verdict.accept)
+        self.assertTrue(any("restore stub name" in r for r in verdict.reasons))
+
+    def test_restore_stub_vs_dump_size_is_identity_fail(self):
+        pad = "".join(f"v{i}=0;" for i in range(80))
+        dump = f'int walk_keys(int n) {{ puts("k"); {pad} return n; }}'
+        entry = {
+            "address": "0x1",
+            "guessed_name": "walk_keys",
+            "ghidra_name": "walk_keys",
+            "name": "walk_keys",
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": dump,
+        }
+        short = 'int walk_keys(int n) { puts("k"); }\n'
+        verdict = review_function(entry, short, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(any("restore stub vs dump size" in r for r in verdict.reasons))
+        faithful = review_function(entry, dump + "\n", [])
+        self.assertTrue(faithful.identity_ok)
+        self.assertTrue(faithful.accept)
+        compact = (
+            'int walk_keys(int n) {\n'
+            '  puts("k");\n'
+            '  for (int i = 0; i < n; i++) puts("k");\n'
+            '  return n;\n'
+            '}\n'
+        )
+        kept = review_function(entry, compact, [])
+        self.assertTrue(kept.identity_ok)
+
+    def test_restore_ellipsis_stub_is_identity_fail(self):
+        entry = {
+            "address": "0x1",
+            "guessed_name": "walk_keys",
+            "ghidra_name": "walk_keys",
+            "name": "walk_keys",
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": 'void walk_keys() { puts("k"); }',
+        }
+        code = (
+            'void sub_1400015af() {\n'
+            '    // ... (body omitted)\n'
+            '    puts("k");\n'
+            '    // ... (body omitted)\n'
+            '}\n'
+        )
+        verdict = review_function(entry, code, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertFalse(verdict.accept)
+        blob = " ".join(verdict.reasons)
+        self.assertTrue("restore stub name" in blob or "restore ellipsis stub" in blob)
+
     def test_run_rejects_green_tu_with_swap(self):
         restored = [{
             "classification": "user_code",

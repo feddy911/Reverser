@@ -774,7 +774,20 @@ class TestFidelitySmoke(unittest.TestCase):
             should_skip_polish(fid, "undefined1 auStack_20[16]; auStack_20._8_8_ = 1;")
         )
         self.assertTrue(should_skip_polish(fid, residue, compile_ok=True))
-        self.assertTrue(should_skip_polish(fid, "int main(){ return 0; }"))
+        self.assertFalse(should_skip_polish(fid, "int main(){ return 0; }"))
+        self.assertTrue(
+            should_skip_polish(fid, "int main(){ return 0; }", compile_ok=True)
+        )
+
+    def test_high_fid_does_not_skip_polish_when_compile_failed(self):
+        from src.analysis.fidelity import should_skip_polish
+
+        fid = {"fidelity": 1.0, "scored": True}
+        body = "int main(){ return series_fn.back(); }"
+        self.assertFalse(should_skip_polish(fid, body, compile_ok=False))
+        self.assertFalse(should_skip_polish(fid, body))
+        green = "int main(){ return 0; }"
+        self.assertTrue(should_skip_polish(fid, green, compile_ok=True))
 
     def test_keep_dump_literals_comments_missing(self):
         from src.agents.restorer import keep_dump_literals

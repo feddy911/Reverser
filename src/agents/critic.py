@@ -104,6 +104,24 @@ def defined_function_name(code: str) -> str:
     return span[2] or ""
 
 
+_STUB_DEF_NAMES = frozenset({"func", "function", "f", "foo", "bar"})
+_RE_STUB_ADDR_NAME = re.compile(r"^(?:func|sub)_[0-9a-fA-F]+$", re.I)
+_RE_ELLIPSIS_STUB = re.compile(r"//\s*\.\.\.|/\*[^*]*\.\.\.[^*]*\*/")
+_STUB_DUMP_MIN = 400
+_STUB_DUMP_RATIO = 8
+_STUB_MAX_BARE_STMTS = 2
+
+
+def _code_size(blob: str) -> int:
+    return len(re.sub(r"\s+", "", blob or ""))
+
+
+def _bare_stmt_count(code: str) -> int:
+    s = re.sub(r"/\*.*?\*/", " ", code or "", flags=re.S)
+    s = re.sub(r"//.*?$", " ", s, flags=re.M)
+    return s.count(";")
+
+
 def identity_issues(entry: Dict[str, Any], code: str) -> List[str]:
     reasons: List[str] = []
     allowed = _haystacks(entry)
@@ -117,6 +135,22 @@ def identity_issues(entry: Dict[str, Any], code: str) -> List[str]:
         allowed_names = {guessed, ghidra, (entry.get("name") or "").strip()}
         if defined not in allowed_names and defined.lower() not in allowed.lower():
             reasons.append(f"function renamed to algorithm {defined}")
+    want = guessed or ghidra
+    if defined and want and defined != want:
+        low = defined.lower()
+        if low in _STUB_DEF_NAMES or _RE_STUB_ADDR_NAME.match(defined):
+            reasons.append("restore stub name " + defined)
+    if _RE_ELLIPSIS_STUB.search(code or ""):
+        reasons.append("restore ellipsis stub")
+    dump = entry.get("ghidra_code") or ""
+    n_dump = _code_size(dump)
+    n_code = _code_size(code)
+    if (
+        n_dump >= _STUB_DUMP_MIN
+        and n_code * _STUB_DUMP_RATIO < n_dump
+        and _bare_stmt_count(code) <= _STUB_MAX_BARE_STMTS
+    ):
+        reasons.append("restore stub vs dump size")
     return reasons
 
 

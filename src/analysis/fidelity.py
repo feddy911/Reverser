@@ -113,12 +113,15 @@ def should_skip_polish(
     *,
     compile_ok: Optional[bool] = None,
 ) -> bool:
-    """Skip polish when dump-facts are scored high and the body already compiles.
+    """Skip polish when dump-facts are scored high and per-fn syntax is green.
 
-    Residue forces polish only if per-fn syntax failed or is unknown.
+    compile_ok must be True: high fidelity is not a skip if gcc still fails.
+    Residue plus a green body may still skip; residue plus a red body cannot.
     Unscored (empty bag) is not 1.0-heaven.
     """
-    if dump_has_residue(code) and compile_ok is not True:
+    if compile_ok is not True:
+        return False
+    if not (code or "").strip():
         return False
     if not fid.get("scored"):
         return False
