@@ -98,16 +98,23 @@ def _select_functions(
     user_names: Optional[Sequence[str]],
     top_k: int,
 ) -> List[Dict[str, Any]]:
+    """Pick functions, but attach scorer literals like live restore.
+
+    Held-out critic must see dump-fact strings even when the manifest names
+    functions instead of taking ML top-k. Raw ghidra JSON often has
+    literals=None; FeatureIndex fills them from the strings table.
+    """
     functions = list(ghidra.get("functions") or [])
+    scored = _score_dump(ghidra)
+    by_addr = {s.get("address"): s for s in scored if s.get("address")}
     if user_names:
         want = [n for n in user_names if n]
-        picked = [
-            f for f in functions
-            if any(_name_eq(f.get("name") or "", n) for n in want)
-        ]
+        picked = []
+        for f in functions:
+            if any(_name_eq(f.get("name") or "", n) for n in want):
+                picked.append(by_addr.get(f.get("address")) or f)
         if picked:
             return picked
-    scored = _score_dump(ghidra)
     top, _n = select_llm_targets(scored, top_k)
     return list(top)
 

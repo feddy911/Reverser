@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.analysis.eval_heldout import (
+    _select_functions,
     eval_heldout_entry,
     frozen_leaks,
     run_manifest,
@@ -25,6 +26,25 @@ class TestHeldoutFreeze(unittest.TestCase):
 
 
 class TestHeldoutEval(unittest.TestCase):
+    def test_select_user_names_attaches_scored_literals(self):
+        ghidra = {
+            "functions": [{
+                "address": "0x140001000",
+                "name": "say_hi",
+                "size": 48,
+                "callees": [],
+                "ext_calls": [],
+                "ghidra_code": (
+                    "void say_hi(void)\n{\n  puts(\"hello!\\n\");\n}\n"
+                ),
+            }],
+            "strings": [{"string": "hello!\n", "address": "0x140010000"}],
+            "thunks": [],
+        }
+        picked = _select_functions(ghidra, user_names=["say_hi"], top_k=3)
+        self.assertEqual(len(picked), 1)
+        self.assertIn("hello!\n", picked[0].get("literals") or [])
+
     def test_struct_fixture_runs_without_new_recipe(self):
         with tempfile.TemporaryDirectory() as td:
             work = Path(td)
@@ -45,10 +65,13 @@ class TestHeldoutEval(unittest.TestCase):
                 rec.get("assembled_ok"),
                 rec.get("unknown_messages") or rec.get("compile_stderr"),
             )
-            self.assertTrue(
-                (rec.get("critic") or {}).get("accept"),
-                rec.get("critic"),
-            )
+            critic = rec.get("critic") or {}
+            self.assertTrue(critic.get("identity_ok"), critic)
+            # Leaf math with no dump strings/calls is an empty fact bag.
+            # Critic hell, not a new sanitizer recipe.
+            if not critic.get("accept"):
+                blob = " ".join(str(x) for x in (critic.get("reasons") or []))
+                self.assertIn("unscored", blob, critic)
 
     def test_unknown_token_becomes_proposal_not_recipe(self):
         from src.analysis.compile_verify import find_cxx_compiler

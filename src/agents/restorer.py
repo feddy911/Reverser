@@ -469,6 +469,92 @@ def repair_restore_debris(code: str) -> str:
     return t
 
 
+_DOT_METHODS = (
+    "back", "front", "size", "empty", "begin", "end", "clear", "pop_back",
+    "c_str", "data", "length", "capacity",
+)
+_RE_DOT_METHOD = re.compile(
+    r"\b([A-Za-z_]\w*)\.(" + "|".join(_DOT_METHODS) + r")\s*\(\s*\)"
+)
+
+
+def _dump_qualified_method(ghidra_code: str, meth: str) -> Optional[Tuple[str, str]]:
+    """Last Type::meth(recv) in the dump. Returns (call, recv) or None."""
+    from src.analysis.ghidra_cpp import _match_forward, _split_top_args, _type_start
+
+    blob = ghidra_code or ""
+    needle = "::" + meth
+    pos = 0
+    found: Optional[Tuple[str, str]] = None
+    while True:
+        j = blob.find(needle, pos)
+        if j < 0:
+            break
+        k = j + len(needle)
+        while k < len(blob) and blob[k] in " \t\n\r":
+            k += 1
+        if k < len(blob) and blob[k] == "(":
+            close = _match_forward(blob, k, "(", ")")
+            if close > 0:
+                t0 = _type_start(blob, j)
+                if 0 <= t0 < j:
+                    call = re.sub(r"[ \t]*\n[ \t]*", "", blob[t0 : close + 1]).strip()
+                    args = _split_top_args(blob[k + 1 : close])
+                    recv = (args[0] if args else "").strip()
+                    if call and recv:
+                        found = (call, recv)
+        pos = j + 1
+    return found
+
+
+_RECV_TYPEISH = frozenset({
+    "std", "vector", "allocator", "string", "basic_string", "int", "char",
+    "unsigned", "long", "const", "void", "size_t", "uint", "ulong",
+    "undefined", "undefined1", "undefined4", "undefined8",
+})
+
+
+def _recv_idents(recv: str) -> List[str]:
+    return [
+        tok for tok in re.findall(r"[A-Za-z_]\w*", recv or "")
+        if tok not in _RECV_TYPEISH
+    ]
+
+
+def repair_method_on_callee_name(
+    code: str,
+    *,
+    ghidra_code: str = "",
+    function_names: Optional[Sequence[str]] = None,
+) -> str:
+    """If restore does callee.method() and the dump has Type::method(recv),
+    put the dump call back so sanitize can rewrite it. Dump-faithful.
+    Does not invent dump temps that are not already in the restore body.
+    Does not bump the restore prompt.
+    """
+    names = {n for n in (function_names or []) if n and re.fullmatch(r"[A-Za-z_]\w*", n)}
+    if not code or not names:
+        return code
+    dump_cache: Dict[str, Optional[Tuple[str, str]]] = {}
+
+    def _sub(m: re.Match[str]) -> str:
+        ident, meth = m.group(1), m.group(2)
+        if ident not in names:
+            return m.group(0)
+        if meth not in dump_cache:
+            dump_cache[meth] = _dump_qualified_method(ghidra_code, meth)
+        hit = dump_cache[meth]
+        if not hit:
+            return m.group(0)
+        call, recv = hit
+        needed = _recv_idents(recv)
+        if not needed or any(tok not in code for tok in needed):
+            return m.group(0)
+        return call
+
+    return _RE_DOT_METHOD.sub(_sub, code)
+
+
 def _norm(code: str) -> str:
     return re.sub(r"\s+", "", code or "")
 

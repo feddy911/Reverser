@@ -817,6 +817,45 @@ class TestFidelitySmoke(unittest.TestCase):
         src_ok = 'std::string s = "hello";\n'
         self.assertEqual(repair_restore_debris(src_ok), src_ok)
 
+    def test_repair_method_on_callee_uses_dump_not_local(self):
+        from src.agents.restorer import repair_method_on_callee_name
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        dump = (
+            "pvVar4 = std::vector<int,_std::allocator<int>_>::back\n"
+            "                     (in_stack_ffffffffffffff78);\n"
+        )
+        names = ["series_fn", "print_series"]
+        missing_recv = (
+            "int main() {\n"
+            "  series_fn(n);\n"
+            "  std::cout << series_fn.back();\n"
+            "  std::cout << local.back();\n"
+            "}\n"
+        )
+        skipped = repair_method_on_callee_name(
+            missing_recv, ghidra_code=dump, function_names=names,
+        )
+        self.assertIn("series_fn.back()", skipped)
+        self.assertNotIn("in_stack_ffffffffffffff78", skipped)
+
+        present = (
+            "int main() {\n"
+            "  auto *in_stack_ffffffffffffff78 = series_fn(n);\n"
+            "  std::cout << series_fn.back();\n"
+            "  std::cout << local.back();\n"
+            "}\n"
+        )
+        got = repair_method_on_callee_name(
+            present, ghidra_code=dump, function_names=names,
+        )
+        self.assertNotIn("series_fn.back()", got)
+        self.assertIn("std::vector<int,_std::allocator<int>_>::back(in_stack_ffffffffffffff78)", got)
+        self.assertIn("local.back()", got)
+        san = sanitize_ghidra_cpp(got)
+        self.assertIn("back()", san)
+        self.assertNotIn("series_fn.back()", san)
+
     def test_repair_restore_debris_closes_truncated_braces(self):
         from src.agents.restorer import repair_restore_debris
 

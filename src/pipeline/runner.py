@@ -569,23 +569,37 @@ def run(config: AppConfig) -> int:
                     continue_truncated_cpp,
                     keep_dump_literals,
                     looks_truncated_cpp,
+                    repair_method_on_callee_name,
                     repair_restore_debris,
                     unwrap_restore_payload,
                 )
                 unwrap_restore_payload(data)
-                data["cpp_code"] = repair_restore_debris(
-                    keep_dump_literals(
-                        data.get("cpp_code") or "",
-                        s.get("literals") or [],
-                    )
+                dump_fn_names = [
+                    (f.get("name") or "").strip()
+                    for f in functions
+                    if (f.get("name") or "").strip()
+                ]
+                data["cpp_code"] = repair_method_on_callee_name(
+                    repair_restore_debris(
+                        keep_dump_literals(
+                            data.get("cpp_code") or "",
+                            s.get("literals") or [],
+                        )
+                    ),
+                    ghidra_code=gh_code,
+                    function_names=dump_fn_names,
                 )
                 if looks_truncated_cpp(data.get("cpp_code") or ""):
-                    data["cpp_code"] = repair_restore_debris(
-                        continue_truncated_cpp(
-                            restorer.client,
-                            data.get("cpp_code") or "",
-                            restorer.system_prompt,
-                        )
+                    data["cpp_code"] = repair_method_on_callee_name(
+                        repair_restore_debris(
+                            continue_truncated_cpp(
+                                restorer.client,
+                                data.get("cpp_code") or "",
+                                restorer.system_prompt,
+                            )
+                        ),
+                        ghidra_code=gh_code,
+                        function_names=dump_fn_names,
                     )
 
                 cls = data.get("classification", "unknown")
