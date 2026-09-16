@@ -9,6 +9,9 @@ venv/
 # Outputs
 output/
 
+# Local session notes (not part of the pipeline)
+feedback.txt
+
 # IDE
 .idea/
 .vscode/
