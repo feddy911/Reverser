@@ -12,9 +12,10 @@ ghidra_cpp: |
   }
 contains:
   - "<< ("
-  - "&std::cout"
+  - "std::cout <<"
 not_contains:
   - "std::operator<<"
   - "__fu0__ZSt4cout"
+  - "(*((&"
 compile: true
 notes: "Ghidra free std::operator<<(ostream*, x) is stream insert"

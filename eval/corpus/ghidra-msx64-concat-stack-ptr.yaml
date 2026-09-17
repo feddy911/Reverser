@@ -1,0 +1,19 @@
+id: ghidra-msx64-concat-stack-ptr
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  void wrap(Rec *p)
+  {
+    uint in_stk_n72;
+    undefined4 in_stk_n68;
+    ((Rec *)CONCAT44(in_stk_n68, in_stk_n72))->n = 1;
+  }
+contains:
+  - "p->n"
+not_contains:
+  - "CONCAT"
+  - "in_stk_"
+  - "<< 32"
+compile: true
+notes: "Microsoft x64: pointer 8 bytes, stack parameter slots 8-byte aligned. Ghidra PIECE of two 4-byte incoming homes (integer_size 4 in x86-64-win.cspec) is that pointer; CONCAT44 is little-endian. Bind to T* formal. Humans write pointers; the compiler splits them."

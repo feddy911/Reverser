@@ -713,7 +713,7 @@ def _strip_invalid_using(text: str) -> str:
 
 _RE_OSTREAM_OBJ_CAST = re.compile(
     r"\(\s*(?:std::)?(?:basic_)?ostream(?:\s*<[^()]*>)?\s*\*\s*\)\s*"
-    r"(?:std::)?(cout|cerr|clog)\b"
+    r"&?\s*(?:std::)?(cout|cerr|clog)\b"
 )
 _RE_DAT_UNDERSCORE = re.compile(r"\b_DAT_([0-9A-Fa-f]+)\b")
 _RE_MPZ_T_PTR = re.compile(r"\bmpz_t\s*\*")
@@ -880,6 +880,9 @@ def rewrite_ghidra_ostream(code: str) -> str:
     s = _rewrite_std_free_lshift("".join(out))
     s = _rewrite_unqualified_ostream_ptr_lshift(s)
     s = _wrap_ostream_lshift_assign(s)
+    s = _collapse_deref_addr(s)
+    s = _drop_unused_lshift_addr(s)
+    s = _fold_ostream_insert_chain(s)
     s = _RE_OSTREAM_ARRAY.sub(r"undefined1 \1\2", s)
     return s
 
@@ -1037,6 +1040,214 @@ def _wrap_ostream_lshift_assign(s: str) -> str:
         out.append("))")
         copied = close + 1
     out.append(s[copied:])
+    return "".join(out)
+
+
+_RE_DEREF_ADDR = re.compile(r"\(\*\(\(&([^()]+)\)\)\)")
+_RE_DEREF_ADDR_SM = re.compile(r"\(\*\(&([^()]+)\)\)")
+
+
+def _collapse_deref_addr(s: str) -> str:
+    """(*((&x))) is x. Ghidra wraps ostream this as &cout then deref."""
+    prev = None
+    t = s or ""
+    while t != prev:
+        prev = t
+        t = _RE_DEREF_ADDR.sub(r"\1", t)
+        t = _RE_DEREF_ADDR_SM.sub(r"\1", t)
+    return t
+
+
+def _ident_after_ostream_ptr_cast(inner: str) -> str | None:
+    t = (inner or "").strip()
+    while t.startswith("("):
+        close = _match_forward(t, 0, "(", ")")
+        if close < 0:
+            break
+        cast = t[: close + 1]
+        rest = t[close + 1 :].strip()
+        if "*" in cast and rest:
+            t = rest
+            continue
+        break
+    t = t.strip().strip("()")
+    if re.fullmatch(r"[A-Za-z_]\w*", t):
+        return t
+    return None
+
+
+def _parse_addr_insert_assign(s: str, i: int) -> tuple[int, str, str] | None:
+    m = re.match(r"([A-Za-z_]\w*)\s*=\s*\(&\(", s[i:])
+    if not m:
+        return None
+    ident = m.group(1)
+    open_inner = i + m.end() - 1
+    close_inner = _match_forward(s, open_inner, "(", ")")
+    if close_inner < 0:
+        return None
+    if close_inner + 1 >= len(s) or s[close_inner + 1] != ")":
+        return None
+    inner = s[open_inner + 1 : close_inner].strip()
+    if "<<" not in inner:
+        return None
+    j = close_inner + 2
+    while j < len(s) and s[j] in " \t":
+        j += 1
+    if j < len(s) and s[j] == ";":
+        j += 1
+    return j, ident, inner
+
+
+def _parse_deref_ostream_insert(s: str, i: int) -> tuple[int, str, str] | None:
+    """(*((ostream *)id)) << rhs, (*(id)) << rhs, or (*id) << rhs."""
+    n = len(s)
+    j = i
+    while j < n and s[j] in " \t\n\r":
+        j += 1
+    if j >= n or s[j] != "(":
+        return None
+    j += 1
+    while j < n and s[j] in " \t":
+        j += 1
+    if j >= n or s[j] != "*":
+        return None
+    j += 1
+    while j < n and s[j] in " \t\n\r":
+        j += 1
+    if j < n and s[j] == "(":
+        inner_close = _match_forward(s, j, "(", ")")
+        if inner_close < 0:
+            return None
+        ident = _ident_after_ostream_ptr_cast(s[j + 1 : inner_close])
+        j = inner_close + 1
+    else:
+        m = re.match(r"([A-Za-z_]\w*)", s[j:])
+        if not m:
+            return None
+        ident = m.group(1)
+        j += len(ident)
+    if not ident:
+        return None
+    while j < n and s[j] in " \t\n\r":
+        j += 1
+    if j >= n or s[j] != ")":
+        return None
+    j += 1
+    while j < n and s[j] in " \t\n\r":
+        j += 1
+    if not s.startswith("<<", j):
+        return None
+    j += 2
+    while j < n and s[j] in " \t\n\r":
+        j += 1
+    if j < n and s[j] == "(":
+        rhs_close = _match_forward(s, j, "(", ")")
+        if rhs_close < 0:
+            return None
+        rhs = s[j : rhs_close + 1]
+        end = rhs_close + 1
+    else:
+        m = re.match(
+            r"([A-Za-z_]\w*|'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\")",
+            s[j:],
+        )
+        if not m:
+            return None
+        rhs = m.group(1)
+        end = j + len(rhs)
+    return end, ident, rhs
+
+
+def _ident_span_uses(s: str, name: str) -> list[int]:
+    return [m.start() for m in re.finditer(rf"\b{re.escape(name)}\b", s)]
+
+
+def _fold_ostream_insert_chain(s: str) -> str:
+    """p = &(a << b); *p << c  is  a << b << c. Inserter returns *this."""
+    blob = s or ""
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while True:
+            k = blob.find("(&(", i)
+            if k < 0:
+                break
+            lhs = re.search(r"([A-Za-z_]\w*)\s*=\s*$", blob[:k])
+            if not lhs:
+                i = k + 2
+                continue
+            start = lhs.start(1)
+            parsed = _parse_addr_insert_assign(blob, start)
+            if not parsed:
+                i = k + 2
+                continue
+            after_asgn, ident, inner = parsed
+            nxt = _parse_deref_ostream_insert(blob, after_asgn)
+            if not nxt or nxt[1] != ident:
+                i = k + 2
+                continue
+            end, _name, rhs = nxt
+            uses = _ident_span_uses(blob, ident)
+            allowed: set[int] = {start}
+            for u in uses:
+                if _at_local_decl_name(blob, u, ident):
+                    allowed.add(u)
+            insert_ident = None
+            for u in uses:
+                if after_asgn <= u < end:
+                    insert_ident = u
+                    allowed.add(u)
+                    break
+            if insert_ident is None or any(u not in allowed for u in uses):
+                i = k + 2
+                continue
+            chained = f"{inner} << {rhs}"
+            blob = blob[:start] + chained + blob[end:]
+            trial = re.sub(
+                rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(ident)}\s*;[ \t]*\n?",
+                "",
+                blob,
+                count=1,
+                flags=re.M,
+            )
+            if not re.search(rf"\b{re.escape(ident)}\b", trial):
+                blob = trial
+            changed = True
+            i = start
+            break
+    return blob
+
+
+def _drop_unused_lshift_addr(s: str) -> str:
+    """Discarded `&(a << b)` is `a << b`. Keep the address on assignment."""
+    blob = s or ""
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while True:
+        k = blob.find("(&(", i)
+        if k < 0:
+            break
+        open_inner = k + 2
+        close_inner = _match_forward(blob, open_inner, "(", ")")
+        if close_inner < 0 or close_inner + 1 >= len(blob) or blob[close_inner + 1] != ")":
+            i = k + 2
+            continue
+        inner = blob[open_inner + 1 : close_inner]
+        if "<<" not in inner:
+            i = k + 2
+            continue
+        prev = blob[:k].rstrip()
+        prev_ch = prev[-1:] if prev else ""
+        if prev_ch not in ("", ";", "{", "}"):
+            i = k + 2
+            continue
+        out.append(blob[copied:k])
+        out.append(inner)
+        copied = close_inner + 2
+        i = copied
+    out.append(blob[copied:])
     return "".join(out)
 
 
@@ -1764,6 +1975,242 @@ def _rewrite_msx64_extraout(code: str) -> str:
     return blob
 
 
+def _ptr_cast_lparen(s: str, i: int) -> int | None:
+    j = i - 1
+    while j >= 0 and s[j] in " \t\n\r":
+        j -= 1
+    if j < 0 or s[j] != ")":
+        return None
+    depth = 0
+    k = j
+    while k >= 0:
+        ch = s[k]
+        if ch == ")":
+            depth += 1
+        elif ch == "(":
+            depth -= 1
+            if depth == 0:
+                if "*" in s[k + 1 : j]:
+                    return k
+                return None
+        k -= 1
+    return None
+
+
+def _stack_home_arg(a: str) -> str | None:
+    """CONCAT operand that is a 4-byte incoming stack home (casts stripped)."""
+    a = (a or "").strip()
+    prev = None
+    while a != prev:
+        prev = a
+        a = re.sub(r"^\([^()]*\)\s*", "", a).strip()
+        if len(a) >= 2 and a[0] == "(" and a[-1] == ")":
+            a = a[1:-1].strip()
+    hit = _RE_STACK_HOME_IDENT.fullmatch(a)
+    return hit.group(1) if hit else None
+
+
+def _concat_ptr_target(
+    ret: str, formals: list[tuple[str, str]], body: str
+) -> str | None:
+    # Microsoft x64: 8-byte pointer in RCX (sret) or the next pointer formal.
+    # Ghidra x86-64-win integer_size is 4, so the home is two PIECE varnodes.
+    if _is_msx64_sret(ret, formals, body):
+        for name in ("in_RCX", "in_ECX", "in_CX"):
+            if re.search(rf"\b{re.escape(name)}\b", body or ""):
+                return name
+    unused: str | None = None
+    used: str | None = None
+    for _pty, pname in formals:
+        if "*" not in _norm_abi_type(_pty):
+            continue
+        if pname == "this":
+            continue
+        if re.search(rf"\b{re.escape(pname)}\b", body or ""):
+            if used is None:
+                used = pname
+        elif unused is None:
+            unused = pname
+    return unused or used
+
+
+def _callee_formals_map(blob: str) -> dict[str, list[tuple[str, str]]]:
+    """Definitions and prototypes in this blob. Microsoft x64 types, not gym names."""
+    found: dict[str, list[tuple[str, str]]] = {}
+    for ident, t0, close, _end in _iter_function_defs(blob, skip_qualified=False):
+        mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
+        if not mname:
+            continue
+        open_p = t0 + mname.end() - 1
+        found[ident] = _parse_param_decls(blob[open_p + 1 : close])
+    for m in re.finditer(
+        r"(?:^|[;{}])\s*(?:[A-Za-z_:][\w:\s\*&<>,]*)\b([A-Za-z_]\w*)\s*\(([^;{}]*)\)\s*;",
+        blob or "",
+        re.M,
+    ):
+        ident = m.group(1)
+        if ident in _NOT_FN_NAMES or ident in found:
+            continue
+        found[ident] = _parse_param_decls(m.group(2))
+    return found
+
+
+def _arg_index_in_call(s: str, pos: int) -> tuple[str, int] | None:
+    i = pos
+    depth = 0
+    commas = 0
+    while i > 0:
+        i -= 1
+        ch = s[i]
+        if ch == ")":
+            depth += 1
+        elif ch == "(":
+            if depth == 0:
+                j = i
+                while j > 0 and s[j - 1] in " \t\n\r":
+                    j -= 1
+                m = re.search(r"([A-Za-z_]\w*)\s*$", s[:j])
+                if not m or m.group(1) in _NOT_FN_NAMES:
+                    return None
+                return m.group(1), commas
+            depth -= 1
+        elif ch == "," and depth == 0:
+            commas += 1
+        elif ch in "{};" and depth == 0:
+            return None
+    return None
+
+
+def _at_local_decl_name(s: str, start: int, name: str) -> bool:
+    ls = s.rfind("\n", 0, start) + 1
+    le = s.find("\n", start)
+    if le < 0:
+        le = len(s)
+    return bool(
+        re.match(
+            rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(name)}\s*;[ \t]*$",
+            s[ls:le],
+        )
+    )
+
+
+def _home_use_is_ptr(
+    s: str, start: int, end: int, formals_map: dict[str, list[tuple[str, str]]]
+) -> bool:
+    after = s[end:].lstrip()
+    if after.startswith("->") or after.startswith("."):
+        return True
+    if _ptr_cast_lparen(s, start) is not None:
+        return True
+    j = start
+    while j > 0 and s[j - 1] in " \t":
+        j -= 1
+    if j > 0 and s[j - 1] == "*":
+        return True
+    info = _arg_index_in_call(s, start)
+    if not info:
+        return False
+    callee, idx = info
+    formals = formals_map.get(callee) or []
+    if idx >= len(formals):
+        return False
+    return "*" in _norm_abi_type(formals[idx][0])
+
+
+def _rewrite_one_concat_stack_ptr(
+    blob: str, ident: str, t0: int, close: int, end: int
+) -> str:
+    """CONCAT of two 4-byte stack homes is one incoming pointer."""
+    if ident == "main":
+        return blob
+    mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
+    if not mname:
+        return blob
+    name_at = t0 + mname.start()
+    open_p = t0 + mname.end() - 1
+    ret = blob[t0:name_at].strip()
+    formals = _parse_param_decls(blob[open_p + 1 : close])
+    brace = _brace_after_params(blob, close)
+    if brace < 0:
+        return blob
+    body = blob[brace : end + 1]
+    target = _concat_ptr_target(ret, formals, body)
+    if not target:
+        return blob
+    new_body = body
+    homes: list[str] = []
+    while True:
+        hit = None
+        for m in _RE_GHIDRA_PIECE.finditer(new_body):
+            if m.group(1) != "CONCAT":
+                continue
+            sizes = _piece_sizes(m.group(2))
+            if not sizes or sizes[0] + sizes[1] != 8:
+                continue
+            open_c = m.end() - 1
+            close_c = _match_forward(new_body, open_c, "(", ")")
+            if close_c < 0:
+                continue
+            args = [a.strip() for a in _split_top_args(new_body[open_c + 1 : close_c])]
+            if len(args) != 2:
+                continue
+            hi = _stack_home_arg(args[0])
+            lo = _stack_home_arg(args[1])
+            if hi is None or lo is None:
+                continue
+            start = m.start()
+            cast_l = _ptr_cast_lparen(new_body, start)
+            if cast_l is not None:
+                start = cast_l
+            homes.extend((hi, lo))
+            hit = (start, close_c + 1)
+            break
+        if hit is None:
+            break
+        new_body = new_body[: hit[0]] + target + new_body[hit[1] :]
+    if new_body == body:
+        return blob
+    new_body = re.sub(
+        rf"\({re.escape(target)}\)\s*->",
+        f"{target}->",
+        new_body,
+    )
+    formals_map = _callee_formals_map(blob)
+    seen: set[str] = set()
+    for name in homes:
+        if name in seen:
+            continue
+        seen.add(name)
+        for m in reversed(list(re.finditer(rf"\b{re.escape(name)}\b", new_body))):
+            if _at_local_decl_name(new_body, m.start(), name):
+                continue
+            if _home_use_is_ptr(new_body, m.start(), m.end(), formals_map):
+                new_body = new_body[: m.start()] + target + new_body[m.end() :]
+        trial = re.sub(
+            rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(name)}\s*;[ \t]*\n?",
+            "",
+            new_body,
+            count=1,
+            flags=re.M,
+        )
+        if re.search(rf"\b{re.escape(name)}\b", trial):
+            continue
+        new_body = trial
+    formal_names = {pname for _pty, pname in formals}
+    if target in formal_names:
+        new_body = _strip_dup_formal_decl(new_body, target)
+    return blob[:brace] + new_body + blob[end + 1 :]
+
+
+def _rewrite_msx64_concat_stack_ptr(code: str) -> str:
+    """Bind CONCAT44 of adjacent 4-byte stack homes to the 8-byte pointer."""
+    blob = code or ""
+    spans = list(_iter_function_defs(blob, skip_qualified=True))
+    for ident, t0, close, end in reversed(spans):
+        blob = _rewrite_one_concat_stack_ptr(blob, ident, t0, close, end)
+    return blob
+
+
 def _rewrite_one_this_local(
     blob: str, _ident: str, t0: int, close: int, end: int
 ) -> str:
@@ -1969,6 +2416,7 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _outside_strings(t, _rewrite_stack_overlay)
     t = _outside_strings(t, _rewrite_in_stack_temps)
     t = _outside_strings(t, _strip_compiler_instrumentation)
+    t = _rewrite_msx64_concat_stack_ptr(t)
     t = _outside_strings(t, _rewrite_ghidra_piece_ops)
     t = _outside_strings(t, _rewrite_ghidra_func_ops)
     t = _outside_strings(t, _rewrite_bool_xor)

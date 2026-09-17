@@ -1,0 +1,21 @@
+id: ghidra-msx64-concat-used-ptr-formal
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  void wrap(Rec *p)
+  {
+    uint in_stk_n72;
+    undefined4 in_stk_n68;
+    p->n = 0;
+    ((Rec *)CONCAT44(in_stk_n68, in_stk_n72))->n = 1;
+  }
+contains:
+  - "p->n = 0"
+  - "p->n = 1"
+not_contains:
+  - "CONCAT"
+  - "in_stk_"
+  - "<< 32"
+compile: true
+notes: "The 8-byte stack home of a pointer formal is that formal even when the name already appears in the body. Compiler splits; Ghidra CONCAT is the same pointer."

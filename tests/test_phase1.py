@@ -821,6 +821,26 @@ int main(int argc, char **argv) { return 0; }
         self.assertIn("<< (", got)
         self.assertNotIn("::operator<<", got)
         self.assertIn("(&((", got)
+        report = sanitize_ghidra_cpp(
+            "void report_n(void) {\n"
+            "  std::operator<<((ostream *)&std::cout, \"n\");\n"
+            "}\n"
+        )
+        self.assertIn('std::cout << ("n")', report)
+        self.assertNotIn("(*((&", report)
+        self.assertNotIn("(&((", report)
+        chain = sanitize_ghidra_cpp(
+            "void report_n(void) {\n"
+            "  std::ostream *this;\n"
+            "  ulonglong n;\n"
+            "  this = (&(std::cout << (' ')));\n"
+            "  (*((std::ostream *)this)) << (n);\n"
+            "}\n"
+        )
+        self.assertIn("std::cout << (' ') << (n)", chain)
+        self.assertNotIn("ghidra_this", chain)
+        self.assertNotIn("this =", chain)
+        self.assertNotIn("(*((", chain)
 
     def test_free_fn_dump_this_local_renamed(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -917,6 +937,76 @@ int main(int argc, char **argv) { return 0; }
         self.assertEqual(
             leftover_msx64_extraout(extra_keep, dump=extra_keep), []
         )
+        concat_ptr = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "void wrap(Rec *p)\n"
+            "{\n"
+            "  uint in_stk_n72;\n"
+            "  undefined4 in_stk_n68;\n"
+            "  ((Rec *)CONCAT44(in_stk_n68, in_stk_n72))->n = 1;\n"
+            "}\n"
+        )
+        self.assertIn("p->n", concat_ptr)
+        self.assertNotIn("CONCAT", concat_ptr)
+        self.assertNotIn("in_stk_", concat_ptr)
+        self.assertNotIn("<< 32", concat_ptr)
+        concat_sret = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "Rec * wrap(void)\n"
+            "{\n"
+            "  Rec *in_RCX;\n"
+            "  uint in_stk_n72;\n"
+            "  undefined4 in_stk_n68;\n"
+            "  new ((Rec *)CONCAT44(in_stk_n68, in_stk_n72)) Rec();\n"
+            "  return in_RCX;\n"
+            "}\n"
+        )
+        self.assertIn("new (in_RCX)", concat_sret)
+        self.assertNotIn("CONCAT", concat_sret)
+        self.assertNotIn("<< 32", concat_sret)
+        concat_piece = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "void use(Rec *q);\n"
+            "void wrap(Rec *p)\n"
+            "{\n"
+            "  uint in_stk_n72;\n"
+            "  undefined4 in_stk_n68;\n"
+            "  ((Rec *)CONCAT44(in_stk_n68, in_stk_n72))->n = 1;\n"
+            "  use(in_stk_n72);\n"
+            "}\n"
+        )
+        self.assertIn("p->n", concat_piece)
+        self.assertIn("use(p)", concat_piece)
+        self.assertNotIn("in_stk_", concat_piece)
+        concat_used = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "void wrap(Rec *p)\n"
+            "{\n"
+            "  uint in_stk_n72;\n"
+            "  undefined4 in_stk_n68;\n"
+            "  p->n = 0;\n"
+            "  ((Rec *)CONCAT44((undefined4)in_stk_n68, (uint)in_stk_n72))->n = 1;\n"
+            "}\n"
+        )
+        self.assertIn("p->n = 0", concat_used)
+        self.assertIn("p->n = 1", concat_used)
+        self.assertNotIn("CONCAT", concat_used)
+        self.assertNotIn("in_stk_", concat_used)
+        concat_int = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "void use(uint k);\n"
+            "void wrap(Rec *p)\n"
+            "{\n"
+            "  uint in_stk_n72;\n"
+            "  undefined4 in_stk_n68;\n"
+            "  ((Rec *)CONCAT44(in_stk_n68, in_stk_n72))->n = 1;\n"
+            "  use(in_stk_n72);\n"
+            "}\n"
+        )
+        self.assertIn("p->n", concat_int)
+        self.assertIn("use(in_stk_n72)", concat_int)
+        self.assertNotIn("use(p)", concat_int)
+        self.assertNotIn("CONCAT", concat_int)
 
     def test_emit_sanitized_restore_keeps_raw(self):
         from src.analysis.ghidra_cpp import emit_sanitized_restore
@@ -1042,7 +1132,7 @@ int main(int argc, char **argv) { return 0; }
         self.assertIn("<< (", got)
         self.assertNotIn("filesystem::__cxx11::operator<<", got)
         self.assertNotIn("filesystem::operator<<", got)
-        self.assertIn("&std::cout", got)
+        self.assertIn("std::cout <<", got)
         self.assertNotIn("_refptr__ZSt4cout", got)
 
     def test_string_ctor_deref_alloc_ident(self):
@@ -1378,7 +1468,7 @@ int main(int argc, char **argv) { return 0; }
             "std::operator<<(poVar1, \"\\n\");\n"
         )
         self.assertIn("<< (", got)
-        self.assertIn("&std::cout", got)
+        self.assertIn("std::cout <<", got)
         self.assertNotIn("std::operator<<", got)
         self.assertNotIn("__fu0__ZSt4cout", got)
 

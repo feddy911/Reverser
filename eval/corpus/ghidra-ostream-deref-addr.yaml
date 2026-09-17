@@ -1,0 +1,18 @@
+id: ghidra-ostream-deref-addr
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void report_n(void)
+  {
+    std::operator<<((ostream *)&std::cout, "n");
+    std::operator<<((ostream *)&std::cout, '\n');
+  }
+contains:
+  - "std::cout << (\"n\")"
+  - "std::cout << ('\\n')"
+not_contains:
+  - "(*((&"
+  - "::operator<<"
+  - "(&(("
+compile: true
+notes: "Ghidra operator<<(ostream*, x) is an ostream& insert. (*(&std::cout)) is std::cout. A discarded address-of the insert is not a value."

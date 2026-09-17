@@ -197,6 +197,32 @@ class TestCorpusEval(unittest.TestCase):
         self.assertIn("make()", keep.ghidra_cpp)
         self.assertNotIn("return make", keep.ghidra_cpp)
 
+    def test_ostream_deref_and_concat_ptr_fixtures_are_loaded(self):
+        cases = {c.id: c for c in load_corpus()}
+        ostream = cases["ghidra-ostream-deref-addr"]
+        self.assertTrue(ostream.compile)
+        self.assertIn("std::cout", ostream.ghidra_cpp)
+        self.assertNotIn("Series", ostream.ghidra_cpp)
+        self.assertNotIn("FibTimer", ostream.ghidra_cpp)
+        concat = cases["ghidra-msx64-concat-stack-ptr"]
+        self.assertTrue(concat.compile)
+        self.assertIn("CONCAT44", concat.ghidra_cpp)
+        self.assertNotIn("vector", concat.ghidra_cpp)
+        self.assertNotIn("FibTimer", concat.ghidra_cpp)
+        piece = cases["ghidra-msx64-concat-stack-piece-use"]
+        self.assertTrue(piece.compile)
+        self.assertIn("use(in_stk_n72)", piece.ghidra_cpp)
+        self.assertNotIn("vector", piece.ghidra_cpp)
+        used = cases["ghidra-msx64-concat-used-ptr-formal"]
+        self.assertTrue(used.compile)
+        self.assertIn("p->n = 0", used.ghidra_cpp)
+        self.assertIn("CONCAT44", used.ghidra_cpp)
+        chain = cases["ghidra-ostream-insert-chain"]
+        self.assertTrue(chain.compile)
+        self.assertIn("(*((std::ostream *)this))", chain.ghidra_cpp)
+        self.assertNotIn("Series", chain.ghidra_cpp)
+        self.assertNotIn("FibTimer", chain.ghidra_cpp)
+
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):
     def test_restore_body_and_cache_stay_put(self):

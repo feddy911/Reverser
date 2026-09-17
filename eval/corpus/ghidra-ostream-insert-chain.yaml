@@ -1,0 +1,20 @@
+id: ghidra-ostream-insert-chain
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void report_n(void)
+  {
+    std::ostream *this;
+    ulonglong n;
+    this = (&(std::cout << (' ')));
+    (*((std::ostream *)this)) << (n);
+  }
+contains:
+  - "std::cout << (' ') << (n)"
+not_contains:
+  - "ghidra_this"
+  - "(*(("
+  - "this ="
+  - "ostream *this"
+compile: true
+notes: "C++ inserter returns basic_ostream& (*this). &(s << x) is &s. An adjacent insert through that pointer is s << x << y, not a this-temp."
