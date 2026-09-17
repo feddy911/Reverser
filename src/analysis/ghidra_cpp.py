@@ -1355,10 +1355,24 @@ def _abi_types_compatible(decl_ty: str, param_ty: str) -> bool:
     return False
 
 
-def leftover_msx64_in_regs(code: str) -> list[str]:
+_SRET_SLOT_REGS = frozenset({"in_RCX", "in_ECX", "in_CX"})
+
+
+def _first_fn_return_type(code: str) -> str:
+    blob = code or ""
+    for ident, t0, close, _end in _iter_function_defs(blob, skip_qualified=True):
+        mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
+        if not mname:
+            continue
+        return blob[t0 : t0 + mname.start()].strip()
+    return ""
+
+
+def leftover_msx64_in_regs(code: str, *, dump: str = "") -> list[str]:
     """Incoming-register aliases still in the body after msx64 bind.
 
     String literals and // comments are ignored. in_stack_* is not this lever.
+    Microsoft x64 sret keeps RCX as the hidden return slot; that is not leftover.
     """
     blob = re.sub(r'"(?:\\.|[^"\\])*"', " ", code or "")
     blob = re.sub(r"//.*?$", " ", blob, flags=re.M)
@@ -1367,7 +1381,64 @@ def leftover_msx64_in_regs(code: str) -> list[str]:
         for name in aliases:
             if re.search(rf"\b{re.escape(name)}\b", blob):
                 found.append(name)
+    if not found:
+        return found
+    sig = dump if str(dump).strip() else code
+    if _code_is_msx64_sret(sig):
+        found = [n for n in found if n not in _SRET_SLOT_REGS]
     return found
+
+
+_RE_EXTRAOUT_NAME = re.compile(r"\bextraout_[A-Za-z][A-Za-z0-9]*\b")
+
+
+def _list_extraout_names(body: str) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _RE_EXTRAOUT_NAME.finditer(body or ""):
+        name = m.group(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def _extraout_alias_ident(body: str, name: str) -> str | None:
+    """Dump assigned extraout from a simple ident. A CALL is not an ident."""
+    m = re.search(
+        rf"^[ \t]*{re.escape(name)}\s*=\s*([A-Za-z_]\w*)\s*;",
+        body or "",
+        re.M,
+    )
+    if not m:
+        return None
+    ident = m.group(1)
+    if ident == name or ident.startswith("extraout_"):
+        return None
+    if ident in _NOT_FN_NAMES or ident in ("true", "false", "nullptr"):
+        return None
+    return ident
+
+
+def leftover_msx64_extraout(code: str, *, dump: str = "") -> list[str]:
+    """extraout_* still in restore: invented, or dump assigned an ident.
+
+    Ghidra extraout after a CALL with no assignment is dump-faithful.
+    """
+    blob = re.sub(r'"(?:\\.|[^"\\])*"', " ", code or "")
+    blob = re.sub(r"//.*?$", " ", blob, flags=re.M)
+    found = _list_extraout_names(blob)
+    if not found:
+        return found
+    dump_blob = dump if str(dump).strip() else ""
+    out: list[str] = []
+    for name in found:
+        if dump_blob and re.search(rf"\b{re.escape(name)}\b", dump_blob):
+            if _extraout_alias_ident(dump_blob, name) is None:
+                continue
+        out.append(name)
+    return out
 
 
 def emit_sanitized_restore(data: dict) -> None:
@@ -1392,6 +1463,55 @@ def _looks_msx64_sret(ret: str) -> bool:
     return any(k in r for k in ("string", "vector", "pair", "map", "set", "list"))
 
 
+def _rcx_decl_type(body: str) -> str | None:
+    for name in ("in_RCX", "in_ECX", "in_CX"):
+        ty = _in_reg_decl_type(body, name)
+        if ty is not None:
+            return ty
+    return None
+
+
+def _is_msx64_sret(
+    ret: str, formals: list[tuple[str, str]], body: str
+) -> bool:
+    """Hidden return in RCX: container name or dump shape.
+
+    Ghidra prints T* for a by-value return. strcpy-like T* copy(T*) keeps
+    RCX as the first formal (same type). User T* vs int* first formal is sret.
+    """
+    if _looks_msx64_sret(ret):
+        return True
+    if "*" not in _norm_abi_type(ret):
+        return False
+    rcx_ty = _rcx_decl_type(body)
+    if rcx_ty is None:
+        return False
+    if not _abi_types_compatible(rcx_ty, ret):
+        return False
+    if not formals:
+        return True
+    first_pty, first_pn = formals[0]
+    if first_pn == "this":
+        return bool(re.search(r"\bin_(?:RDX|EDX|DX)\b", body or ""))
+    return not _abi_types_compatible(rcx_ty, first_pty)
+
+
+def _code_is_msx64_sret(code: str) -> bool:
+    blob = code or ""
+    for ident, t0, close, end in _iter_function_defs(blob, skip_qualified=True):
+        mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
+        if not mname:
+            continue
+        ret = blob[t0 : t0 + mname.start()].strip()
+        open_p = t0 + mname.end() - 1
+        formals = _parse_param_decls(blob[open_p + 1 : close])
+        brace = _brace_after_params(blob, close)
+        if brace < 0:
+            continue
+        return _is_msx64_sret(ret, formals, blob[brace : end + 1])
+    return False
+
+
 def _parse_param_decls(inner: str) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for raw in _split_top_args(inner):
@@ -1405,6 +1525,11 @@ def _parse_param_decls(inner: str) -> list[tuple[str, str]]:
     return out
 
 
+_STMT_LEAD = re.compile(
+    r"^(?:return|goto|break|continue|delete|throw|co_return|co_yield)\b"
+)
+
+
 def _in_reg_decl_type(body: str, name: str) -> str | None:
     m = re.search(
         rf"^[ \t]*([A-Za-z_:][\w:\s\*&<>,]*)\b{re.escape(name)}\s*;",
@@ -1413,7 +1538,27 @@ def _in_reg_decl_type(body: str, name: str) -> str | None:
     )
     if not m:
         return None
-    return m.group(1).strip()
+    ty = m.group(1).strip()
+    if _STMT_LEAD.match(ty):
+        return None
+    return ty
+
+
+def _strip_dup_formal_decl(body: str, pname: str) -> str:
+    """Drop a leftover local that now shadows the formal. Keep `return n;`."""
+
+    def repl(m: re.Match) -> str:
+        if _STMT_LEAD.match(m.group(1).strip()):
+            return m.group(0)
+        return ""
+
+    return re.sub(
+        rf"^[ \t]*([A-Za-z_:][\w:\s\*&<>,]*)\b{re.escape(pname)}\s*;[ \t]*\n?",
+        repl,
+        body,
+        count=1,
+        flags=re.M,
+    )
 
 
 def _rewrite_one_msx64_fn(blob: str, ident: str, t0: int, close: int, end: int) -> str:
@@ -1426,15 +1571,16 @@ def _rewrite_one_msx64_fn(blob: str, ident: str, t0: int, close: int, end: int) 
     open_p = t0 + mname.end() - 1
     ret = blob[t0:name_at].strip()
     formals = _parse_param_decls(blob[open_p + 1 : close])
-    if not formals:
-        return blob
     brace = _brace_after_params(blob, close)
     if brace < 0:
         return blob
     body = blob[brace : end + 1]
     if "in_" not in body:
         return blob
-    start_slot = 1 if _looks_msx64_sret(ret) else 0
+    start_slot = 1 if _is_msx64_sret(ret, formals, body) else 0
+    this_local = _in_reg_decl_type(body, "this") is not None
+    if not formals and not (start_slot and this_local):
+        return blob
     repl: dict[str, str] = {}
     for i, (_pty, pname) in enumerate(formals):
         slot = start_slot + i
@@ -1452,18 +1598,28 @@ def _rewrite_one_msx64_fn(blob: str, ident: str, t0: int, close: int, end: int) 
             if not _abi_types_compatible(decl_ty, _pty):
                 continue
             repl[alias] = pname
+    if start_slot and this_local and all(pn != "this" for _pt, pn in formals):
+        for alias in _MS64_INT_REGS[1]:
+            if alias in repl:
+                continue
+            if not re.search(rf"\b{re.escape(alias)}\b", body):
+                continue
+            repl[alias] = "this"
     if not repl:
         return blob
     new_body = body
     for alias, pname in sorted(repl.items(), key=lambda kv: -len(kv[0])):
-        new_body = re.sub(rf"\b{re.escape(alias)}\b", pname, new_body)
         new_body = re.sub(
-            rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(pname)}\s*;[ \t]*\n?",
+            rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(alias)}\s*;[ \t]*\n?",
             "",
             new_body,
             count=1,
             flags=re.M,
         )
+        new_body = re.sub(rf"\b{re.escape(alias)}\b", pname, new_body)
+        if pname == "this":
+            continue
+        new_body = _strip_dup_formal_decl(new_body, pname)
     return blob[:brace] + new_body + blob[end + 1 :]
 
 
@@ -1507,7 +1663,7 @@ def _rewrite_one_msx64_stack_homes(
 ) -> str:
     """Bind dump-declared stack homes to unused formals. Skip main.
 
-    Ghidra often types the home as Point* while the prototype is vector*.
+    Ghidra often types the home pointee unlike the formal (T* vs vector*).
     Both-pointer is enough; do not invent a source identifier. No decl — no
     bind (undeclared in_stack transplant is a known regression).
     """
@@ -1545,13 +1701,7 @@ def _rewrite_one_msx64_stack_homes(
     new_body = body
     for alias, pname in sorted(repl.items(), key=lambda kv: -len(kv[0])):
         new_body = re.sub(rf"\b{re.escape(alias)}\b", pname, new_body)
-        new_body = re.sub(
-            rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(pname)}\s*;[ \t]*\n?",
-            "",
-            new_body,
-            count=1,
-            flags=re.M,
-        )
+        new_body = _strip_dup_formal_decl(new_body, pname)
     return blob[:brace] + new_body + blob[end + 1 :]
 
 
@@ -1561,6 +1711,56 @@ def _rewrite_msx64_stack_homes(code: str) -> str:
     spans = list(_iter_function_defs(blob, skip_qualified=True))
     for ident, t0, close, end in reversed(spans):
         blob = _rewrite_one_msx64_stack_homes(blob, ident, t0, close, end)
+    return blob
+
+
+def _rewrite_one_extraout(
+    blob: str, _ident: str, t0: int, close: int, end: int
+) -> str:
+    """Collapse extraout_* when the dump assigned it from a simple ident."""
+    brace = _brace_after_params(blob, close)
+    if brace < 0:
+        return blob
+    body = blob[brace : end + 1]
+    names = _list_extraout_names(body)
+    if not names:
+        return blob
+    repl: dict[str, str] = {}
+    for name in names:
+        ident = _extraout_alias_ident(body, name)
+        if ident is None:
+            continue
+        repl[name] = ident
+    if not repl:
+        return blob
+    new_body = body
+    for name, ident in sorted(repl.items(), key=lambda kv: -len(kv[0])):
+        new_body = re.sub(
+            rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(name)}\s*;[ \t]*\n?",
+            "",
+            new_body,
+            count=1,
+            flags=re.M,
+        )
+        new_body = re.sub(
+            rf"^[ \t]*{re.escape(name)}\s*=\s*{re.escape(ident)}\s*;[ \t]*\n?",
+            "",
+            new_body,
+            count=1,
+            flags=re.M,
+        )
+        new_body = re.sub(rf"\b{re.escape(name)}\b", ident, new_body)
+        if ident != "this":
+            new_body = _strip_dup_formal_decl(new_body, ident)
+    return blob[:brace] + new_body + blob[end + 1 :]
+
+
+def _rewrite_msx64_extraout(code: str) -> str:
+    """Bind dump-assigned extraout_* aliases. Do not invent a CALL return."""
+    blob = code or ""
+    spans = list(_iter_function_defs(blob, skip_qualified=False))
+    for ident, t0, close, end in reversed(spans):
+        blob = _rewrite_one_extraout(blob, ident, t0, close, end)
     return blob
 
 
@@ -1752,6 +1952,7 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _outside_strings(t, _strip_empty_allocator_dtors)
     t = _rewrite_msx64_incoming(t)
     t = _rewrite_msx64_stack_homes(t)
+    t = _rewrite_msx64_extraout(t)
     t = _rewrite_const_iter_begin_assign(t)
     t = _rewrite_string_ref_deref(t)
     t = _rewrite_const_ref_arrow(t)

@@ -1,0 +1,22 @@
+id: ghidra-msx64-sret-this
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  string * wrap(void)
+  {
+    string *in_RCX;
+    Rec *this;
+    undefined8 in_RDX;
+    (void)in_RDX;
+    this->n = 1;
+    return in_RCX;
+  }
+contains:
+  - "ghidra_this"
+  - "in_RCX"
+not_contains:
+  - "in_RDX"
+  - "Rec *this"
+compile: true
+notes: "Microsoft x64: hidden return in RCX, this in RDX. Ghidra Decompiler Concepts auto-parameter. Dump may keep this as a local of a free function; bind in_RDX then rename that local."

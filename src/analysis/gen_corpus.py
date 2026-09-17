@@ -111,7 +111,7 @@ def _is_protected(ident: str) -> bool:
         "CONCAT", "ZEXT", "SEXT", "SUB", "CARRY", "SCARRY", "SBORROW",
         "POPCOUNT", "LZCOUNT", "INT2FLOAT", "FLOAT2FLOAT",
         "in_RCX", "in_RDX", "in_R8", "in_R9", "in_ECX", "in_EDX",
-        "in_CX", "in_DX",
+        "in_CX", "in_DX", "extraout_", "unaff_",
     )):
         return True
     if ident in {

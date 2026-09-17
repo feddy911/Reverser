@@ -990,6 +990,112 @@ class TestCritic(unittest.TestCase):
         self.assertTrue(stack.identity_ok)
         quoted = 'void show_rec(Rec *p) { (void)p; const char *s = "in_RCX"; }\n'
         self.assertTrue(review_function(entry, quoted, []).identity_ok)
+        invented_sret = (
+            "string * show_rec(Rec *p) {\n"
+            "  undefined8 *in_RCX;\n"
+            "  (void)*in_RCX;\n"
+            "}\n"
+        )
+        self.assertFalse(review_function(entry, invented_sret, []).identity_ok)
+        sret_entry = {
+            "address": "0x2",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": (
+                "string * wrap(int *n)\n"
+                "{\n"
+                "  string *in_RCX;\n"
+                "  return in_RCX;\n"
+                "}\n"
+            ),
+        }
+        sret_ok = (
+            "string * wrap(int *n) {\n"
+            "  string *in_RCX;\n"
+            "  (void)n;\n"
+            "  return in_RCX;\n"
+            "}\n"
+        )
+        self.assertTrue(review_function(sret_entry, sret_ok, []).identity_ok)
+        sret_rdx = (
+            "string * wrap(int *n) {\n"
+            "  string *in_RCX;\n"
+            "  undefined8 in_RDX;\n"
+            "  (void)in_RDX;\n"
+            "  return in_RCX;\n"
+            "}\n"
+        )
+        rdx_v = review_function(sret_entry, sret_rdx, [])
+        self.assertFalse(rdx_v.identity_ok)
+        self.assertTrue(any("restore leftover in_REG" in r for r in rdx_v.reasons))
+        rec_entry = {
+            "address": "0x3",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": (
+                "struct Rec { int n; };\n"
+                "Rec * wrap(int *n)\n"
+                "{\n"
+                "  Rec *in_RCX;\n"
+                "  return in_RCX;\n"
+                "}\n"
+            ),
+        }
+        rec_ok = (
+            "Rec * wrap(int *n) {\n"
+            "  Rec *in_RCX;\n"
+            "  (void)n;\n"
+            "  return in_RCX;\n"
+            "}\n"
+        )
+        self.assertTrue(review_function(rec_entry, rec_ok, []).identity_ok)
+        extra_dump = (
+            "struct Rec { int n; };\n"
+            "Rec * make(void);\n"
+            "Rec * wrap(void)\n"
+            "{\n"
+            "  Rec *extraout_RAX;\n"
+            "  make();\n"
+            "  return extraout_RAX;\n"
+            "}\n"
+        )
+        extra_entry = {
+            "address": "0x4",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": extra_dump,
+        }
+        self.assertTrue(review_function(extra_entry, extra_dump, []).identity_ok)
+        invented_extra = (
+            "Rec * wrap(void) {\n"
+            "  Rec *extraout_RAX;\n"
+            "  return extraout_RAX;\n"
+            "}\n"
+        )
+        inv = review_function(
+            {
+                "address": "0x5",
+                "guessed_name": "wrap",
+                "ghidra_name": "wrap",
+                "name": "wrap",
+                "literals": [],
+                "ext_calls": [],
+                "ghidra_code": "Rec * wrap(void) { return p; }\n",
+            },
+            invented_extra,
+            [],
+        )
+        self.assertFalse(inv.identity_ok)
+        self.assertTrue(any("restore leftover extraout" in r for r in inv.reasons))
 
     def test_restore_ellipsis_stub_is_identity_fail(self):
         entry = {

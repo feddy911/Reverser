@@ -569,6 +569,7 @@ def run(config: AppConfig) -> int:
                     continue_truncated_cpp,
                     keep_dump_literals,
                     looks_truncated_cpp,
+                    repair_calls_from_dump,
                     repair_method_on_callee_name,
                     repair_restore_debris,
                     unwrap_restore_payload,
@@ -579,6 +580,11 @@ def run(config: AppConfig) -> int:
                     for f in functions
                     if (f.get("name") or "").strip()
                 ]
+                callee_dump_by_name = {
+                    n: (f.get("ghidra_code") or "")
+                    for f in functions
+                    if (n := (f.get("name") or "").strip())
+                }
                 data["cpp_code"] = repair_method_on_callee_name(
                     repair_restore_debris(
                         keep_dump_literals(
@@ -620,7 +626,15 @@ def run(config: AppConfig) -> int:
                 from src.analysis.ghidra_cpp import emit_sanitized_restore
 
                 # After cache.put: dialect bind lives on the run body, not the
-                # restore cache key.
+                # restore cache key. Call-site transplant is after stack-home
+                # bind so homes are not rewritten back onto vector* formals.
+                emit_sanitized_restore(data)
+                data["cpp_code"] = repair_calls_from_dump(
+                    data.get("cpp_code") or "",
+                    ghidra_code=gh_code,
+                    function_names=dump_fn_names,
+                    callee_dump_by_name=callee_dump_by_name,
+                )
                 emit_sanitized_restore(data)
 
                 cls = data.get("classification", "unknown")

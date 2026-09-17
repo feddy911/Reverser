@@ -622,6 +622,180 @@ def repair_method_on_callee_name(
     return _insert_dump_decls(out, uniq)
 
 
+def _iter_call_sites(code: str, name: str) -> List[Tuple[int, int, str]]:
+    """Non-definition `name(` spans: (open_paren, close_paren, inner)."""
+    from src.analysis.ghidra_cpp import _match_forward
+
+    s = code or ""
+    out: List[Tuple[int, int, str]] = []
+    if not name:
+        return out
+    for m in re.finditer(rf"\b{re.escape(name)}\s*\(", s):
+        open_p = m.end() - 1
+        close = _match_forward(s, open_p, "(", ")")
+        if close < 0:
+            continue
+        after = s[close + 1 :].lstrip()
+        if after.startswith("{"):
+            continue
+        out.append((open_p, close, s[open_p + 1 : close]))
+    return out
+
+
+def _dump_fn_param_types(dump: str, name: str) -> List[str]:
+    from src.analysis.ghidra_cpp import named_function_span, _parse_param_decls
+
+    span = named_function_span(dump or "", name, skip_qualified=True)
+    if not span:
+        return []
+    _t0, close, _end = span
+    blob = dump or ""
+    open_p = blob.rfind("(", 0, close + 1)
+    if open_p < 0:
+        return []
+    return [pty for pty, _pn in _parse_param_decls(blob[open_p + 1 : close])]
+
+
+def _declares_ptr_ident(code: str, ident: str) -> bool:
+    return bool(re.search(rf"\*\s*{re.escape(ident)}\b", code or ""))
+
+
+def _ident_decl_type(code: str, ident: str) -> str:
+    """Local or formal type of ident, or empty. Does not invent."""
+    from src.analysis.ghidra_cpp import (
+        _in_reg_decl_type,
+        _iter_function_defs,
+        _parse_param_decls,
+    )
+
+    ty = _in_reg_decl_type(code or "", ident)
+    if ty:
+        return ty
+    blob = code or ""
+    for name, t0, close, _end in _iter_function_defs(blob, skip_qualified=True):
+        mname = re.search(rf"\b{re.escape(name)}\s*\(", blob[t0 : close + 1])
+        if not mname:
+            continue
+        open_p = t0 + mname.end() - 1
+        for pty, pname in _parse_param_decls(blob[open_p + 1 : close]):
+            if pname == ident:
+                return pty
+    return ""
+
+
+def _arg_ok_for_param(arg: str, pty: str, caller: str) -> bool:
+    a = (arg or "").strip()
+    if not a:
+        return False
+    if "*" not in (pty or ""):
+        return True
+    if a.startswith("&"):
+        return False
+    if re.fullmatch(r"[A-Za-z_]\w*", a):
+        if not _declares_ptr_ident(caller, a):
+            return False
+        decl = _ident_decl_type(caller, a)
+        if not decl:
+            return True
+        from src.analysis.ghidra_cpp import _abi_types_compatible
+
+        return _abi_types_compatible(decl, pty)
+    return "*" in a or a.startswith("(")
+
+
+def _restore_args_ok(inner: str, ptys: Sequence[str], caller: str) -> bool:
+    from src.analysis.ghidra_cpp import _split_top_args
+
+    if not ptys:
+        return True
+    args = _split_top_args(inner)
+    if not args and ptys:
+        return False
+    for i, a in enumerate(args):
+        if i >= len(ptys):
+            break
+        if not _arg_ok_for_param(a, ptys[i], caller):
+            return False
+    return True
+
+
+def repair_calls_from_dump(
+    code: str,
+    *,
+    ghidra_code: str = "",
+    function_names: Optional[Sequence[str]] = None,
+    callee_dump_by_name: Optional[Dict[str, str]] = None,
+) -> str:
+    """If restore calls a dump sibling with args that miss the callee proto,
+    put the dump call args back. Dump-faithful.
+
+    Recv may be missing from restore only when the dump itself declares it.
+    Does not invent a receiver. Does not bump the restore prompt.
+    """
+    from src.analysis.ghidra_cpp import _split_top_args
+
+    names = [
+        n
+        for n in (function_names or [])
+        if n and n != "main" and re.fullmatch(r"[A-Za-z_]\w*", n)
+    ]
+    if not code or not names or not (ghidra_code or "").strip():
+        return code
+    dumps = callee_dump_by_name or {}
+    out = code
+    pending: List[str] = []
+    seen_decl: Set[str] = set()
+
+    for callee in sorted(names, key=len, reverse=True):
+        dump_calls = _iter_call_sites(ghidra_code, callee)
+        if not dump_calls:
+            continue
+        ptys = _dump_fn_param_types(dumps.get(callee) or "", callee)
+        if not ptys:
+            continue
+        rest_calls = _iter_call_sites(out, callee)
+        if not rest_calls:
+            continue
+        n = min(len(dump_calls), len(rest_calls))
+        for i in range(n - 1, -1, -1):
+            _do, _dc, dump_inner = dump_calls[i]
+            open_p, close, rest_inner = rest_calls[i]
+            if _restore_args_ok(rest_inner, ptys, out):
+                continue
+            dump_flat = re.sub(r"[ \t]*\r?\n[ \t]*", "", dump_inner).replace("\r", "")
+            dump_flat = re.sub(r"\s+", " ", dump_flat).strip()
+            recvs: List[str] = []
+            for raw in _split_top_args(dump_flat):
+                recvs.extend(_recv_idents(raw))
+            if not recvs:
+                continue
+            inserts: List[str] = []
+            ok = True
+            for tok in recvs:
+                if _tok_in_restore(tok, out) or tok in seen_decl:
+                    continue
+                decl = _dump_recv_decl(ghidra_code, tok)
+                if not decl:
+                    ok = False
+                    break
+                inserts.append(decl)
+                seen_decl.add(tok)
+            if not ok:
+                continue
+            pending.extend(inserts)
+            out = out[: open_p + 1] + dump_flat + out[close:]
+            rest_calls = _iter_call_sites(out, callee)
+
+    uniq: List[str] = []
+    hit: Set[str] = set()
+    for d in pending:
+        if d in hit:
+            continue
+        hit.add(d)
+        uniq.append(d)
+    return _insert_dump_decls(out, uniq)
+
+
 def _norm(code: str) -> str:
     return re.sub(r"\s+", "", code or "")
 

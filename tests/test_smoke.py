@@ -890,6 +890,148 @@ class TestFidelitySmoke(unittest.TestCase):
         self.assertIn("back()", san)
         self.assertNotIn("series_fn.back()", san)
 
+    def test_repair_calls_from_dump_pointer_proto(self):
+        from src.agents.restorer import repair_calls_from_dump
+
+        callee_dump = (
+            "void show_items(vector<int,_std::allocator<int>_> *xs)\n"
+            "{\n  (void)xs;\n}\n"
+        )
+        caller_dump = (
+            "int walk_n(void)\n"
+            "{\n"
+            "  vector<int,_std::allocator<int>_> *in_stack_ffffffffffffff78;\n"
+            "  uint n;\n"
+            "  n = 3;\n"
+            "  show_items(in_stack_ffffffffffffff78);\n"
+            "  return (int)n;\n"
+            "}\n"
+        )
+        restore = (
+            "int walk_n(void) {\n"
+            "  vector<int,_std::allocator<int>_> * in_stack_ffffffffffffff78;\n"
+            "  uint n = 3;\n"
+            "  show_items(n);\n"
+            "  return (int)n;\n"
+            "}\n"
+        )
+        got = repair_calls_from_dump(
+            restore,
+            ghidra_code=caller_dump,
+            function_names=["show_items", "walk_n"],
+            callee_dump_by_name={"show_items": callee_dump},
+        )
+        self.assertIn("show_items(in_stack_ffffffffffffff78)", got)
+        self.assertNotIn("show_items(n)", got)
+        keep = repair_calls_from_dump(
+            "int walk_n(void) { uint n = 3; fill_n(n); return (int)n; }\n",
+            ghidra_code=(
+                "int walk_n(void) { uint in_stack_ffffffffffffff80; "
+                "fill_n(in_stack_ffffffffffffff80); }\n"
+            ),
+            function_names=["fill_n"],
+            callee_dump_by_name={"fill_n": "void fill_n(uint k) { (void)k; }\n"},
+        )
+        self.assertIn("fill_n(n)", keep)
+        skipped = repair_calls_from_dump(
+            "int walk_n(void) { uint n = 3; show_items(n); }\n",
+            ghidra_code="int walk_n(void) { show_items(in_stack_ffffffffffffff78); }\n",
+            function_names=["show_items"],
+            callee_dump_by_name={"show_items": callee_dump},
+        )
+        self.assertIn("show_items(n)", skipped)
+        self.assertNotIn("in_stack_ffffffffffffff78", skipped)
+
+    def test_repair_calls_from_dump_pointer_elem_mismatch(self):
+        from src.agents.restorer import repair_calls_from_dump
+
+        callee_dump = (
+            "double span_of(Rec *a, Rec *b)\n"
+            "{\n  (void)a; (void)b; return 0;\n}\n"
+        )
+        caller_dump = (
+            "int walk_n(vector<Rec,_std::allocator<Rec>_> *xs, Rec *q)\n"
+            "{\n"
+            "  Rec *in_stack_ffffffffffffffb8;\n"
+            "  Rec *in_stack_ffffffffffffffc0;\n"
+            "  span_of(in_stack_ffffffffffffffb8, in_stack_ffffffffffffffc0);\n"
+            "  return 0;\n"
+            "}\n"
+        )
+        restore = (
+            "int walk_n(vector<Rec,_std::allocator<Rec>_> *xs, Rec *q) {\n"
+            "  span_of(xs, q);\n"
+            "  return 0;\n"
+            "}\n"
+        )
+        got = repair_calls_from_dump(
+            restore,
+            ghidra_code=caller_dump,
+            function_names=["span_of", "walk_n"],
+            callee_dump_by_name={"span_of": callee_dump},
+        )
+        self.assertIn(
+            "span_of(in_stack_ffffffffffffffb8, in_stack_ffffffffffffffc0)",
+            got,
+        )
+        self.assertNotIn("span_of(xs, q)", got)
+        keep = repair_calls_from_dump(
+            "int walk_n(Rec *a, Rec *b) { span_of(a, b); return 0; }\n",
+            ghidra_code=(
+                "int walk_n(Rec *a, Rec *b) { "
+                "span_of(in_stack_ffffffffffffffb8, in_stack_ffffffffffffffc0); }\n"
+            ),
+            function_names=["span_of"],
+            callee_dump_by_name={"span_of": callee_dump},
+        )
+        self.assertIn("span_of(a, b)", keep)
+        opaque = repair_calls_from_dump(
+            "int walk_n(Rec *p) { undefined8 *in_RCX; span_of(in_RCX, p); return 0; }\n",
+            ghidra_code=(
+                "int walk_n(Rec *p) { Rec *in_stack_ffffffffffffffb8; "
+                "span_of(in_stack_ffffffffffffffb8, p); }\n"
+            ),
+            function_names=["span_of"],
+            callee_dump_by_name={"span_of": callee_dump},
+        )
+        self.assertIn("span_of(in_RCX, p)", opaque)
+
+    def test_repair_calls_after_stack_home_bind(self):
+        from src.agents.restorer import repair_calls_from_dump
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        callee_dump = (
+            "double span_of(Rec *a, Rec *b)\n"
+            "{\n  (void)a; (void)b; return 0;\n}\n"
+        )
+        caller = (
+            "int walk_n(vector<Rec,_std::allocator<Rec>_> *xs, Rec *q)\n"
+            "{\n"
+            "  Rec *in_stack_ffffffffffffffb8;\n"
+            "  Rec *in_stack_ffffffffffffffc0;\n"
+            "  (void)*in_stack_ffffffffffffffb8;\n"
+            "  (void)*in_stack_ffffffffffffffc0;\n"
+            "  span_of(in_stack_ffffffffffffffb8, in_stack_ffffffffffffffc0);\n"
+            "  return 0;\n"
+            "}\n"
+        )
+        bound = sanitize_ghidra_cpp(caller)
+        self.assertIn("span_of(xs, q)", bound)
+        got = repair_calls_from_dump(
+            bound,
+            ghidra_code=caller,
+            function_names=["span_of", "walk_n"],
+            callee_dump_by_name={"span_of": callee_dump},
+        )
+        self.assertIn(
+            "span_of(in_stack_ffffffffffffffb8, in_stack_ffffffffffffffc0)",
+            got,
+        )
+        self.assertNotIn("span_of(xs, q)", got)
+        again = sanitize_ghidra_cpp(got)
+        self.assertNotIn("span_of(xs, q)", again)
+        self.assertIn("span_of(", again)
+
     def test_repair_restore_debris_closes_truncated_braces(self):
         from src.agents.restorer import repair_restore_debris
 

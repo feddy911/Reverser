@@ -1,0 +1,19 @@
+id: ghidra-msx64-extraout-unkilled
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  Rec * make(void);
+  Rec * wrap(void)
+  {
+    Rec *extraout_RAX;
+    make();
+    return extraout_RAX;
+  }
+contains:
+  - "make()"
+  - "extraout_RAX"
+not_contains:
+  - "return make"
+compile: true
+notes: "extraout after a CALL with no dump assignment is not the callee return. Do not rewrite to return make()."

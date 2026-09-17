@@ -722,6 +722,10 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("(void)n", sret)
         self.assertIn("in_RCX", sret)
         self.assertNotIn("in_RDX", sret)
+        from src.analysis.ghidra_cpp import leftover_msx64_in_regs
+
+        self.assertEqual(leftover_msx64_in_regs(sret), [])
+        self.assertIn("in_RCX", leftover_msx64_in_regs(pair))
         trap = sanitize_ghidra_cpp(
             "int add(int x, int y)\n"
             "{\n"
@@ -837,6 +841,82 @@ int main(int argc, char **argv) { return 0; }
         )
         self.assertIn("this->n", member)
         self.assertNotIn("ghidra_this", member)
+        sret_this = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "string * wrap(void)\n"
+            "{\n"
+            "  string *in_RCX;\n"
+            "  Rec *this;\n"
+            "  undefined8 in_RDX;\n"
+            "  (void)in_RDX;\n"
+            "  this->n = 1;\n"
+            "  return in_RCX;\n"
+            "}\n"
+        )
+        self.assertIn("ghidra_this", sret_this)
+        self.assertIn("in_RCX", sret_this)
+        self.assertNotIn("in_RDX", sret_this)
+        self.assertNotIn("Rec *this", sret_this)
+        from src.analysis.ghidra_cpp import leftover_msx64_in_regs
+
+        self.assertEqual(leftover_msx64_in_regs(sret_this), [])
+        user_sret = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "Rec * wrap(int *n)\n"
+            "{\n"
+            "  Rec *in_RCX;\n"
+            "  undefined8 in_RDX;\n"
+            "  (void)in_RDX;\n"
+            "  return in_RCX;\n"
+            "}\n"
+        )
+        self.assertIn("(void)n", user_sret)
+        self.assertIn("in_RCX", user_sret)
+        self.assertNotIn("in_RDX", user_sret)
+        self.assertEqual(leftover_msx64_in_regs(user_sret), [])
+        copy_ret = sanitize_ghidra_cpp(
+            "char * copy3(char *d, char *s)\n"
+            "{\n"
+            "  char *in_RCX;\n"
+            "  char *in_RDX;\n"
+            "  strncpy(in_RCX, in_RDX, 3);\n"
+            "  return in_RCX;\n"
+            "}\n"
+        )
+        self.assertIn("strncpy(d, s, 3)", copy_ret)
+        self.assertIn("return d", copy_ret)
+        self.assertNotIn("in_RCX", copy_ret)
+        self.assertNotIn("in_RDX", copy_ret)
+        extra_alias = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "Rec * wrap(Rec *p)\n"
+            "{\n"
+            "  Rec *extraout_RAX;\n"
+            "  extraout_RAX = p;\n"
+            "  return extraout_RAX;\n"
+            "}\n"
+        )
+        self.assertIn("return p", extra_alias)
+        self.assertNotIn("extraout_", extra_alias)
+        extra_keep = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "Rec * make(void);\n"
+            "Rec * wrap(void)\n"
+            "{\n"
+            "  Rec *extraout_RAX;\n"
+            "  make();\n"
+            "  return extraout_RAX;\n"
+            "}\n"
+        )
+        self.assertIn("make()", extra_keep)
+        self.assertIn("extraout_RAX", extra_keep)
+        self.assertNotIn("return make", extra_keep)
+        from src.analysis.ghidra_cpp import leftover_msx64_extraout
+
+        self.assertEqual(leftover_msx64_extraout(extra_alias), [])
+        self.assertEqual(
+            leftover_msx64_extraout(extra_keep, dump=extra_keep), []
+        )
 
     def test_emit_sanitized_restore_keeps_raw(self):
         from src.analysis.ghidra_cpp import emit_sanitized_restore

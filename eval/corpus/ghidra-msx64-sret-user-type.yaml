@@ -1,0 +1,19 @@
+id: ghidra-msx64-sret-user-type
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  Rec * wrap(int *n)
+  {
+    Rec *in_RCX;
+    undefined8 in_RDX;
+    (void)in_RDX;
+    return in_RCX;
+  }
+contains:
+  - "(void)n"
+  - "in_RCX"
+not_contains:
+  - "in_RDX"
+compile: true
+notes: "Microsoft x64 hidden return in RCX; Ghidra prints T* for a by-value return. Detect from dump shape (in_RCX vs first formal), not a list of container names."

@@ -162,6 +162,41 @@ class TestCorpusEval(unittest.TestCase):
         self.assertNotIn("PointCloud", case.ghidra_cpp)
         self.assertNotIn("nearest_index", case.ghidra_cpp)
 
+    def test_sret_this_fixture_is_loaded(self):
+        cases = {c.id: c for c in load_corpus()}
+        case = cases["ghidra-msx64-sret-this"]
+        self.assertTrue(case.compile)
+        self.assertEqual(case.recipe, "sanitize")
+        self.assertIn("Rec *this", case.ghidra_cpp)
+        self.assertIn("in_RDX", case.ghidra_cpp)
+        self.assertNotIn("Point", case.ghidra_cpp)
+        self.assertNotIn("PointCloud", case.ghidra_cpp)
+        self.assertNotIn("FibTimer", case.ghidra_cpp)
+
+    def test_sret_user_type_fixture_is_loaded(self):
+        cases = {c.id: c for c in load_corpus()}
+        case = cases["ghidra-msx64-sret-user-type"]
+        self.assertTrue(case.compile)
+        self.assertEqual(case.recipe, "sanitize")
+        self.assertIn("Rec * wrap", case.ghidra_cpp)
+        self.assertNotIn("vector", case.ghidra_cpp)
+        self.assertNotIn("Point", case.ghidra_cpp)
+        self.assertNotIn("PointCloud", case.ghidra_cpp)
+        self.assertNotIn("FibTimer", case.ghidra_cpp)
+
+    def test_extraout_fixtures_are_loaded(self):
+        cases = {c.id: c for c in load_corpus()}
+        alias = cases["ghidra-msx64-extraout-alias"]
+        self.assertTrue(alias.compile)
+        self.assertEqual(alias.recipe, "sanitize")
+        self.assertIn("extraout_RAX", alias.ghidra_cpp)
+        self.assertNotIn("Point", alias.ghidra_cpp)
+        self.assertNotIn("FibTimer", alias.ghidra_cpp)
+        keep = cases["ghidra-msx64-extraout-unkilled"]
+        self.assertTrue(keep.compile)
+        self.assertIn("make()", keep.ghidra_cpp)
+        self.assertNotIn("return make", keep.ghidra_cpp)
+
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):
     def test_restore_body_and_cache_stay_put(self):

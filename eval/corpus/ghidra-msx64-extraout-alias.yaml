@@ -1,0 +1,17 @@
+id: ghidra-msx64-extraout-alias
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  Rec * wrap(Rec *p)
+  {
+    Rec *extraout_RAX;
+    extraout_RAX = p;
+    return extraout_RAX;
+  }
+contains:
+  - "return p"
+not_contains:
+  - "extraout_"
+compile: true
+notes: "Ghidra extraout is a killed-by-call output (Decompiler Concepts; Improving Disassembly). Dump assigned extraout_RAX from a formal: that ident is the value. Microsoft x64 integer/pointer return is RAX. Do not invent a CALL result."
