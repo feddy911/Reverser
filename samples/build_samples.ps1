@@ -22,7 +22,8 @@ $Targets = @(
     "FibTimer",
     "TaskBoard",
     "NetPath",
-    "GammaFn"
+    "GammaFn",
+    "NestWalk"
 )
 
 $GmpTargets = @{
@@ -59,4 +60,5 @@ Write-Host "Smoke-run:"
 & (Join-Path $Samples "TaskBoard.exe") | Out-Host
 & (Join-Path $Samples "NetPath.exe") | Out-Host
 & (Join-Path $Samples "GammaFn.exe") | Out-Host
+& (Join-Path $Samples "NestWalk.exe") | Out-Host
 Write-Host "Done."

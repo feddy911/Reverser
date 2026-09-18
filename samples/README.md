@@ -12,6 +12,7 @@ Built with MinGW (`samples/build_samples.ps1`): `-std=c++17 -O0 -g`.
 | `TaskBoard.exe` | structs, vector, map, sort (apply-only; рецепты по нему не пишут) |
 | `NetPath.exe` | graph, pair, unordered_map (apply-only; do not write recipes from it) |
 | `GammaFn.exe` | MPFR Gamma + GMP factorial (Collatz-level library types; freeze; do not write recipes) |
+| `NestWalk.exe` | handmade BST + linked stack/queue, recursive tree ops (apply-only; рецепты по нему не пишут) |
 | `MyCollatz.exe` | legacy GMP/MSVC Debug reference |
 
 ## ISO language probes (sources only, 09.09)
@@ -55,7 +56,7 @@ needs C++20 constexpr `count_if`. 14.09 `std_cxx20` 6/6 leftover 0 after
 14.09 `iso_cxx20` 3/3 leftover 0; coroutine keywords absent from Ghidra.
 Do not add fs/std/iso exe to live 9.
 
-Total in `samples/`: 327 `.cpp`, 9 `.exe` (application cohort only).
+Total in `samples/`: 328 `.cpp`, 10 `.exe` (application cohort; NestWalk is gym-only).
 
 
 Rebuild application samples:

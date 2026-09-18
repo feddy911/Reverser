@@ -106,7 +106,12 @@ _RE_GHIDRA_TEMP = re.compile(
 _RE_GHIDRA_SYMBOL = re.compile(r"\b((?:FUN|DAT|thunk_FUN)_[0-9A-Fa-f]+)\b")
 _RE_GHIDRA_LOCAL = re.compile(r"\b(local_\d+|param_\d+|auStack[0-9A-Fa-f]+)\b")
 _RE_GHIDRA_OSTREAM = re.compile(
-    r"(\(\s*&\s*\(\s*(?:\(\s*)*(?:std::)?cout|\bghidra_this\b)"
+    r"("
+    r"\(\s*&\s*\(\s*(?:\(\s*)*(?:std::)?cout"
+    r"|ghidra_this"
+    r"|ostream\s*\*\s*\)\s*\(\s*&"
+    r"|\(\s*\*\s*\(\s*\(\s*(?:std::)?(?:basic_)?ostream"
+    r")"
 )
 _RE_GHIDRA_QUAL_MEM = re.compile(
     r"\b(std::(?:vector|basic_string|basic_ostream)\s*<[^\n>]*>\s*::)"
@@ -126,6 +131,17 @@ _RE_COPY_CTOR_FREE = re.compile(
 )
 _RE_DEFAULT_CTOR_FREE = re.compile(
     r"(?:^|\n)\s*([A-Z][A-Za-z0-9]*)\s*\(\s*\)\s*\{"
+    r"(?=[^}]{0,400}?\b(?:in_stk_|in_stack_|in_RCX))"
+)
+# Ghidra prints MSVC thiscall T::T as placement-new on this, often glued
+# as voidnew / __thiscallnew without a space. Not a human constructor.
+_RE_THISCALL_COPY_CTOR = re.compile(
+    r"(?:void\s*)?(?:__thiscall\s*)?new\s*\(\s*(?:const\s+)?([A-Z][A-Za-z0-9]*)"
+    r"\s*\*\s*(?:this|param_\d+)\s*\)\s*\1\s*\(\s*(?:const\s+)?\1\s*\*"
+)
+_RE_THISCALL_DEFAULT_CTOR = re.compile(
+    r"(?:void\s*)?(?:__thiscall\s*)?new\s*\(\s*(?:const\s+)?([A-Z][A-Za-z0-9]*)"
+    r"\s*\*\s*(?:this|param_\d+)\s*\)\s*\1\s*\(\s*\)\s*\{"
     r"(?=[^}]{0,400}?\b(?:in_stk_|in_stack_|in_RCX))"
 )
 
@@ -192,6 +208,8 @@ def dialect_hits(code: str) -> List[DialectHit]:
         (_RE_ASSEMBLER_CALL, "assembler", "word_call"),
         (_RE_COPY_CTOR_FREE, "compiler", "special_member"),
         (_RE_DEFAULT_CTOR_FREE, "compiler", "special_member"),
+        (_RE_THISCALL_COPY_CTOR, "compiler", "special_member"),
+        (_RE_THISCALL_DEFAULT_CTOR, "compiler", "special_member"),
     ):
         for m in rx.finditer(blob):
             add(source, kind, m.group(1))

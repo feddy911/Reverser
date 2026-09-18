@@ -1,0 +1,18 @@
+id: ghidra-ostream-ptr-addr-insert
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void wrap(int n)
+  {
+    std::ostream *p;
+    p = std::cout << "n=";
+    p = (std::ostream *)(&((*((std::ostream *)p)) << (n)));
+  }
+contains:
+  - "&(std::cout << \"n=\")"
+  - "*p << (n)"
+not_contains:
+  - "(*(("
+  - "ostream *)(&"
+compile: true
+notes: "C++ inserter returns basic_ostream&. &(s << x) is &s. Assigning (ostream*)(&((*((ostream*)p)) << x)) is *p << x. cout << x assigned to ostream* keeps the address. Mix wrap, not a sample name."

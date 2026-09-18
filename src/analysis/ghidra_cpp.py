@@ -1034,7 +1034,10 @@ def rewrite_ghidra_ostream(code: str) -> str:
     s = _rewrite_std_free_lshift("".join(out))
     s = _rewrite_unqualified_ostream_ptr_lshift(s)
     s = _wrap_ostream_lshift_assign(s)
+    s = _wrap_cout_lshift_assign(s)
+    s = _RE_OSTREAM_STAR_AROUND_ADDR.sub(r"\1", s)
     s = _collapse_deref_addr(s)
+    s = _fold_ostream_self_ptr_insert(s)
     s = _drop_unused_lshift_addr(s)
     s = _fold_ostream_insert_chain(s)
     s = _RE_OSTREAM_ARRAY.sub(r"undefined1 \1\2", s)
@@ -1194,6 +1197,111 @@ def _wrap_ostream_lshift_assign(s: str) -> str:
         out.append("))")
         copied = close + 1
     out.append(s[copied:])
+    return "".join(out)
+
+
+_RE_OSTREAM_STAR_AROUND_ADDR = re.compile(
+    r"\(\s*(?:std::)?(?:basic_)?w?ostream(?:\s*<[^>]*>)?\s*\*\s*\)\s*(\(&)"
+)
+_RE_COUT_LSHIFT_ASSIGN = re.compile(
+    r"\b([A-Za-z_]\w*)\s*=\s*((?:std::)?c(?:out|err|log)\s*<<)"
+)
+
+
+def _stmt_semi(s: str, i: int) -> int:
+    """Index of the next `;` at paren-depth 0, skipping strings."""
+    n = len(s)
+    depth = 0
+    q = ""
+    j = i
+    while j < n:
+        ch = s[j]
+        if q:
+            if ch == "\\" and j + 1 < n:
+                j += 2
+                continue
+            if ch == q:
+                q = ""
+            j += 1
+            continue
+        if ch in "'\"":
+            q = ch
+            j += 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == ";" and depth <= 0:
+            return j
+        j += 1
+    return -1
+
+
+def _wrap_cout_lshift_assign(s: str) -> str:
+    """`p = cout << x` returns ostream&, not ostream*. Keep the address."""
+    blob = s or ""
+    out: list[str] = []
+    copied = 0
+    for m in _RE_COUT_LSHIFT_ASSIGN.finditer(blob):
+        lead = blob[m.start():m.start(2)]
+        if "&(" in lead.replace(" ", ""):
+            continue
+        semi = _stmt_semi(blob, m.start(2))
+        if semi < 0:
+            continue
+        out.append(blob[copied:m.start(2)])
+        out.append("&(")
+        out.append(blob[m.start(2):semi])
+        out.append(")")
+        copied = semi
+    out.append(blob[copied:])
+    return "".join(out)
+
+
+def _fold_ostream_self_ptr_insert(s: str) -> str:
+    """`p = &((*((ostream*)p)) << x)` is `*p << x`. Inserter returns *this."""
+    blob = s or ""
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while True:
+        k = blob.find("(&(", i)
+        if k < 0:
+            break
+        lhs = re.search(
+            r"([A-Za-z_]\w*)\s*=\s*"
+            r"(?:\(\s*(?:std::)?(?:basic_)?w?ostream(?:\s*<[^>]*>)?\s*\*\s*\)\s*)?$",
+            blob[:k],
+        )
+        if not lhs:
+            i = k + 2
+            continue
+        ident = lhs.group(1)
+        start = lhs.start(1)
+        open_inner = k + 2
+        close_inner = _match_forward(blob, open_inner, "(", ")")
+        if close_inner < 0 or close_inner + 1 >= len(blob) or blob[close_inner + 1] != ")":
+            i = k + 2
+            continue
+        inner = blob[open_inner + 1 : close_inner]
+        parsed = _parse_deref_ostream_insert(inner, 0)
+        if not parsed or parsed[1] != ident:
+            i = k + 2
+            continue
+        end = close_inner + 2
+        while end < len(blob) and blob[end] in " \t":
+            end += 1
+        semi = ""
+        if end < len(blob) and blob[end] == ";":
+            semi = ";"
+            end += 1
+        _end, _name, rhs = parsed
+        out.append(blob[copied:start])
+        out.append(f"*{ident} << {rhs}{semi}")
+        copied = end
+        i = copied
+    out.append(blob[copied:])
     return "".join(out)
 
 
@@ -1677,11 +1785,12 @@ _MS64_INT_REGS = (
 )
 _PTR_AS_INT = frozenset({
     "undefined8", "ulonglong", "unsignedlonglong", "__uint64", "uint8",
+    "longlong", "int64", "__int64",
 })
-# Ghidra types a pointer register as undefined8* / void*; that is the formal.
+# Ghidra types a pointer register as undefined8* / void* / longlong*; that is the formal.
 _OPAQUE_PTR_BASE = frozenset({
     "undefined", "undefined8", "ulonglong", "unsignedlonglong", "__uint64",
-    "void",
+    "void", "longlong", "int64", "__int64",
 })
 _INT_AS_INT = frozenset({
     "int", "uint", "unsigned", "unsignedint", "int4", "uint4", "undefined4",
@@ -1897,7 +2006,7 @@ _STMT_LEAD = re.compile(
 
 def _in_reg_decl_type(body: str, name: str) -> str | None:
     m = re.search(
-        rf"^[ \t]*([A-Za-z_:][\w:\s\*&<>,]*)\b{re.escape(name)}\s*;",
+        rf"^[ \t]*([A-Za-z_:][\w:\s\*&<>,]*)\b{re.escape(name)}\s*(?:=\s*[^;]+)?;",
         body,
         re.M,
     )
@@ -1909,6 +2018,23 @@ def _in_reg_decl_type(body: str, name: str) -> str | None:
     return ty
 
 
+def _drop_in_reg_decl(body: str, alias: str) -> str:
+    """Drop `T in_RCX;` or `T in_RCX = p;`. Keep `return in_RCX;`."""
+
+    def repl(m: re.Match) -> str:
+        if _STMT_LEAD.match(m.group(1).strip()):
+            return m.group(0)
+        return ""
+
+    return re.sub(
+        rf"^[ \t]*([A-Za-z_:][\w:\s\*&<>,]*)\b{re.escape(alias)}\s*(?:=\s*[^;]+)?;[ \t]*\r?\n?",
+        repl,
+        body,
+        count=1,
+        flags=re.M,
+    )
+
+
 def _strip_dup_formal_decl(body: str, pname: str) -> str:
     """Drop a leftover local that now shadows the formal. Keep `return n;`."""
 
@@ -1918,7 +2044,7 @@ def _strip_dup_formal_decl(body: str, pname: str) -> str:
         return ""
 
     return re.sub(
-        rf"^[ \t]*([A-Za-z_:][\w:\s\*&<>,]*)\b{re.escape(pname)}\s*;[ \t]*\n?",
+        rf"^[ \t]*([A-Za-z_:][\w:\s\*&<>,]*)\b{re.escape(pname)}\s*;[ \t]*\r?\n?",
         repl,
         body,
         count=1,
@@ -1974,13 +2100,7 @@ def _rewrite_one_msx64_fn(blob: str, ident: str, t0: int, close: int, end: int) 
         return blob
     new_body = body
     for alias, pname in sorted(repl.items(), key=lambda kv: -len(kv[0])):
-        new_body = re.sub(
-            rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(alias)}\s*;[ \t]*\n?",
-            "",
-            new_body,
-            count=1,
-            flags=re.M,
-        )
+        new_body = _drop_in_reg_decl(new_body, alias)
         new_body = re.sub(rf"\b{re.escape(alias)}\b", pname, new_body)
         if pname == "this":
             continue
@@ -2481,7 +2601,7 @@ def _strip_compiler_instrumentation(code: str) -> str:
 
 def sanitize_ghidra_cpp(code: str) -> str:
     """Rewrite Ghidra type spellings and member-call syntax into parseable C++."""
-    t = code or ""
+    t = (code or "").replace("\r\n", "\n").replace("\r", "\n")
     # Even if an earlier quote makes _outside_strings skip a chunk.
     t = t.replace("structstd::", "std::")
 
@@ -2576,4 +2696,5 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _outside_strings(t, _rewrite_bool_xor)
     t = _rewrite_ghidra_this_local(t)
     t = _outside_strings(t, _elide_default_allocator_args)
+    t = _outside_strings(t, lambda chunk: re.sub(r"\n[ \t]*\n+", "\n", chunk))
     return t

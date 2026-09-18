@@ -156,7 +156,7 @@ def _clean_code(code: str, name: str = "") -> str:
     # Close leftover quotes/braces before dialect so _outside_strings sees code.
     text = repair_restore_debris(text)
     text = sanitize_ghidra_cpp(text)
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
+    return re.sub(r"\n[ \t]*\n+", "\n", text).strip()
 
 
 def _strip_void_result_assigns(code: str, void_names: Set[str]) -> str:
@@ -246,6 +246,31 @@ def _adjust_calls_to_ptrs(code: str, self_name: str, ptrs: Dict[str, List[bool]]
         out.append(s[copied:])
         s = "".join(out)
     return s
+
+
+def _is_ctor_shaped_free_fn(name: str, code: str) -> bool:
+    """Ghidra lifts MSVC thiscall T::T as a free function with no return type.
+
+    ISO class.ctor: a constructor has no return type and is a class member.
+    At namespace scope Rec(Rec *) / Rec() is ill-formed next to struct Rec.
+    Drop those recovered special members from the TU. Do not emit Rec::Rec.
+    """
+    if not name or name == "main":
+        return False
+    proto = _prototype(name, code)
+    if not proto:
+        return False
+    sig = proto.rstrip(";").strip()
+    m = re.match(rf"^{re.escape(name)}\s*\((.*)\)\s*$", sig, re.DOTALL)
+    if not m:
+        return False
+    inner = (m.group(1) or "").strip()
+    if not inner or inner == "void":
+        return True
+    args = [a.strip() for a in _split_top_args(inner)]
+    if not args:
+        return True
+    return bool(re.match(rf"(?:const\s+)?{re.escape(name)}\s*\*", args[0]))
 
 
 def _prototype(name: str, code: str) -> Optional[str]:
@@ -496,9 +521,13 @@ def assemble(
         return mo.group(0)
 
     cleaned: List[Tuple[str, str, str]] = []
+    dropped: List[Tuple[str, str]] = []
     for addr, name, code in bodies:
         code = RE_THUNK_CALL.sub(repl, code)
         code = strip_int_dat_redecls(_clean_code(code, name=name))
+        if _is_ctor_shaped_free_fn(name, code):
+            dropped.append((addr, name))
+            continue
         cleaned.append((addr, name, code))
 
     void_names = set()
@@ -565,6 +594,11 @@ def assemble(
             parts.append(proto)
     parts.append("")
     parts.append("// ---- functions ----")
+    if dropped:
+        parts.append("// ---- dropped compiler special members ----")
+        for addr, name in dropped:
+            parts.append(f"// dropped compiler special member {name} @ {addr}")
+        parts.append("")
     for addr, name, code in cleaned:
         parts.append("// " + "=" * 60)
         parts.append(f"// {name} @ {addr}")

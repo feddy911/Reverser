@@ -1,0 +1,18 @@
+id: critic-ghidra-thiscall-ctor
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: Rec
+ghidra_cpp: |
+  voidnew (Rec *this) Rec(Rec *param_2) {
+    *(undefined4 *)(in_RCX + 8) = *(undefined4 *)(in_RDX + 8);
+  }
+  void __thiscallnew (Rec *this) Rec() {
+    std::string *in_stk_n40;
+    std::string(in_stk_n40);
+  }
+contains:
+  - "==compiler:special_member:Rec=="
+not_contains:
+  - "==0=="
+compile: false
+notes: "Ghidra lifts MSVC thiscall T::T as placement-new on this, often glued voidnew / __thiscallnew. That is a compiler special member, not a constructor a person wrote. Assembler omits the free function from the TU; critic still labels the restore body."

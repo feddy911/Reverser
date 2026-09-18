@@ -1,0 +1,20 @@
+id: ghidra-operator-new-delete
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  Rec * wrap(Rec *p)
+  {
+    Rec *q;
+    q = (Rec *)operator_new(0x18);
+    operator_delete(p, 0x18);
+    return q;
+  }
+contains:
+  - "operator new(0x18)"
+  - "operator delete(p, 0x18)"
+not_contains:
+  - "operator_new"
+  - "operator_delete"
+compile: true
+notes: "Ghidra cannot use operator new as an identifier; it prints operator_new / operator_delete. ISO is operator new / operator delete. Mix wrap/Rec."

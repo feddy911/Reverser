@@ -521,6 +521,37 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("in_stack_98", got)
         self.assertNotIn("in_stack_ffffffffffffff58", got)
 
+    def test_crlf_dump_does_not_insert_blank_lines(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        raw = (
+            "void wrap(Rec *p)\r\n\r\n{\n\r\n"
+            "  Rec *q;\r\n\r\n"
+            "  if (p != 0) {\r\n"
+            "    q = p;\r\n\r\n"
+            "  }\r\n"
+            "  return;\r\n}\r\n"
+        )
+        got = sanitize_ghidra_cpp(raw)
+        self.assertNotIn("\r", got)
+        self.assertNotIn("\n\n", got)
+        self.assertIn("void wrap(Rec *p)\n{", got)
+        self.assertIn("  Rec *q;\n  if (p != 0) {\n    q = p;\n  }", got)
+
+    def test_ostream_ptr_addr_insert_folds_to_deref_shift(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "void wrap(int n) {\n"
+            "  std::ostream *p;\n"
+            "  p = std::cout << \"n=\";\n"
+            "  p = (std::ostream *)(&((*((std::ostream *)p)) << (n)));\n"
+            "}\n"
+        )
+        self.assertIn("*p << (n)", got)
+        self.assertIn("&(std::cout << \"n=\")", got)
+        self.assertNotIn("(*((", got)
+
     def test_msx64_stack_homes_bind_unused_formals(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 
@@ -742,6 +773,47 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("p[2] == 0", opaque)
         self.assertIn("*p", opaque)
         self.assertNotIn("in_RCX", opaque)
+        longthis = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "int walk_rec(Rec *p)\n"
+            "{\n"
+            "  longlong in_RCX;\n"
+            "  if (in_RCX == 0) {\n"
+            "    return 0;\n"
+            "  }\n"
+            "  return walk_rec(p);\n"
+            "}\n"
+        )
+        self.assertIn("p == 0", longthis)
+        self.assertNotIn("in_RCX", longthis)
+        longptr = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "void show_rec(Rec *p)\n"
+            "{\n"
+            "  longlong *in_RCX;\n"
+            "  (void)*in_RCX;\n"
+            "}\n"
+        )
+        self.assertIn("(void)*p", longptr)
+        self.assertNotIn("in_RCX", longptr)
+        alias = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "Rec * wrap(Rec *p, int n)\n"
+            "{\n"
+            "  Rec *in_RCX = p;\n"
+            "  int in_EDX = n;\n"
+            "  if (in_RCX == 0) {\n"
+            "    return in_RCX;\n"
+            "  }\n"
+            "  (void)in_EDX;\n"
+            "  return in_RCX;\n"
+            "}\n"
+        )
+        self.assertIn("p == 0", alias)
+        self.assertIn("return p", alias)
+        self.assertIn("(void)n", alias)
+        self.assertNotIn("in_RCX", alias)
+        self.assertNotIn("in_EDX", alias)
         pair = sanitize_ghidra_cpp(
             "int first_of(std::pair<int, int> *p)\n"
             "{\n"
@@ -1087,6 +1159,28 @@ int main(int argc, char **argv) { return 0; }
         self.assertIn("(*(dst) += (*(src)))", got)
         self.assertNotIn("::operator=", got)
         self.assertNotIn("::operator+=", got)
+
+    def test_operator_new_delete_underscore_is_iso_new(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "Rec * wrap(Rec *p)\n"
+            "{\n"
+            "  Rec *q;\n"
+            "  q = (Rec *)operator_new(0x18);\n"
+            "  operator_delete(p, 0x18);\n"
+            "  operator_delete[](p);\n"
+            "  return q;\n"
+            "}\n"
+        )
+        self.assertIn("operator new(0x18)", got)
+        self.assertIn("operator delete(p, 0x18)", got)
+        self.assertIn("operator delete[](p)", got)
+        self.assertNotIn("operator_new", got)
+        self.assertNotIn("operator_delete", got)
+        lit = sanitize_ghidra_cpp('const char *s = "operator_delete";\n')
+        self.assertIn("operator_delete", lit)
 
     def test_operator_and_eq_rewrite(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -1950,6 +2044,51 @@ class TestCompileVerify(unittest.TestCase):
         self.assertEqual(n, 1)
         self.assertNotIn("structstd", text)
         self.assertIn("std::ostream", text)
+
+    def test_assemble_drops_ctor_shaped_free_functions(self):
+        from src.agents.assembler import assemble
+
+        restored = [
+            {
+                "classification": "user_code",
+                "address": "0x1",
+                "guessed_name": "wrap",
+                "ghidra_name": "FUN_1",
+                "cpp_code": "void wrap(Rec *p) { (void)p; }\n",
+            },
+            {
+                "classification": "user_code",
+                "address": "0x2",
+                "guessed_name": "Rec",
+                "ghidra_name": "FUN_2",
+                "cpp_code": (
+                    "Rec(Rec *param_2) {\n"
+                    "  *(undefined4 *)(in_RCX + 8) = *(undefined4 *)(in_RDX + 8);\n"
+                    "}\n"
+                ),
+            },
+            {
+                "classification": "user_code",
+                "address": "0x3",
+                "guessed_name": "Rec",
+                "ghidra_name": "FUN_3",
+                "cpp_code": (
+                    "Rec() {\n"
+                    "  std::string *in_stk_n40;\n"
+                    "  std::string(in_stk_n40);\n"
+                    "}\n"
+                ),
+            },
+        ]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertIn("void wrap", text)
+        self.assertIn("struct Rec", text)
+        self.assertIn("dropped compiler special member Rec", text)
+        self.assertNotIn("Rec(Rec *", text)
+        self.assertNotIn("Rec() {", text)
+        self.assertNotIn("Rec::Rec", text)
+        self.assertNotIn("in_RCX", text)
 
 
 if __name__ == "__main__":

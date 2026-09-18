@@ -1,0 +1,24 @@
+id: ghidra-msx64-in-reg-alias
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  Rec * wrap(Rec *p, int n)
+  {
+    Rec *in_RCX = p;
+    int in_EDX = n;
+    if (in_RCX == 0) {
+      return in_RCX;
+    }
+    (void)in_EDX;
+    return in_RCX;
+  }
+contains:
+  - "p == 0"
+  - "return p"
+  - "(void)n"
+not_contains:
+  - "in_RCX"
+  - "in_EDX"
+compile: true
+notes: "Microsoft x64: restorer or dump copies formals into in_RCX/in_EDX. That local is the argument, not a second live. Mix wrap/Rec."

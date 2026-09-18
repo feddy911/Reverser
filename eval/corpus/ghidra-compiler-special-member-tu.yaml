@@ -1,0 +1,31 @@
+id: ghidra-compiler-special-member-tu
+profile: gcc_pe_x64
+recipe: assemble
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(Rec *p)
+  {
+    (void)p;
+  }
+extra_functions:
+  - name: Rec
+    cpp: |
+      Rec(Rec *param_2) {
+        *(undefined4 *)(in_RCX + 8) = *(undefined4 *)(in_RDX + 8);
+      }
+  - name: Rec
+    cpp: |
+      Rec() {
+        std::string *in_stk_n40;
+        std::string(in_stk_n40);
+      }
+contains:
+  - "void wrap"
+  - "struct Rec"
+not_contains:
+  - "Rec(Rec *"
+  - "Rec() {"
+  - "Rec::Rec"
+  - "in_RCX"
+compile: true
+notes: "ISO class.ctor: a constructor has no return type and is a class member. Ghidra recovers MSVC thiscall copy/default as free T(T*) / T(). At namespace scope that is ill-formed next to struct T. Assembler omits them from the TU and does not invent T::T."

@@ -1,0 +1,17 @@
+id: critic-ghidra-ostream-addr-insert
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(int n)
+  {
+    std::ostream *p;
+    p = (std::ostream *)(&((*((std::ostream *)p)) << (n)));
+    (void)p;
+  }
+contains:
+  - "==ghidra:ostream:"
+not_contains:
+  - "==0=="
+compile: false
+notes: "Ghidra takes the address of an inserter result and casts it back to ostream*. That is decompiler this-pointer glue, not an insert a person wrote. Report only; does not REJECT."

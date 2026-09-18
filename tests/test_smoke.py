@@ -1581,7 +1581,7 @@ class TestCommandments(unittest.TestCase):
     )
     _STEMS = (
         "EchoFilter", "PointCloud", "MyCollatz", "IniMini", "XorCipher",
-        "FibTimer", "TaskBoard", "NetPath", "GammaFn",
+        "FibTimer", "TaskBoard", "NetPath", "GammaFn", "NestWalk",
     )
 
     def test_restore_path_has_no_application_stems(self):

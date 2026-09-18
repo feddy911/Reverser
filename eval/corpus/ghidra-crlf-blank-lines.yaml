@@ -1,0 +1,11 @@
+id: ghidra-crlf-blank-lines
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: "void wrap(Rec *p)\r\n\r\n{\r\n  Rec *q;\r\n\r\n  if (p != 0) {\r\n    q = p;\r\n\r\n  }\r\n  return;\r\n}\r\n"
+contains:
+  - "void wrap(Rec *p)\n{"
+  - "  Rec *q;\n  if (p != 0) {\n    q = p;\n  }"
+not_contains:
+  - "\n\n"
+compile: true
+notes: "Ghidra PE dumps use CRLF. Mixing LF inserts with leftover CR, or deleting an in_stack decl without its newline, leaves a blank line after every statement. Normalize to LF and collapse blank lines. Not a rewrite of control flow."

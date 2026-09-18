@@ -1,0 +1,20 @@
+id: ghidra-msx64-longlong-this
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  int walk_rec(Rec *p)
+  {
+    longlong in_RCX;
+    if (in_RCX == 0) {
+      return 0;
+    }
+    return walk_rec(p);
+  }
+contains:
+  - "p == 0"
+  - "walk_rec(p)"
+not_contains:
+  - "in_RCX"
+compile: true
+notes: "Microsoft x64 this/first pointer is RCX. Ghidra types a null-checked pointer as longlong, same class as undefined8. Mix wrap/Rec."

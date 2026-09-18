@@ -151,6 +151,25 @@ class TestCorpusEval(unittest.TestCase):
         self.assertNotIn("Point", case.ghidra_cpp)
         self.assertNotIn("PointCloud", case.ghidra_cpp)
         self.assertNotIn("print_point", case.ghidra_cpp)
+        opnew = cases["ghidra-operator-new-delete"]
+        self.assertTrue(opnew.compile)
+        self.assertEqual(opnew.recipe, "sanitize")
+        self.assertIn("operator_new(0x18)", opnew.ghidra_cpp)
+        self.assertIn("operator_delete(p, 0x18)", opnew.ghidra_cpp)
+        self.assertNotIn("NestWalk", opnew.ghidra_cpp)
+        self.assertNotIn("FibTimer", opnew.ghidra_cpp)
+        longthis = cases["ghidra-msx64-longlong-this"]
+        self.assertTrue(longthis.compile)
+        self.assertEqual(longthis.recipe, "sanitize")
+        self.assertIn("longlong in_RCX", longthis.ghidra_cpp)
+        self.assertNotIn("NestWalk", longthis.ghidra_cpp)
+        self.assertNotIn("FibTimer", longthis.ghidra_cpp)
+        alias = cases["ghidra-msx64-in-reg-alias"]
+        self.assertTrue(alias.compile)
+        self.assertEqual(alias.recipe, "sanitize")
+        self.assertIn("in_RCX = p", alias.ghidra_cpp)
+        self.assertNotIn("NestWalk", alias.ghidra_cpp)
+        self.assertNotIn("FibTimer", alias.ghidra_cpp)
 
     def test_stack_home_args_fixture_is_loaded(self):
         cases = {c.id: c for c in load_corpus()}
@@ -161,6 +180,13 @@ class TestCorpusEval(unittest.TestCase):
         self.assertNotIn("Point", case.ghidra_cpp)
         self.assertNotIn("PointCloud", case.ghidra_cpp)
         self.assertNotIn("nearest_index", case.ghidra_cpp)
+        crlf = cases["ghidra-crlf-blank-lines"]
+        self.assertEqual(crlf.recipe, "sanitize")
+        self.assertTrue(crlf.compile)
+        self.assertIn("\r\n", crlf.ghidra_cpp)
+        self.assertNotIn("NestWalk", crlf.ghidra_cpp)
+        self.assertNotIn("FibTimer", crlf.ghidra_cpp)
+        self.assertNotIn("Item", crlf.ghidra_cpp)
 
     def test_sret_this_fixture_is_loaded(self):
         cases = {c.id: c for c in load_corpus()}
@@ -222,6 +248,11 @@ class TestCorpusEval(unittest.TestCase):
         self.assertIn("(*((std::ostream *)this))", chain.ghidra_cpp)
         self.assertNotIn("Series", chain.ghidra_cpp)
         self.assertNotIn("FibTimer", chain.ghidra_cpp)
+        ptr_addr = cases["ghidra-ostream-ptr-addr-insert"]
+        self.assertTrue(ptr_addr.compile)
+        self.assertIn("(*((std::ostream *)p))", ptr_addr.ghidra_cpp)
+        self.assertNotIn("NestWalk", ptr_addr.ghidra_cpp)
+        self.assertNotIn("FibTimer", ptr_addr.ghidra_cpp)
         alloc = cases["ghidra-default-allocator-arg"]
         self.assertTrue(alloc.compile)
         self.assertIn("std::allocator<int>", alloc.ghidra_cpp)
@@ -246,6 +277,12 @@ class TestCorpusEval(unittest.TestCase):
         self.assertIn("uint wrap", preamble.ghidra_cpp)
         self.assertNotIn("ghidra_word", preamble.ghidra_cpp)
         self.assertNotIn("FibTimer", preamble.ghidra_cpp)
+        ctor_tu = cases["ghidra-compiler-special-member-tu"]
+        self.assertEqual(ctor_tu.recipe, "assemble")
+        self.assertTrue(ctor_tu.compile)
+        self.assertIn("Rec(Rec *param_2)", ctor_tu.ghidra_cpp + ctor_tu.extra_functions[0]["cpp"])
+        self.assertNotIn("Item", ctor_tu.ghidra_cpp)
+        self.assertNotIn("FibTimer", ctor_tu.ghidra_cpp)
 
     def test_critic_dialect_fixtures_are_loaded(self):
         cases = {c.id: c for c in load_corpus()}
@@ -272,6 +309,17 @@ class TestCorpusEval(unittest.TestCase):
         self.assertEqual(dctor.recipe, "critic")
         self.assertIn("Rec() {", dctor.ghidra_cpp)
         self.assertNotIn("Item", dctor.ghidra_cpp)
+        thiscall = cases["critic-ghidra-thiscall-ctor"]
+        self.assertEqual(thiscall.recipe, "critic")
+        self.assertIn("voidnew (Rec *this)", thiscall.ghidra_cpp)
+        self.assertIn("__thiscallnew (Rec *this)", thiscall.ghidra_cpp)
+        self.assertNotIn("Item", thiscall.ghidra_cpp)
+        self.assertNotIn("FibTimer", thiscall.ghidra_cpp)
+        ostream_addr = cases["critic-ghidra-ostream-addr-insert"]
+        self.assertEqual(ostream_addr.recipe, "critic")
+        self.assertIn("(*((std::ostream *)p))", ostream_addr.ghidra_cpp)
+        self.assertNotIn("NestWalk", ostream_addr.ghidra_cpp)
+        self.assertNotIn("FibTimer", ostream_addr.ghidra_cpp)
 
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):

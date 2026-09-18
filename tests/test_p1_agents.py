@@ -1307,6 +1307,15 @@ class TestCritic(unittest.TestCase):
             "}\n"
         )
         self.assertEqual(human, [])
+        ostream_addr = dialect_hits(
+            "void wrap(int n) {\n"
+            "  std::ostream *p;\n"
+            "  p = (std::ostream *)(&((*((std::ostream *)p)) << (n)));\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(h.source == "ghidra" and h.kind == "ostream" for h in ostream_addr)
+        )
         ctor = dialect_hits(
             "Rec(Rec *param_2) {\n"
             "  *(undefined4 *)(in_RCX + 8) = *(undefined4 *)(in_RDX + 8);\n"
@@ -1330,6 +1339,35 @@ class TestCritic(unittest.TestCase):
             "}\n"
         )
         self.assertFalse(any(h.kind == "special_member" for h in human_ctor))
+        thiscall_copy = dialect_hits(
+            "voidnew (Rec *this) Rec(Rec *param_2) {"
+            "  *(undefined4 *)(in_RCX + 8) = 0;\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(
+                h.source == "compiler" and h.kind == "special_member" and h.token == "Rec"
+                for h in thiscall_copy
+            )
+        )
+        thiscall_dctor = dialect_hits(
+            "void __thiscallnew (Rec *this) Rec() {\n"
+            "  std::string *in_stk_n40;\n"
+            "  std::string(in_stk_n40);\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(
+                h.source == "compiler" and h.kind == "special_member" and h.token == "Rec"
+                for h in thiscall_dctor
+            )
+        )
+        self.assertFalse(
+            any(
+                h.kind == "special_member"
+                for h in dialect_hits("void wrap(Rec *p) { (void)p; }\n")
+            )
+        )
 
     def test_dialect_leftover_does_not_reject_run(self):
         restored = [{
