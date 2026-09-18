@@ -1,0 +1,16 @@
+id: ghidra-undeclared-callee-stub
+profile: gcc_pe_x64
+recipe: assemble
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(Rec *p)
+  {
+    helper(p);
+  }
+contains:
+  - "inline ghidra_word helper(...)"
+  - "helper(p)"
+not_contains:
+  - "FUN_"
+compile: true
+notes: "Ghidra names a callee the restorer did not emit. Assembler stubs it like a thunk, from the call site, not a sample symbol list. Mix wrap/Rec."

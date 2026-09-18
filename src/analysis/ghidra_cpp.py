@@ -2143,21 +2143,50 @@ def _list_stack_home_decls(body: str) -> list[tuple[str, str]]:
     return out
 
 
+def _home_init_ident(body: str, name: str) -> str | None:
+    """Dump copied a formal into the home: `T in_stk_n40 = n;`."""
+    m = re.search(
+        rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(name)}\s*=\s*([A-Za-z_]\w*)\s*;",
+        body or "",
+        re.M,
+    )
+    if not m:
+        return None
+    ident = m.group(1)
+    if ident == name:
+        return None
+    if ident.startswith((
+        "in_stk", "in_stack", "extraout_", "in_RCX", "in_RDX", "in_R8",
+        "in_R9", "in_ECX", "in_EDX", "in_CX", "in_DX",
+    )):
+        return None
+    if ident in _NOT_FN_NAMES or ident in ("true", "false", "nullptr"):
+        return None
+    return ident
+
+
+def _formal_used_in_body(body: str, pname: str) -> bool:
+    return bool(re.search(rf"\b{re.escape(pname)}\b", body or ""))
+
+
 def _rewrite_one_msx64_stack_homes(
     blob: str, ident: str, t0: int, close: int, end: int
 ) -> str:
-    """Bind dump-declared stack homes to unused formals. Skip main.
+    """Bind dump-declared stack homes to formals. Skip main.
 
     Ghidra often types the home pointee unlike the formal (T* vs vector*).
-    Both-pointer is enough; do not invent a source identifier. No decl — no
-    bind (undeclared in_stack transplant is a known regression).
+    Both-pointer is enough on the same slot; do not invent a source identifier.
+    No decl — no bind (undeclared in_stack transplant is a known regression).
+
+    Same-type spill: `T in_stk = formal` is that argument. A leftover home
+    may also match the unique unused formal of a compatible type (not
+    T* vs U* field-0). Two ints and one home stay leftover.
     """
     if ident == "main":
         return blob
     mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
     if not mname:
         return blob
-    name_at = t0 + mname.start()
     open_p = t0 + mname.end() - 1
     formals = _parse_param_decls(blob[open_p + 1 : close])
     if not formals:
@@ -2169,22 +2198,54 @@ def _rewrite_one_msx64_stack_homes(
     homes = _list_stack_home_decls(body)
     if not homes:
         return blob
+    formal_ty = {pname: pty for pty, pname in formals}
     repl: dict[str, str] = {}
+    bound_formals: set[str] = set()
+    for alias, decl_ty in homes:
+        src = _home_init_ident(body, alias)
+        if src is None or src not in formal_ty:
+            continue
+        if not _abi_types_compatible(decl_ty, formal_ty[src]):
+            continue
+        repl[alias] = src
+        bound_formals.add(src)
     for i, (_pty, pname) in enumerate(formals):
         if i >= len(homes):
             break
         alias, decl_ty = homes[i]
-        if re.search(rf"\b{re.escape(pname)}\b", body):
+        if alias in repl or pname in bound_formals:
+            continue
+        if _formal_used_in_body(body, pname):
             continue
         if not (
             _abi_types_compatible(decl_ty, _pty) or _abi_both_pointers(decl_ty, _pty)
         ):
             continue
         repl[alias] = pname
+        bound_formals.add(pname)
+    unused = [
+        (pty, pname)
+        for pty, pname in formals
+        if pname not in bound_formals and not _formal_used_in_body(body, pname)
+    ]
+    for alias, decl_ty in homes:
+        if alias in repl:
+            continue
+        matches = [
+            (pty, pname)
+            for pty, pname in unused
+            if _abi_types_compatible(decl_ty, pty)
+        ]
+        if len(matches) != 1:
+            continue
+        _pty, pname = matches[0]
+        repl[alias] = pname
+        unused = [(t, n) for t, n in unused if n != pname]
     if not repl:
         return blob
     new_body = body
     for alias, pname in sorted(repl.items(), key=lambda kv: -len(kv[0])):
+        new_body = _drop_in_reg_decl(new_body, alias)
         new_body = re.sub(rf"\b{re.escape(alias)}\b", pname, new_body)
         new_body = _strip_dup_formal_decl(new_body, pname)
     return blob[:brace] + new_body + blob[end + 1 :]

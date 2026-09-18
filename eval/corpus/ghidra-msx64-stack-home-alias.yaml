@@ -1,0 +1,22 @@
+id: ghidra-msx64-stack-home-alias
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  void wrap(Rec *p, int n)
+  {
+    int in_stk_n40 = n;
+    if (p == 0) {
+      return;
+    }
+    (void)in_stk_n40;
+  }
+contains:
+  - "(void)n"
+  - "p == 0"
+not_contains:
+  - "in_stk_"
+  - "in_stack_"
+  - "int n = n"
+compile: true
+notes: "Microsoft x64 spills a register arg to a home. Ghidra prints T in_stk = formal. Same type, not a second live. Mix wrap/Rec."

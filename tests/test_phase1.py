@@ -607,6 +607,58 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("xs->n", bare)
         self.assertNotIn("return xs->n + xs->n", bare)
         self.assertIn("in_stk_n72", bare)
+        alias = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "void wrap(Rec *p, int n)\n"
+            "{\n"
+            "  int in_stk_n40 = n;\n"
+            "  if (p == 0) {\n"
+            "    return;\n"
+            "  }\n"
+            "  (void)in_stk_n40;\n"
+            "}\n"
+        )
+        self.assertIn("(void)n", alias)
+        self.assertIn("p == 0", alias)
+        self.assertNotIn("in_stk_", alias)
+        self.assertNotIn("int n = n", alias)
+        same = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "void wrap(Rec *p, int n)\n"
+            "{\n"
+            "  int in_stk_n40;\n"
+            "  if (p == 0) {\n"
+            "    return;\n"
+            "  }\n"
+            "  (void)in_stk_n40;\n"
+            "}\n"
+        )
+        self.assertIn("(void)n", same)
+        self.assertNotIn("in_stk_", same)
+        ambig = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "void wrap(Rec *p, int n, int m)\n"
+            "{\n"
+            "  int in_stk_n40;\n"
+            "  (void)p;\n"
+            "  (void)in_stk_n40;\n"
+            "}\n"
+        )
+        self.assertIn("in_stk_", ambig)
+        self.assertNotIn("(void)n", ambig)
+        field0 = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "int wrap(Rec *p)\n"
+            "{\n"
+            "  int *in_RCX;\n"
+            "  if (p == 0) {\n"
+            "    return 0;\n"
+            "  }\n"
+            "  return *in_RCX;\n"
+            "}\n"
+        )
+        self.assertIn("in_RCX", field0)
+        self.assertIn("p == 0", field0)
 
     def test_austack_overlay_slot_is_byte_offset_cast(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -1800,6 +1852,19 @@ class TestCompileVerify(unittest.TestCase):
         blob = "\n".join(stubs)
         self.assertIn("dist2", blob)
         self.assertNotIn("inline ghidra_word nearest(", blob)
+        helper = type_stubs_for_snippet(
+            "void wrap(Rec *p) { helper(p); }\n",
+            current_name="wrap",
+        )
+        hblob = "\n".join(helper)
+        self.assertIn("inline ghidra_word helper(...)", hblob)
+        self.assertNotIn("inline ghidra_word wrap(", hblob)
+        proto = type_stubs_for_snippet(
+            "Rec * make(void);\nvoid wrap(void) { make(); }\n",
+            current_name="wrap",
+        )
+        pblob = "\n".join(proto)
+        self.assertNotIn("inline ghidra_word make(", pblob)
 
     def test_typedefs_for_source_emits_only_named_aliases(self):
         from src.domains.pack import typedefs_for_source
@@ -1817,7 +1882,23 @@ class TestCompileVerify(unittest.TestCase):
 
         silent = "\n".join(typedefs_for_source("int f(ghidra_word w) { return (int)w; }\n"))
         self.assertIn("struct ghidra_word", silent)
+        self.assertIn("operator=(decltype(nullptr))", silent)
         self.assertNotIn("operator()", silent)
+        self.assertNotIn("operator*()", silent)
+        field_os = "\n".join(
+            typedefs_for_source(
+                "struct Rec { ghidra_word n; };\n"
+                "void wrap(Rec *p) { std::cout << p->n; }\n"
+            )
+        )
+        self.assertIn("operator<<(std::ostream &os, ghidra_word w)", field_os)
+        field_star = "\n".join(
+            typedefs_for_source(
+                "struct Rec { ghidra_word left; };\n"
+                "void wrap(Rec *p) { (void)*p->left; }\n"
+            )
+        )
+        self.assertIn("operator*() const", field_star)
         called = "\n".join(
             typedefs_for_source("int f(ghidra_word w) { return (int)w(); }\n")
         )
@@ -1901,6 +1982,32 @@ class TestCompileVerify(unittest.TestCase):
         src = "\n".join(preamble) + body
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "ghidra_word_ops.cpp"
+            p.write_text(src, encoding="utf-8")
+            rep = compile_cpp(p, compiler=cxx, timeout_sec=30)
+            self.assertTrue(rep.attempted)
+            self.assertTrue(rep.ok, rep.stderr)
+
+    def test_ghidra_word_nullptr_assign_compiles(self):
+        from src.analysis.compile_verify import compile_cpp, find_cxx_compiler
+        from src.analysis.includes import make_preamble
+
+        cxx = find_cxx_compiler()
+        if not cxx:
+            self.skipTest("no C++ compiler on PATH")
+        body = (
+            "struct Rec { ghidra_word left; };\n"
+            "void wrap(Rec *p) {\n"
+            "  p->left = nullptr;\n"
+            "  ghidra_word w;\n"
+            "  w = nullptr;\n"
+            "  (void)w;\n"
+            "}\n"
+        )
+        preamble = make_preamble("// test", [{"cpp_code": body}], [])
+        src = "\n".join(preamble) + body
+        self.assertIn("operator=(decltype(nullptr))", src)
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "ghidra_word_nullptr.cpp"
             p.write_text(src, encoding="utf-8")
             rep = compile_cpp(p, compiler=cxx, timeout_sec=30)
             self.assertTrue(rep.attempted)
@@ -2089,6 +2196,22 @@ class TestCompileVerify(unittest.TestCase):
         self.assertNotIn("Rec() {", text)
         self.assertNotIn("Rec::Rec", text)
         self.assertNotIn("in_RCX", text)
+
+    def test_assemble_stubs_undeclared_callee_not_in_restored_set(self):
+        from src.agents.assembler import assemble
+
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "FUN_1",
+            "cpp_code": "void wrap(Rec *p) { helper(p); }\n",
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertIn("inline ghidra_word helper(...)", text)
+        self.assertNotIn("inline ghidra_word wrap(", text)
+        self.assertNotIn("inline ghidra_word Rec(", text)
 
 
 if __name__ == "__main__":

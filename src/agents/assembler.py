@@ -405,6 +405,12 @@ def type_stubs_for_snippet(
             lines.append("")
     lines.extend(_ghidra_stubs(blob))
     lines.extend(_sibling_call_stubs(blob, sibling_names or [], current_name))
+    defined = {((current_name or "").strip())} | {
+        (n or "").strip() for n in (sibling_names or [])
+    }
+    defined.discard("")
+    struct_names = already | set(inferred)
+    lines.extend(_undeclared_callee_stubs(blob, defined, struct_names))
     glue = missing_typedefs(preamble or "", blob + "\n" + "\n".join(lines))
     if glue:
         lines = glue + [""] + lines
@@ -436,6 +442,112 @@ def _sibling_call_stubs(
     if not lines:
         return []
     return ["// ---- sibling user calls (per-fn) ----"] + lines + [""]
+
+
+_CALL_NOT_CALLEE = frozenset({
+    "if", "while", "for", "switch", "catch", "return", "sizeof", "typeof",
+    "decltype", "alignof", "static_cast", "reinterpret_cast", "const_cast",
+    "dynamic_cast", "new", "delete", "throw", "noexcept",
+    "offsetof", "typeid", "default", "case", "else", "static_assert",
+})
+_CALL_NOT_TYPE = frozenset({
+    "ghidra_word", "undefined", "undefined1", "undefined2", "undefined4",
+    "undefined8", "byte", "uchar", "ushort", "uint", "ulong", "ulonglong",
+    "longlong", "int", "char", "bool", "void", "auto", "size_t", "ptrdiff_t",
+    "float", "double", "wchar_t", "short", "long", "unsigned",
+})
+_CALL_STMT = frozenset({
+    "return", "if", "while", "for", "switch", "case", "else", "goto",
+    "throw", "delete", "new", "co_return", "co_yield",
+})
+
+
+def _call_is_definition(blob: str, paren_end: int) -> bool:
+    """True when `name(` opens a function body, not a call site."""
+    rest = blob[paren_end:]
+    depth = 1
+    i = 0
+    while i < len(rest) and depth:
+        if rest[i] == "(":
+            depth += 1
+        elif rest[i] == ")":
+            depth -= 1
+        i += 1
+    after = rest[i:].lstrip()
+    return after.startswith("{") or after.startswith("const") or after.startswith(
+        "override"
+    )
+
+
+def _preceding_ident(blob: str, start: int) -> str:
+    i = start
+    while i > 0 and blob[i - 1] in " \t\n\r*&":
+        i -= 1
+    j = i
+    while j > 0 and (blob[j - 1].isalnum() or blob[j - 1] == "_"):
+        j -= 1
+    return blob[j:i]
+
+
+def _declared_free_names(blob: str) -> Set[str]:
+    """Names that already have a prototype or definition in `blob`."""
+    found: Set[str] = set()
+    for m in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", blob or ""):
+        name = m.group(1)
+        if name in _CALL_NOT_CALLEE or name in _CALL_NOT_TYPE:
+            continue
+        if _call_is_definition(blob, m.end()):
+            found.add(name)
+            continue
+        prev = _preceding_ident(blob, m.start(1))
+        if prev and prev not in _CALL_STMT:
+            found.add(name)
+    return found
+
+
+def _undeclared_callee_stubs(
+    code: str,
+    defined: Set[str],
+    struct_names: Set[str],
+) -> List[str]:
+    """Stub free calls that the TU uses but did not restore. Dump named them.
+
+    Skip members (`p->f(`), `std::`, CRT, keywords, types used as ctors,
+    and names that already have a prototype in the snippet.
+    Same shape as sibling/thunk stubs: `inline ghidra_word name(...)`.
+    """
+    from src.analysis.platform import is_runtime_noise
+
+    blob = code or ""
+    already = defined | struct_names | _declared_free_names(blob)
+    names: List[str] = []
+    seen: Set[str] = set()
+    for m in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", blob):
+        name = m.group(1)
+        start = m.start(1)
+        if name in seen or name in already:
+            continue
+        if name in _CALL_NOT_CALLEE or name in _CALL_NOT_TYPE:
+            continue
+        if is_runtime_noise(name):
+            continue
+        if name.startswith(("FUN_", "thunk_", "DAT_", "_")):
+            continue
+        if start >= 2 and blob[start - 2:start] in {"->", "::"}:
+            continue
+        if start >= 1 and blob[start - 1] == ".":
+            continue
+        if _call_is_definition(blob, m.end()):
+            continue
+        seen.add(name)
+        names.append(name)
+    if not names:
+        return []
+    lines = ["// ---- undeclared callees ----"]
+    for name in names:
+        lines.append(f"inline ghidra_word {name}(...) {{ return {{}}; }}")
+    lines.append("")
+    return lines
 
 
 _RE_INT_DAT = re.compile(
@@ -565,6 +677,15 @@ def assemble(
     blob = "\n".join(c for _, _, c in cleaned)
     inferred = _infer_structs(blob, already)
     stub_lines = _ghidra_stubs(blob)
+    defined = {name for _addr, name, _code in cleaned}
+    struct_names = (
+        set(best)
+        | {n for n in inferred}
+        | _preamble_type_names("\n".join(parts))
+    )
+    stub_lines = list(stub_lines) + _undeclared_callee_stubs(
+        blob, defined, struct_names
+    )
     inferred_src = "\n".join(
         _format_inferred_struct(name, inferred[name])
         for name in sorted(inferred)

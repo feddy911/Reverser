@@ -1,0 +1,21 @@
+id: ghidra-msx64-stack-home-same-type
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  struct Rec { int n; };
+  void wrap(Rec *p, int n)
+  {
+    int in_stk_n40;
+    if (p == 0) {
+      return;
+    }
+    (void)in_stk_n40;
+  }
+contains:
+  - "(void)n"
+  - "p == 0"
+not_contains:
+  - "in_stk_"
+  - "in_stack_"
+compile: true
+notes: "Stack home is the unique unused formal of a compatible type, not slot 0 (that is Rec star). Not T star vs U star. Mix wrap/Rec."

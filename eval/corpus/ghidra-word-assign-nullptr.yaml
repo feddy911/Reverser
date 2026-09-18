@@ -1,0 +1,19 @@
+id: ghidra-word-assign-nullptr
+profile: gcc_pe_x64
+gcc_fingerprint: "no match for 'operator='.*ghidra_word.*nullptr_t"
+gcc_probe:
+  - "no match for 'operator=' (operand types are 'ghidra_word' and 'std::nullptr_t')"
+recipe: assemble
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(Rec *p)
+  {
+    p->left = nullptr;
+  }
+contains:
+  - "operator=(decltype(nullptr))"
+  - "p->left = nullptr"
+not_contains:
+  - "c_str"
+compile: true
+notes: "Inferred Rec fields are ghidra_word. operator=(T star) does not match nullptr_t. Mix wrap/Rec, not a sample name."

@@ -1,0 +1,16 @@
+id: ghidra-word-field-deref
+profile: gcc_pe_x64
+recipe: assemble
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(Rec *p)
+  {
+    (void)*p->left;
+  }
+contains:
+  - "operator*() const"
+  - "*p->left"
+not_contains:
+  - "c_str"
+compile: true
+notes: "Inferred Rec fields are ghidra_word. *p->left is unary star on the dummy word (arrow binds first). Mix wrap/Rec."

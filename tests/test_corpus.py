@@ -187,6 +187,17 @@ class TestCorpusEval(unittest.TestCase):
         self.assertNotIn("NestWalk", crlf.ghidra_cpp)
         self.assertNotIn("FibTimer", crlf.ghidra_cpp)
         self.assertNotIn("Item", crlf.ghidra_cpp)
+        home_alias = cases["ghidra-msx64-stack-home-alias"]
+        self.assertTrue(home_alias.compile)
+        self.assertEqual(home_alias.recipe, "sanitize")
+        self.assertIn("in_stk_n40 = n", home_alias.ghidra_cpp)
+        self.assertNotIn("NestWalk", home_alias.ghidra_cpp)
+        self.assertNotIn("FibTimer", home_alias.ghidra_cpp)
+        same_ty = cases["ghidra-msx64-stack-home-same-type"]
+        self.assertTrue(same_ty.compile)
+        self.assertIn("int in_stk_n40;", same_ty.ghidra_cpp)
+        self.assertNotIn("NestWalk", same_ty.ghidra_cpp)
+        self.assertNotIn("FibTimer", same_ty.ghidra_cpp)
 
     def test_sret_this_fixture_is_loaded(self):
         cases = {c.id: c for c in load_corpus()}
@@ -277,6 +288,25 @@ class TestCorpusEval(unittest.TestCase):
         self.assertIn("uint wrap", preamble.ghidra_cpp)
         self.assertNotIn("ghidra_word", preamble.ghidra_cpp)
         self.assertNotIn("FibTimer", preamble.ghidra_cpp)
+        nullptr = cases["ghidra-word-assign-nullptr"]
+        self.assertTrue(nullptr.compile)
+        self.assertEqual(nullptr.recipe, "assemble")
+        self.assertIn("p->left = nullptr", nullptr.ghidra_cpp)
+        self.assertNotIn("NestWalk", nullptr.ghidra_cpp)
+        self.assertNotIn("FibTimer", nullptr.ghidra_cpp)
+        field_os = cases["ghidra-word-field-ostream"]
+        self.assertTrue(field_os.compile)
+        self.assertEqual(field_os.recipe, "assemble")
+        self.assertIn("p->n", field_os.ghidra_cpp)
+        self.assertNotIn("NestWalk", field_os.ghidra_cpp)
+        deref = cases["ghidra-word-field-deref"]
+        self.assertTrue(deref.compile)
+        self.assertIn("*p->left", deref.ghidra_cpp)
+        self.assertNotIn("NestWalk", deref.ghidra_cpp)
+        callee = cases["ghidra-undeclared-callee-stub"]
+        self.assertTrue(callee.compile)
+        self.assertIn("helper(p)", callee.ghidra_cpp)
+        self.assertNotIn("NestWalk", callee.ghidra_cpp)
         ctor_tu = cases["ghidra-compiler-special-member-tu"]
         self.assertEqual(ctor_tu.recipe, "assemble")
         self.assertTrue(ctor_tu.compile)

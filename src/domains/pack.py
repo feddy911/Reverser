@@ -112,6 +112,7 @@ def _ghidra_word_lines(
     call: bool = True,
     pair: bool = True,
     stream: bool = True,
+    star: bool = True,
 ) -> List[str]:
     lines = [
         "struct ghidra_word {",
@@ -124,6 +125,7 @@ def _ghidra_word_lines(
         "    v = (unsigned long long)(std::uintptr_t)p;",
         "    return *this;",
         "  }",
+        "  ghidra_word &operator=(decltype(nullptr)) { v = 0; return *this; }",
         "  operator unsigned long long() const { return v; }",
         "  explicit operator bool() const { return v != 0; }",
         "  template<class T> operator T *() const {",
@@ -141,6 +143,8 @@ def _ghidra_word_lines(
         )
     if index:
         lines.append("  template<class I> ghidra_word &operator[](I) { return *this; }")
+    if star:
+        lines.append("  ghidra_word operator*() const { return *this; }")
     if call:
         lines.append(
             "  template<class... A> ghidra_word operator()(A &&...) const { return {}; }"
@@ -211,13 +215,27 @@ def _word_features(blob: str, word_idents: list[str]) -> dict[str, bool]:
         )
         for ident in word_idents
     )
+    field_stream = bool(
+        re.search(r"<<\s*[A-Za-z_]\w*\s*(?:->|\.)\s*[A-Za-z_]\w*", blob or "")
+    )
+    star = any(
+        re.search(
+            rf"(?<![\w.])\*\s*(?:\(\s*)*{re.escape(ident)}\b",
+            blob or "",
+        )
+        for ident in word_idents
+    )
+    field_star = bool(
+        re.search(r"\*\s*[A-Za-z_]\w*\s*->\s*[A-Za-z_]\w*", blob or "")
+    )
     return {
         "call": call,
         "index": index,
         "arrow": arrow,
         "inc": inc,
         "pair": pair,
-        "stream": stream,
+        "stream": stream or field_stream,
+        "star": star or field_star,
     }
 
 

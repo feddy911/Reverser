@@ -1,0 +1,16 @@
+id: ghidra-word-field-ostream
+profile: gcc_pe_x64
+recipe: assemble
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(Rec *p)
+  {
+    std::cout << p->n;
+  }
+contains:
+  - "operator<<"
+  - "std::cout << p->n"
+not_contains:
+  - "c_str"
+compile: true
+notes: "Inferred Rec fields are ghidra_word. Shift on p->n is the dummy word, not a local ghidra_word ident. Mix wrap/Rec."
