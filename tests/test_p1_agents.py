@@ -1099,6 +1099,335 @@ class TestCritic(unittest.TestCase):
         self.assertFalse(inv.identity_ok)
         self.assertTrue(any("restore leftover extraout" in r for r in inv.reasons))
 
+    def test_leftover_dead_array_home_is_identity_fail(self):
+        from src.agents.critic import dialect_hits, review_function
+
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": "void wrap(void) { (void)0; }",
+        }
+        leftover = (
+            "void use(int n);\n"
+            "void wrap(void)\n"
+            "{\n"
+            "  int xs [4];\n"
+            "  int i;\n"
+            "  int in_stk_n40;\n"
+            "  for (i = 0; i < 4; i = i + 1) {\n"
+            "    use(in_stk_n40);\n"
+            "  }\n"
+            "}\n"
+        )
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any("restore leftover dead_array xs" in r for r in verdict.reasons)
+        )
+        self.assertTrue(
+            any(
+                h.source == "compiler" and h.kind == "dead_array" and h.token == "xs"
+                for h in dialect_hits(leftover)
+            )
+        )
+        bound = (
+            "void use(int n);\n"
+            "void wrap(void)\n"
+            "{\n"
+            "  int xs[4] = {1, 2, 3, 4};\n"
+            "  int i;\n"
+            "  for (i = 0; i < 4; i = i + 1) {\n"
+            "    use(xs[i]);\n"
+            "  }\n"
+            "}\n"
+        )
+        ok = review_function(entry, bound, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(any(h.kind == "dead_array" for h in dialect_hits(bound)))
+        stack_only = (
+            "void wrap(void)\n"
+            "{\n"
+            "  int in_stk_n40;\n"
+            "  (void)in_stk_n40;\n"
+            "}\n"
+        )
+        stack = review_function(entry, stack_only, [])
+        self.assertTrue(stack.identity_ok)
+        self.assertFalse(any(h.kind == "dead_array" for h in dialect_hits(stack_only)))
+
+    def test_dialect_hits_split_ghidra_compiler_human(self):
+        ghidra = dialect_hits(
+            "void wrap(unsigned long long x) { x = CONCAT44(a, b); (void)x; }\n"
+        )
+        self.assertTrue(any(h.source == "ghidra" and h.kind == "concat" for h in ghidra))
+        self.assertFalse(any(h.source == "compiler" for h in ghidra))
+        abi = dialect_hits(
+            "void wrap(void) { undefined8 *in_RCX; (void)*in_RCX; }\n"
+        )
+        sources = {h.source for h in abi}
+        self.assertIn("compiler", sources)
+        self.assertIn("ghidra", sources)
+        self.assertTrue(any(h.token == "in_RCX" for h in abi))
+        human = dialect_hits(
+            "void wrap(std::vector<int> *p) {\n"
+            "  p->push_back(1);\n"
+            "  std::cout << \"n=\" << 1;\n"
+            "}\n"
+        )
+        self.assertEqual(human, [])
+        ostream_addr = dialect_hits(
+            "void wrap(int n) {\n"
+            "  std::ostream *p;\n"
+            "  p = (std::ostream *)(&((*((std::ostream *)p)) << (n)));\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(h.source == "ghidra" and h.kind == "ostream" for h in ostream_addr)
+        )
+        ostream_cout = dialect_hits(
+            "void wrap(void) {\n"
+            "  std::ostream *p;\n"
+            "  p = (&((*(std::cout)) << (\"Number: \")));\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(h.source == "ghidra" and h.kind == "ostream" for h in ostream_cout)
+        )
+        ctor = dialect_hits(
+            "Rec(Rec *param_2) {\n"
+            "  *(undefined4 *)(in_RCX + 8) = *(undefined4 *)(in_RDX + 8);\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(h.source == "compiler" and h.kind == "special_member" and h.token == "Rec" for h in ctor)
+        )
+        dctor = dialect_hits(
+            "Rec() {\n"
+            "  std::string *in_stk_n40;\n"
+            "  std::string(in_stk_n40);\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(h.source == "compiler" and h.kind == "special_member" and h.token == "Rec" for h in dctor)
+        )
+        human_ctor = dialect_hits(
+            "Rec() {\n"
+            "  id.clear();\n"
+            "}\n"
+        )
+        self.assertFalse(any(h.kind == "special_member" for h in human_ctor))
+        thiscall_copy = dialect_hits(
+            "voidnew (Rec *this) Rec(Rec *param_2) {"
+            "  *(undefined4 *)(in_RCX + 8) = 0;\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(
+                h.source == "compiler" and h.kind == "special_member" and h.token == "Rec"
+                for h in thiscall_copy
+            )
+        )
+        thiscall_dctor = dialect_hits(
+            "void __thiscallnew (Rec *this) Rec() {\n"
+            "  std::string *in_stk_n40;\n"
+            "  std::string(in_stk_n40);\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(
+                h.source == "compiler" and h.kind == "special_member" and h.token == "Rec"
+                for h in thiscall_dctor
+            )
+        )
+        self.assertFalse(
+            any(
+                h.kind == "special_member"
+                for h in dialect_hits("void wrap(Rec *p) { (void)p; }\n")
+            )
+        )
+        dead = dialect_hits(
+            "void use(int n);\n"
+            "void wrap(void) {\n"
+            "  int xs [4];\n"
+            "  int i;\n"
+            "  int in_stk_n40;\n"
+            "  for (i = 0; i < 4; i = i + 1) {\n"
+            "    use(in_stk_n40);\n"
+            "  }\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(h.source == "compiler" and h.kind == "dead_array" and h.token == "xs" for h in dead)
+        )
+        shift = dialect_hits(
+            "Rec * helper(Rec *q, int k);\n"
+            "Rec * wrap(Rec *p, int n) {\n"
+            "  Rec *r;\n"
+            "  uint in_stk_n36;\n"
+            "  r = helper((Rec *)(((unsigned)(in_stk_n36) << 32) | (unsigned)(n)), n);\n"
+            "  return r;\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(
+                h.source == "ghidra" and h.kind == "concat_shift" and h.token == "in_stk_n36"
+                for h in shift
+            )
+        )
+
+    def test_dead_array_leftover_rejects_run(self):
+        leftover = (
+            "void wrap(void)\n"
+            "{\n"
+            "  int xs [4];\n"
+            "  int i;\n"
+            "  int in_stk_n40;\n"
+            "  puts(\"k\");\n"
+            "  for (i = 0; i < 4; i = i + 1) {\n"
+            "    use(in_stk_n40);\n"
+            "  }\n"
+            "}\n"
+        )
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "FUN_1",
+            "name": "FUN_1",
+            "cpp_code": leftover,
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+            "compile_ok": True,
+        }]
+        verdict = review_run(
+            restored,
+            tu_text=leftover,
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertFalse(verdict.identity_ok)
+        self.assertFalse(verdict.accept)
+        self.assertTrue(any("dead_array" in r for r in verdict.reasons))
+        self.assertTrue(director_contract(verdict))
+        kinds = {s["sanction"] for s in verdict.sanctions}
+        self.assertIn("run_reject", kinds)
+
+    def test_leftover_concat_shift_ptr_is_identity_fail(self):
+        from src.agents.critic import dialect_hits, review_function
+
+        leftover = (
+            "Rec * helper(Rec *q, int k);\n"
+            "Rec * wrap(Rec *p, int n)\n"
+            "{\n"
+            "  Rec *r;\n"
+            "  uint in_stk_n36;\n"
+            "  r = helper((Rec *)(((unsigned)(in_stk_n36) << 32) | (unsigned)(n)), n);\n"
+            "  return r;\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any("restore leftover concat_shift in_stk_n36" in r for r in verdict.reasons)
+        )
+        self.assertTrue(
+            any(
+                h.source == "ghidra"
+                and h.kind == "concat_shift"
+                and h.token == "in_stk_n36"
+                for h in dialect_hits(leftover)
+            )
+        )
+        bound = (
+            "Rec * helper(Rec *q, int k);\n"
+            "Rec * wrap(Rec *p, int n)\n"
+            "{\n"
+            "  Rec *r;\n"
+            "  r = helper(p, n);\n"
+            "  return r;\n"
+            "}\n"
+        )
+        ok = review_function(entry, bound, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(any(h.kind == "concat_shift" for h in dialect_hits(bound)))
+        wide = "unsigned long long wrap(unsigned a, unsigned b) { return ((unsigned)(a) << 32) | (unsigned)(b); }\n"
+        self.assertFalse(any(h.kind == "concat_shift" for h in dialect_hits(wide)))
+        temp = (
+            "Rec * helper(Rec *q, int k);\n"
+            "Rec * wrap(Rec *p, int n)\n"
+            "{\n"
+            "  Rec *r;\n"
+            "  uint uVar1;\n"
+            "  r = helper((Rec *)CONCAT44(uVar1, n), n);\n"
+            "  return r;\n"
+            "}\n"
+        )
+        temp_v = review_function(entry, temp, [])
+        self.assertFalse(temp_v.identity_ok)
+        self.assertTrue(any("restore leftover concat_shift" in r for r in temp_v.reasons))
+
+    def test_leftover_ostream_addr_insert_is_identity_fail(self):
+        leftover = (
+            "void wrap(void)\n"
+            "{\n"
+            "  std::ostream *pbVar1;\n"
+            "  pbVar1 = (&((*(std::cout)) << (\"Number: \")));\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(any("restore leftover ostream_addr" in r for r in verdict.reasons))
+        self.assertTrue(
+            any(h.source == "ghidra" and h.kind == "ostream" for h in dialect_hits(leftover))
+        )
+        chain = (
+            "void wrap(__uint64 *param_1)\n"
+            "{\n"
+            "  std::ostream *pbVar3;\n"
+            "  std::ostream *pbVar4;\n"
+            "  unsigned long long local_20;\n"
+            "  pbVar3 = (&((*(std::cout)) << (\"\\rSteps: \")));\n"
+            "  pbVar4 = (&((*(pbVar3)) << (*(__uint64 *)(param_1 + 0x10))));\n"
+            "  pbVar3 = (&((*(pbVar4)) << (\" (\")));\n"
+            "  pbVar4 = (&((*(pbVar3)) << (local_20)));\n"
+            "  (void)pbVar4;\n"
+            "}\n"
+        )
+        chain_v = review_function(entry, chain, [])
+        self.assertFalse(chain_v.identity_ok)
+        human = (
+            "void wrap(void)\n"
+            "{\n"
+            "  std::cout << \"Number: \";\n"
+            "}\n"
+        )
+        ok = review_function(entry, human, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(any(h.kind == "ostream" for h in dialect_hits(human)))
+
     def test_restore_ellipsis_stub_is_identity_fail(self):
         entry = {
             "address": "0x1",
@@ -1286,88 +1615,6 @@ class TestCritic(unittest.TestCase):
         self.assertFalse(verdict.accept)
         self.assertTrue(any("unscored" in r for r in verdict.reasons))
         self.assertTrue(director_contract(verdict))
-
-    def test_dialect_hits_split_ghidra_compiler_human(self):
-        ghidra = dialect_hits(
-            "void wrap(unsigned long long x) { x = CONCAT44(a, b); (void)x; }\n"
-        )
-        self.assertTrue(any(h.source == "ghidra" and h.kind == "concat" for h in ghidra))
-        self.assertFalse(any(h.source == "compiler" for h in ghidra))
-        abi = dialect_hits(
-            "void wrap(void) { undefined8 *in_RCX; (void)*in_RCX; }\n"
-        )
-        sources = {h.source for h in abi}
-        self.assertIn("compiler", sources)
-        self.assertIn("ghidra", sources)
-        self.assertTrue(any(h.token == "in_RCX" for h in abi))
-        human = dialect_hits(
-            "void wrap(std::vector<int> *p) {\n"
-            "  p->push_back(1);\n"
-            "  std::cout << \"n=\" << 1;\n"
-            "}\n"
-        )
-        self.assertEqual(human, [])
-        ostream_addr = dialect_hits(
-            "void wrap(int n) {\n"
-            "  std::ostream *p;\n"
-            "  p = (std::ostream *)(&((*((std::ostream *)p)) << (n)));\n"
-            "}\n"
-        )
-        self.assertTrue(
-            any(h.source == "ghidra" and h.kind == "ostream" for h in ostream_addr)
-        )
-        ctor = dialect_hits(
-            "Rec(Rec *param_2) {\n"
-            "  *(undefined4 *)(in_RCX + 8) = *(undefined4 *)(in_RDX + 8);\n"
-            "}\n"
-        )
-        self.assertTrue(
-            any(h.source == "compiler" and h.kind == "special_member" and h.token == "Rec" for h in ctor)
-        )
-        dctor = dialect_hits(
-            "Rec() {\n"
-            "  std::string *in_stk_n40;\n"
-            "  std::string(in_stk_n40);\n"
-            "}\n"
-        )
-        self.assertTrue(
-            any(h.source == "compiler" and h.kind == "special_member" and h.token == "Rec" for h in dctor)
-        )
-        human_ctor = dialect_hits(
-            "Rec() {\n"
-            "  id.clear();\n"
-            "}\n"
-        )
-        self.assertFalse(any(h.kind == "special_member" for h in human_ctor))
-        thiscall_copy = dialect_hits(
-            "voidnew (Rec *this) Rec(Rec *param_2) {"
-            "  *(undefined4 *)(in_RCX + 8) = 0;\n"
-            "}\n"
-        )
-        self.assertTrue(
-            any(
-                h.source == "compiler" and h.kind == "special_member" and h.token == "Rec"
-                for h in thiscall_copy
-            )
-        )
-        thiscall_dctor = dialect_hits(
-            "void __thiscallnew (Rec *this) Rec() {\n"
-            "  std::string *in_stk_n40;\n"
-            "  std::string(in_stk_n40);\n"
-            "}\n"
-        )
-        self.assertTrue(
-            any(
-                h.source == "compiler" and h.kind == "special_member" and h.token == "Rec"
-                for h in thiscall_dctor
-            )
-        )
-        self.assertFalse(
-            any(
-                h.kind == "special_member"
-                for h in dialect_hits("void wrap(Rec *p) { (void)p; }\n")
-            )
-        )
 
     def test_dialect_leftover_does_not_reject_run(self):
         restored = [{

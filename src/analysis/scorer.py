@@ -178,14 +178,14 @@ def select_llm_targets(
     scored: List[Dict[str, Any]],
     top_n: int,
 ) -> Tuple[List[Dict[str, Any]], int]:
-    """Top-N для LLM без CRT/STL/MinGW internals.
+    """Top-N для LLM без CRT/STL/MinGW internals и Ghidra Library Function.
 
     Returns (targets, n_filtered). If everything is noise, falls back to raw top-N.
     """
     kept: List[Dict[str, Any]] = []
     n_filtered = 0
     for s in scored:
-        if is_runtime_noise(s.get("name") or ""):
+        if is_runtime_noise(s.get("name") or "") or s.get("lib_matched"):
             n_filtered += 1
             continue
         kept.append(s)

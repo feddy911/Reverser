@@ -1,0 +1,21 @@
+id: ghidra-local-array-loop-index
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void use(int n);
+  void wrap(void)
+  {
+    int xs [4];
+    int i;
+    int in_stack_ffffffffffffffa0;
+    for (i = 0; i < 4; i = i + 1) {
+      use(in_stack_ffffffffffffffa0);
+    }
+  }
+contains:
+  - "use(xs[i])"
+not_contains:
+  - "in_stack_"
+  - "in_stk_"
+compile: true
+notes: "Ghidra dead-stores the fill then the indexed load looks like a separate int home. Unique unused T xs[N] plus for i<N is xs[i]. Mix wrap."

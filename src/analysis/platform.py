@@ -155,6 +155,129 @@ def looks_like_user_restore_name(name: str) -> bool:
         return True
     return "_" in base
 
+
+# Ghidra / IAT external → a C++ call ident. Empty = still anonymous FUN_/thunk.
+_RE_FOLD_OPERATOR = re.compile(
+    r"operator\s*(?:<<|>>|\+\+|--|->\*?|\(\)|\[\]|==|!=|<=|>=|[+\-*/%^&|~!=<>])"
+)
+_RE_FOLD_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def fold_library_ident(name: str) -> str:
+    """Named import/STL/CRT spelling from a dump symbol. Not a sample name.
+
+    FUN_/thunk_FUN_/DAT_ stay empty: those are addresses, not a library
+    dictionary hit. Demangled ``std::basic_ostream<...>::operator<<``
+    folds to ``operator<<``. Bare IAT names (printf, __gmpz_init) pass.
+    """
+    n = (name or "").strip()
+    if not n or n.startswith(("FUN_", "thunk_FUN_", "DAT_", "LAB_")):
+        return ""
+    op = _RE_FOLD_OPERATOR.search(n)
+    if op:
+        return re.sub(r"\s+", "", op.group(0))
+    if "::" in n:
+        n = n.rsplit("::", 1)[-1].strip()
+    if "<" in n:
+        n = n.split("<", 1)[0].strip()
+    if _RE_FOLD_IDENT.fullmatch(n):
+        return n
+    return ""
+
+
+def _prototype_span(code: str) -> str:
+    s = (code or "").replace("\r\n", "\n").replace("\r", "\n")
+    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.DOTALL)
+    s = re.sub(r"//.*?$", " ", s, flags=re.MULTILINE)
+    i = s.find("{")
+    return " ".join((s[:i] if i >= 0 else s).split())
+
+
+def _split_proto_params(inner: str) -> list[str]:
+    args: list[str] = []
+    depth_p = depth_a = 0
+    start = 0
+    blob = inner or ""
+    for i, c in enumerate(blob):
+        if c == "(":
+            depth_p += 1
+        elif c == ")":
+            depth_p -= 1
+        elif c == "<":
+            depth_a += 1
+        elif c == ">":
+            depth_a -= 1
+        elif c == "," and depth_p == 0 and depth_a == 0:
+            args.append(blob[start:i].strip())
+            start = i + 1
+    tail = blob[start:].strip()
+    if tail:
+        args.append(tail)
+    return args
+
+
+def _proto_param_types(proto: str) -> list[str]:
+    blob = proto or ""
+    start = blob.rfind("(")
+    if start < 0:
+        return []
+    depth = 0
+    close = -1
+    for i in range(start, len(blob)):
+        if blob[i] == "(":
+            depth += 1
+        elif blob[i] == ")":
+            depth -= 1
+            if depth == 0:
+                close = i
+                break
+    if close < 0:
+        return []
+    return _split_proto_params(blob[start + 1:close])
+
+
+def _is_ostream_ptr_type(typ: str) -> bool:
+    t = re.sub(r"\s+", "", typ or "").lower()
+    if "*" not in t:
+        return False
+    if "streambuf" in t:
+        return False
+    return "basic_ostream" in t or bool(
+        re.search(r"(?<![a-z])w?ostream(?![a-z_])", t)
+    )
+
+
+def fold_ident_from_dump_fn(fn: dict) -> str:
+    """In-image dump function → ISO/CRT call ident, or '' if still anonymous.
+
+    Ghidra prints ``thunk_FUN_<addr>(`` even when ``<addr>`` is a static
+    STL inserter / CRT printf in the PE, not an IAT thunk. Named symbols
+    and two-arg ``ostream*`` prototypes fold; extra-arity ostream helpers
+    stay unmapped (no invented ISO name).
+    """
+    ident = fold_library_ident(str((fn or {}).get("name") or ""))
+    if ident:
+        return ident
+    proto = _prototype_span(str((fn or {}).get("ghidra_code") or ""))
+    params = _proto_param_types(proto)
+    if len(params) == 2 and _is_ostream_ptr_type(params[0]):
+        return "operator<<"
+    ext = [(e or "").replace(" ", "") for e in ((fn or {}).get("ext_calls") or [])]
+    for e in ext:
+        if e in {"printf", "fprintf", "sprintf", "puts", "putchar"}:
+            return e
+        if e in STDIO_NAMES and not e.startswith("__"):
+            return e
+    if any(e == "__acrt_iob_func" or e.startswith("__stdio_common") for e in ext):
+        return "printf"
+    if len(params) == 1 and _is_ostream_ptr_type(params[0]):
+        low = {e.lower() for e in ext}
+        if "flush" in low:
+            return "std::flush"
+        if "endl" in low:
+            return "std::endl"
+    return ""
+
 # Универсальные детекторы строк (без привязки к MSVC-путям)
 PATH_RE = re.compile(
     r"(^[A-Za-z]:[\\/]|^/|\\include\\|/usr/|/opt/|Program Files|"

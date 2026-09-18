@@ -1,0 +1,20 @@
+id: ghidra-local-array-elem-init
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void wrap(void)
+  {
+    int xs [4];
+    xs[0] = 1;
+    xs[1] = 2;
+    xs[2] = 3;
+    xs[3] = 4;
+    (void)xs[0];
+  }
+contains:
+  - "int xs[4] = {1, 2, 3, 4}"
+  - "(void)xs[0]"
+not_contains:
+  - "xs[0] = 1"
+compile: true
+notes: "Ghidra prints a local array then element stores. Humans write an aggregate initializer. Mix wrap, not a sample literal list."

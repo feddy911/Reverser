@@ -1,0 +1,16 @@
+id: ghidra-ostream-string-paren
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void wrap(std::ostream *os)
+  {
+    operator<<((std::ostream *)os, " (");
+    operator<<((std::ostream *)os, "0%)");
+  }
+contains:
+  - '" ("'
+  - '"0%)"'
+not_contains:
+  - "0%)))"
+compile: true
+notes: "A '(' inside a string is not a call paren. Mix wrap, not a sample name."

@@ -45,9 +45,17 @@ def _call_tokens(
     callees: List[str],
     name_by_addr: Dict[str, str],
     thunk_target: Dict[str, str],
+    functions: Optional[List[Dict[str, Any]]] = None,
+    thunks: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Tuple[str, List[str]]]:
     from src.analysis.fidelity import build_call_tokens
-    return build_call_tokens(callees, name_by_addr=name_by_addr, thunk_target=thunk_target)
+    return build_call_tokens(
+        callees,
+        name_by_addr=name_by_addr,
+        thunk_target=thunk_target,
+        functions=functions,
+        thunks=thunks,
+    )
 
 
 def _llm_cache_key(
@@ -624,10 +632,17 @@ def run(config: AppConfig) -> int:
                     data["dump_stub_swap"] = True
 
                 from src.analysis.ghidra_cpp import emit_sanitized_restore
+                from src.analysis.pe_image import read_va
 
                 # After cache.put: dialect bind lives on the run body, not the
                 # restore cache key. Call-site transplant is after stack-home
                 # bind so homes are not rewritten back onto vector* formals.
+                try:
+                    va = int(str(addr), 16)
+                    sz = int(s.get("size") or 0)
+                    data["func_bytes"] = read_va(config.binary_path, va, sz)
+                except Exception:
+                    data["func_bytes"] = b""
                 emit_sanitized_restore(data)
                 data["cpp_code"] = repair_calls_from_dump(
                     data.get("cpp_code") or "",
@@ -636,6 +651,13 @@ def run(config: AppConfig) -> int:
                     callee_dump_by_name=callee_dump_by_name,
                 )
                 emit_sanitized_restore(data)
+                from src.agents.assembler import fold_thunk_calls
+
+                data["cpp_code"] = fold_thunk_calls(
+                    data.get("cpp_code") or "", thunks, functions
+                )
+                emit_sanitized_restore(data)
+                data.pop("func_bytes", None)
 
                 cls = data.get("classification", "unknown")
                 guess = data.get("guessed_name") or "-"
@@ -745,7 +767,11 @@ def run(config: AppConfig) -> int:
                     for r in user_parts:
                         addr = r["address"]
                         call_tokens = _call_tokens(
-                            r.get("callees") or [], name_by_addr, thunk_target
+                            r.get("callees") or [],
+                            name_by_addr,
+                            thunk_target,
+                            functions,
+                            thunks,
                         )
                         v2_code = r.get("cpp_code", "")
                         # ghidra_code нужен для const-check; берём из scored top
@@ -855,7 +881,11 @@ def run(config: AppConfig) -> int:
                         v2 = v2_by_addr.get(addr, "")
                         v3c = v3_by_addr.get(addr, "")
                         toks = _call_tokens(
-                            s.get("callees") or [], name_by_addr, thunk_target
+                            s.get("callees") or [],
+                            name_by_addr,
+                            thunk_target,
+                            functions,
+                            thunks,
                         )
                         rep_v2 = check_function(s, v2, toks)
                         rep_v3 = check_function(s, v3c, toks) if v3c else None

@@ -284,6 +284,77 @@ class TestAssemblerDomain(unittest.TestCase):
         self.assertIn("inline ghidra_word thunk_FUN_140021680(...)", text)
         self.assertIn("static undefined DAT_14002db14", text)
 
+    def test_named_import_thunk_folds_not_stubbed(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x140001000",
+            "guessed_name": "go",
+            "ghidra_name": "FUN_140001000",
+            "cpp_code": (
+                "void go() {\n"
+                "  thunk_FUN_140014360(os, \"Number size: \");\n"
+                "  thunk_FUN_140021680(\"%d (%d)\");\n"
+                "}\n"
+            ),
+        }]
+        thunks = [
+            {
+                "address": "0x140014360",
+                "name": "thunk_FUN_140014360",
+                "target": None,
+                "ext_name": "operator<<",
+                "ext_dll": "basic_ostream<char,std::char_traits<char>_>",
+            },
+        ]
+        text, n = assemble(restored, [], thunks)
+        self.assertEqual(n, 1)
+        self.assertIn("operator<<(os, \"Number size: \")", text)
+        self.assertNotIn("inline ghidra_word thunk_FUN_140014360(", text)
+        self.assertIn("inline ghidra_word thunk_FUN_140021680(...)", text)
+        self.assertNotIn("inline ghidra_word d(...)", text)
+        self.assertNotIn("inline ghidra_word unresolved(", text)
+
+    def test_inimage_ostream_inserter_folds_from_dump_proto(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x140001000",
+            "guessed_name": "go",
+            "ghidra_name": "FUN_140001000",
+            "cpp_code": (
+                "void go() {\n"
+                "  thunk_FUN_140014360(os, \"Number size: \");\n"
+                "  thunk_FUN_140017af0(os, a, b, c, d);\n"
+                "}\n"
+            ),
+        }]
+        functions = [
+            {
+                "address": "0x140014360",
+                "name": "FUN_140014360",
+                "ghidra_code": (
+                    "basic_ostream<char,std::char_traits<char>_> *\n"
+                    "FUN_140014360(basic_ostream<char,std::char_traits<char>_> "
+                    "*param_1,char *param_2)\n{\n  return param_1;\n}\n"
+                ),
+            },
+            {
+                "address": "0x140017af0",
+                "name": "FUN_140017af0",
+                "ghidra_code": (
+                    "basic_ostream<char,std::char_traits<char>_> * "
+                    "FUN_140017af0(basic_ostream<char,std::char_traits<char>_> "
+                    "*param_1,longlong param_2,uint param_3,int param_4,"
+                    "int param_5)\n{\n  return param_1;\n}\n"
+                ),
+            },
+        ]
+        text, n = assemble(restored, functions, [])
+        self.assertEqual(n, 1)
+        self.assertIn("operator<<(os, \"Number size: \")", text)
+        self.assertNotIn("inline ghidra_word thunk_FUN_140014360(", text)
+        self.assertIn("thunk_FUN_140017af0(os, a, b, c, d)", text)
+        self.assertIn("inline ghidra_word thunk_FUN_140017af0(...)", text)
+
     def test_main_crt_stub(self):
         restored = [{
             "classification": "user_code",
@@ -522,6 +593,39 @@ class TestFidelitySmoke(unittest.TestCase):
         rep = check_function(entry, code, toks)
         self.assertEqual(rep["missing_ext"], [])
         self.assertEqual(rep["missing_calls"], [])
+
+    def test_folded_inserter_satisfies_fun_callee(self):
+        from src.analysis.fidelity import build_call_tokens, check_function, dump_facts_ok
+
+        functions = [{
+            "address": "0x140014360",
+            "name": "FUN_140014360",
+            "ghidra_code": (
+                "basic_ostream<char,std::char_traits<char>_> * "
+                "FUN_140014360(basic_ostream<char,std::char_traits<char>_> "
+                "*p, char *s) { return p; }\n"
+            ),
+        }]
+        toks = build_call_tokens(
+            ["0x140014360"],
+            name_by_addr={"0x140014360": "FUN_140014360"},
+            functions=functions,
+        )
+        labels, token_lists = zip(*toks)
+        self.assertIn("FUN_140014360", labels)
+        self.assertIn("<<", token_lists[0])
+        entry = {
+            "address": "0x1",
+            "literals": [" ("],
+            "ext_calls": ["operator<<"],
+            "ghidra_code": 'FUN_140014360(os, " (");',
+            "callees": ["0x140014360"],
+        }
+        code = 'std::cout << " (";'
+        rep = check_function(entry, code, toks)
+        self.assertEqual(rep["missing_calls"], [])
+        self.assertEqual(rep["missing_user_calls"], [])
+        self.assertTrue(dump_facts_ok(rep))
 
     def test_unresolved_addr_not_required_as_fun(self):
         from src.analysis.fidelity import build_call_tokens, check_function

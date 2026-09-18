@@ -193,15 +193,21 @@ def build_call_tokens(
     callees: Iterable[str],
     name_by_addr: Optional[Dict[str, str]] = None,
     thunk_target: Optional[Dict[str, str]] = None,
+    functions: Optional[Sequence[Dict[str, Any]]] = None,
+    thunks: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> List[Tuple[str, List[str]]]:
     """Единый builder токенов вызовов для refine / polish / final.
 
     Пропускает compiler/debug instrumentation (JustMyCode, RTC, GS, …).
     Unresolved addresses (import thunks without a name) are not required as
     FUN_<addr>: Ghidra already printed the C symbol (sqrt, memcpy, …).
+    Folded in-image STL/CRT (operator<<, printf) counts as the dump callee.
     """
+    from src.agents.assembler import thunk_fold_map
+
     name_by_addr = name_by_addr or {}
     thunk_target = thunk_target or {}
+    fold_by_addr = thunk_fold_map(thunks, functions)
     out: List[Tuple[str, List[str]]] = []
     for c in callees or []:
         if not c:
@@ -224,6 +230,19 @@ def build_call_tokens(
         base = _call_base(primary)
         if "<" in primary and base and base not in tokens:
             tokens.append(base)
+        for raw in (c, tgt):
+            hx = str(raw or "").strip().lower()
+            if hx.startswith("0x"):
+                hx = hx[2:]
+            ident = fold_by_addr.get(hx) or ""
+            if ident and ident not in tokens:
+                tokens.append(ident)
+            if ident.replace(" ", "") == "operator<<" and "<<" not in tokens:
+                tokens.append("<<")
+            if ident.startswith("std::"):
+                tail = ident.split("::", 1)[-1]
+                if tail and tail not in tokens:
+                    tokens.append(tail)
         if not tokens:
             continue
         if is_noise_call(primary) or all(is_noise_call(t) for t in tokens):

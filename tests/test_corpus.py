@@ -128,6 +128,7 @@ class TestCorpusEval(unittest.TestCase):
             "ghidra-const-string-star-as-string-star",
             "ghidra-int-as-mpfr-rnd",
             "ghidra-ostream-star-ref-shift",
+            "ghidra-ostream-string-paren",
             "ghidra-word-as-char-star",
             "ghidra-undefined-as-undefined-star",
             "ghidra-uchar-star-as-char-star",
@@ -198,6 +199,16 @@ class TestCorpusEval(unittest.TestCase):
         self.assertIn("int in_stk_n40;", same_ty.ghidra_cpp)
         self.assertNotIn("NestWalk", same_ty.ghidra_cpp)
         self.assertNotIn("FibTimer", same_ty.ghidra_cpp)
+        arr_init = cases["ghidra-local-array-elem-init"]
+        self.assertTrue(arr_init.compile)
+        self.assertEqual(arr_init.recipe, "sanitize")
+        self.assertIn("xs[0] = 1", arr_init.ghidra_cpp)
+        self.assertNotIn("NestWalk", arr_init.ghidra_cpp)
+        self.assertNotIn("FibTimer", arr_init.ghidra_cpp)
+        arr_ix = cases["ghidra-local-array-loop-index"]
+        self.assertTrue(arr_ix.compile)
+        self.assertIn("in_stack_ffffffffffffffa0", arr_ix.ghidra_cpp)
+        self.assertNotIn("NestWalk", arr_ix.ghidra_cpp)
 
     def test_sret_this_fixture_is_loaded(self):
         cases = {c.id: c for c in load_corpus()}
@@ -348,8 +359,22 @@ class TestCorpusEval(unittest.TestCase):
         ostream_addr = cases["critic-ghidra-ostream-addr-insert"]
         self.assertEqual(ostream_addr.recipe, "critic")
         self.assertIn("(*((std::ostream *)p))", ostream_addr.ghidra_cpp)
+        self.assertIn("*(std::cout)", ostream_addr.ghidra_cpp)
         self.assertNotIn("NestWalk", ostream_addr.ghidra_cpp)
         self.assertNotIn("FibTimer", ostream_addr.ghidra_cpp)
+        dead = cases["critic-dead-array-home"]
+        self.assertEqual(dead.recipe, "critic")
+        self.assertIn("int xs [4]", dead.ghidra_cpp)
+        self.assertIn("in_stk_n40", dead.ghidra_cpp)
+        self.assertNotIn("NestWalk", dead.ghidra_cpp)
+        self.assertNotIn("FibTimer", dead.ghidra_cpp)
+        self.assertNotIn("keys", dead.ghidra_cpp)
+        shift = cases["critic-ghidra-concat-shift"]
+        self.assertEqual(shift.recipe, "critic")
+        self.assertIn("<< 32", shift.ghidra_cpp)
+        self.assertIn("in_stk_n36", shift.ghidra_cpp)
+        self.assertNotIn("NestWalk", shift.ghidra_cpp)
+        self.assertNotIn("FibTimer", shift.ghidra_cpp)
 
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):

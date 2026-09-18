@@ -1,0 +1,22 @@
+id: critic-dead-array-home
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void use(int n);
+  void wrap(void)
+  {
+    int xs [4];
+    int i;
+    int in_stk_n40;
+    for (i = 0; i < 4; i = i + 1) {
+      use(in_stk_n40);
+    }
+  }
+contains:
+  - "==compiler:dead_array:xs=="
+  - "==compiler:stack_home:in_stk_n40=="
+not_contains:
+  - "==0=="
+compile: false
+notes: "Ghidra dead-stores the fill; the indexed load looks like a separate int home. Unique unused T xs[N] plus for i<N using that home is not human C++. Identity leftover like leftover in_RCX; sanitizer should bind xs[i]. Mix wrap."

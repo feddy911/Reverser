@@ -11,6 +11,12 @@ and does not block ACCEPT.
 Dialect leftovers (Ghidra pcode, MSVC ABI homes, assembler dummy word)
 are labeled ``ghidra`` / ``compiler`` / ``assembler`` vs human C++.
 That report sanctions polisher/assembler and does not REJECT the run.
+A dead local array plus the int home in ``for i<N`` is identity leftover
+(sanitizer should bind ``xs[i]``), same class as leftover ``in_RCX``.
+A ``T*`` rebuilt from an 8-byte PIECE (CONCAT or ``hi<<32|lo``) is identity
+leftover: Ghidra integer_size 4 split a pointer, not human arithmetic.
+An inserter written ``p = (&((*(std::cout)) << x)`` or ``*(std::cout)`` is
+identity leftover: sanitizer should emit ``std::cout << x``.
 
 Higher rank → harsher sanction (see ROLE_RANK). Director's own crime
 (ACCEPT while identity/fidelity/per-fn failed) is illegal; tests assert
@@ -27,8 +33,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from src.analysis.fidelity import build_call_tokens, check_function, dump_facts_ok
 from src.analysis.ghidra_cpp import (
     _first_function_span,
+    leftover_concat_shift_ptr,
+    leftover_dead_array_home,
     leftover_msx64_extraout,
     leftover_msx64_in_regs,
+    leftover_ostream_addr_insert,
 )
 
 FAMOUS_ALGOS: Tuple[str, ...] = (
@@ -107,7 +116,9 @@ _RE_GHIDRA_SYMBOL = re.compile(r"\b((?:FUN|DAT|thunk_FUN)_[0-9A-Fa-f]+)\b")
 _RE_GHIDRA_LOCAL = re.compile(r"\b(local_\d+|param_\d+|auStack[0-9A-Fa-f]+)\b")
 _RE_GHIDRA_OSTREAM = re.compile(
     r"("
-    r"\(\s*&\s*\(\s*(?:\(\s*)*(?:std::)?cout"
+    r"\(\s*&\s*\(\s*(?:\(\s*)*(?:\*\s*(?:\(\s*)*)?(?:std::)?c(?:out|err|log)"
+    r"|\(\s*&\s*\(\s*\(\s*\*\s*\("
+    r"|\(\s*\*\s*\(\s*(?:std::)?c(?:out|err|log)"
     r"|ghidra_this"
     r"|ostream\s*\*\s*\)\s*\(\s*&"
     r"|\(\s*\*\s*\(\s*\(\s*(?:std::)?(?:basic_)?ostream"
@@ -215,6 +226,12 @@ def dialect_hits(code: str) -> List[DialectHit]:
             add(source, kind, m.group(1))
     for token in _default_allocator_tokens(blob):
         add("ghidra", "allocator", token)
+    for name in leftover_dead_array_home(blob):
+        add("compiler", "dead_array", name)
+    for name in leftover_concat_shift_ptr(blob):
+        add("ghidra", "concat_shift", name)
+    for tok in leftover_ostream_addr_insert(blob):
+        add("ghidra", "ostream", tok)
     return hits
 
 
@@ -320,6 +337,15 @@ def identity_issues(entry: Dict[str, Any], code: str) -> List[str]:
     extra = leftover_msx64_extraout(code, dump=dump)
     if extra:
         reasons.append("restore leftover extraout " + extra[0])
+    dead = leftover_dead_array_home(code)
+    if dead:
+        reasons.append("restore leftover dead_array " + dead[0])
+    shift = leftover_concat_shift_ptr(code)
+    if shift:
+        reasons.append("restore leftover concat_shift " + shift[0])
+    ostream_addr = leftover_ostream_addr_insert(code)
+    if ostream_addr:
+        reasons.append("restore leftover ostream_addr " + ostream_addr[0])
     return reasons
 
 
@@ -616,6 +642,8 @@ def review_run(
             entry.get("callees") or [],
             name_by_addr=name_by_addr,
             thunk_target=thunk_target,
+            functions=functions,
+            thunks=thunks,
         )
         fns.append(review_function(entry, r.get("cpp_code") or "", toks))
         allowed_all.append(_haystacks(entry))

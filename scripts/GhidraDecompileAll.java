@@ -54,12 +54,28 @@ public class GhidraDecompileAll extends GhidraScript {
             if (func.isThunk()) {
                 Function target = func.getThunkedFunction(true);
                 String t = "null";
-                if (target != null && !target.isExternal()) {
+                String extName = "null";
+                String extDll = "null";
+                if (target != null && target.isExternal()) {
+                    // PE import thunks: keep the IAT spelling. target=null used
+                    // to drop operator<</printf/__gmpz_* so the assembler stubbed.
+                    extName = escapeJson(target.getName());
+                    importEntries.add(escapeJson(target.getName()));
+                    try {
+                        if (target.getParentNamespace() != null) {
+                            extDll = escapeJson(target.getParentNamespace().getName());
+                        }
+                    } catch (Exception e) {
+                        // ignore
+                    }
+                } else if (target != null) {
                     t = "\"0x" + Long.toHexString(target.getEntryPoint().getOffset()) + "\"";
                 }
                 thunkEntries.add("  {\"address\": \"0x" + Long.toHexString(funcAddr) + "\", " +
                         "\"name\": " + escapeJson(name) + ", " +
-                        "\"target\": " + t + "}");
+                        "\"target\": " + t + ", " +
+                        "\"ext_name\": " + extName + ", " +
+                        "\"ext_dll\": " + extDll + "}");
                 continue;
             }
 

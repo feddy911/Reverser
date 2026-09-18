@@ -16,4 +16,4 @@ not_contains:
   - "in_stk_"
   - "<< 32"
 compile: true
-notes: "Microsoft x64: pointer 8 bytes, stack parameter slots 8-byte aligned. Ghidra PIECE of two 4-byte incoming homes (integer_size 4 in x86-64-win.cspec) is that pointer; CONCAT44 is little-endian. Bind to T* formal. Humans write pointers; the compiler splits them."
+notes: "Microsoft x64 pointer is 8 bytes; Ghidra x86-64-win integer_size is 4, so the decompiler PIECE-splits the home and CONCAT44 later (little-endian). That reconstruction is the T* formal whether the pieces still look like in_stk or were already named as a formal/temp. Humans write the pointer; they do not rebuild it from two 4-byte parts. Mix wrap/Rec."

@@ -7,6 +7,7 @@ ghidra_cpp: |
   {
     std::ostream *p;
     p = (std::ostream *)(&((*((std::ostream *)p)) << (n)));
+    p = (&((*(std::cout)) << ("n")));
     (void)p;
   }
 contains:
@@ -14,4 +15,4 @@ contains:
 not_contains:
   - "==0=="
 compile: false
-notes: "Ghidra takes the address of an inserter result and casts it back to ostream*. That is decompiler this-pointer glue, not an insert a person wrote. Report only; does not REJECT."
+notes: "Ghidra takes the address of an inserter result and casts it back to ostream*, or derefs std::cout as if it were a pointer. That is decompiler this-pointer glue, not an insert a person wrote. Identity leftover like leftover in_RCX; sanitizer should emit std::cout << x / *p << x. Mix wrap. One class, not one spelling."

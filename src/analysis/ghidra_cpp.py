@@ -118,15 +118,38 @@ def _outside_strings(text: str, transform) -> str:
 
 
 def _match_forward(s: str, i: int, open_ch: str, close_ch: str) -> int:
+    """Match a closer; do not count parens inside string/char literals.
+
+    ``operator<<(os, " (")`` must close on the call's ``)``, not a ``(``
+    that lives in the literal.
+    """
     depth = 0
     n = len(s)
-    for j in range(i, n):
-        if s[j] == open_ch:
+    j = i
+    quote = ""
+    escape = False
+    while j < n:
+        c = s[j]
+        if quote:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == quote:
+                quote = ""
+            j += 1
+            continue
+        if c in "\"'":
+            quote = c
+            j += 1
+            continue
+        if c == open_ch:
             depth += 1
-        elif s[j] == close_ch:
+        elif c == close_ch:
             depth -= 1
             if depth == 0:
                 return j
+        j += 1
     return -1
 
 
@@ -1027,7 +1050,7 @@ def rewrite_ghidra_ostream(code: str) -> str:
             i = k + 2
             continue
         out.append(s[copied:t0])
-        out.append(f"(&((*({args[0]})) << ({args[1]})))")
+        out.append(_lshift_insert_expr(args[0], args[1]))
         copied = close_p + 1
         i = copied
     out.append(s[copied:])
@@ -1037,9 +1060,12 @@ def rewrite_ghidra_ostream(code: str) -> str:
     s = _wrap_cout_lshift_assign(s)
     s = _RE_OSTREAM_STAR_AROUND_ADDR.sub(r"\1", s)
     s = _collapse_deref_addr(s)
+    s = _collapse_deref_iostream_obj(s)
     s = _fold_ostream_self_ptr_insert(s)
     s = _drop_unused_lshift_addr(s)
     s = _fold_ostream_insert_chain(s)
+    s = _drop_unused_lshift_addr_assign(s)
+    s = _collapse_deref_iostream_obj(s)
     s = _RE_OSTREAM_ARRAY.sub(r"undefined1 \1\2", s)
     return s
 
@@ -1103,7 +1129,7 @@ def _rewrite_free_lshift_needle(s: str, needle: str) -> str:
             i = k + 2
             continue
         out.append(s[copied:k])
-        out.append(f"(&((*({args[0]})) << ({args[1]})))")
+        out.append(_lshift_insert_expr(args[0], args[1]))
         copied = close_p + 1
         i = copied
     out.append(s[copied:])
@@ -1145,6 +1171,13 @@ def _rewrite_unqualified_ostream_ptr_lshift(s: str) -> str:
             i = k + 2
             continue
         a0 = args[0]
+        obj = _iostream_object_expr(a0)
+        if obj:
+            out.append(s[copied:k])
+            out.append(f"({obj} << ({args[1]}))")
+            copied = close_p + 1
+            i = copied
+            continue
         if "ostream" not in a0 or "*" not in a0:
             i = k + 2
             continue
@@ -1155,6 +1188,39 @@ def _rewrite_unqualified_ostream_ptr_lshift(s: str) -> str:
         i = copied
     out.append(s[copied:])
     return "".join(out)
+
+
+_RE_IOSTREAM_OBJ = re.compile(
+    r"^\(\s*&\s*(?:std::)?(cout|cerr|clog)\s*\)$"
+    r"|^(?:std::)?(cout|cerr|clog)$"
+)
+
+
+def _iostream_object_expr(arg: str) -> str:
+    """cout/cerr/clog is a stream object, including ``(ostream*)std::cout``."""
+    t = re.sub(r"\s+", "", (arg or "").strip())
+    m = re.fullmatch(
+        r"\(?\*?\(?&?(?:std::)?(cout|cerr|clog)\)*",
+        t,
+    )
+    if m:
+        return "std::" + m.group(1)
+    m = re.search(r"(?:std::)?(cout|cerr|clog)$", t)
+    if m:
+        i = m.start()
+        if i > 0 and (t[i - 1].isalnum() or t[i - 1] == "_"):
+            return ""
+        if "*" in t[:i] and "ostream" in t.lower():
+            return "std::" + m.group(1)
+    return ""
+
+
+def _lshift_insert_expr(lhs: str, rhs: str) -> str:
+    """Inserter on a stream object is ``obj << x``; on a pointer, addr-wrap."""
+    obj = _iostream_object_expr(lhs)
+    if obj:
+        return f"({obj} << ({rhs}))"
+    return f"(&((*({lhs})) << ({rhs})))"
 
 
 _RE_OSTREAM_PTR_THIS = re.compile(
@@ -1204,7 +1270,7 @@ _RE_OSTREAM_STAR_AROUND_ADDR = re.compile(
     r"\(\s*(?:std::)?(?:basic_)?w?ostream(?:\s*<[^>]*>)?\s*\*\s*\)\s*(\(&)"
 )
 _RE_COUT_LSHIFT_ASSIGN = re.compile(
-    r"\b([A-Za-z_]\w*)\s*=\s*((?:std::)?c(?:out|err|log)\s*<<)"
+    r"\b([A-Za-z_]\w*)\s*=\s*(\(?\s*(?:std::)?c(?:out|err|log)\s*<<)"
 )
 
 
@@ -1307,6 +1373,13 @@ def _fold_ostream_self_ptr_insert(s: str) -> str:
 
 _RE_DEREF_ADDR = re.compile(r"\(\*\(\(&([^()]+)\)\)\)")
 _RE_DEREF_ADDR_SM = re.compile(r"\(\*\(&([^()]+)\)\)")
+_RE_DEREF_IOSTREAM_OBJ = re.compile(
+    r"\(\s*\*\s*\(\s*(?:std::)?(c(?:out|err|log))\s*\)\s*\)"
+    r"|\*\s*\(\s*(?:std::)?(c(?:out|err|log))\s*\)"
+)
+_RE_PAREN_IOSTREAM_LSHIFT = re.compile(
+    r"\(\s*(std::c(?:out|err|log))\s*\)\s*<<"
+)
 
 
 def _collapse_deref_addr(s: str) -> str:
@@ -1317,6 +1390,20 @@ def _collapse_deref_addr(s: str) -> str:
         prev = t
         t = _RE_DEREF_ADDR.sub(r"\1", t)
         t = _RE_DEREF_ADDR_SM.sub(r"\1", t)
+    return t
+
+
+def _collapse_deref_iostream_obj(s: str) -> str:
+    """`*(std::cout)` is the stream. `(std::cout) <<` is `std::cout <<`."""
+    def repl(m: re.Match[str]) -> str:
+        return "std::" + (m.group(1) or m.group(2))
+
+    prev = None
+    t = s or ""
+    while t != prev:
+        prev = t
+        t = _RE_DEREF_IOSTREAM_OBJ.sub(repl, t)
+        t = _RE_PAREN_IOSTREAM_LSHIFT.sub(r"\1 <<", t)
     return t
 
 
@@ -1339,7 +1426,7 @@ def _ident_after_ostream_ptr_cast(inner: str) -> str | None:
 
 
 def _parse_addr_insert_assign(s: str, i: int) -> tuple[int, str, str] | None:
-    m = re.match(r"([A-Za-z_]\w*)\s*=\s*\(&\(", s[i:])
+    m = re.match(r"\s*([A-Za-z_]\w*)\s*=\s*\(&\(", s[i:])
     if not m:
         return None
     ident = m.group(1)
@@ -1381,6 +1468,8 @@ def _parse_deref_ostream_insert(s: str, i: int) -> tuple[int, str, str] | None:
         if inner_close < 0:
             return None
         ident = _ident_after_ostream_ptr_cast(s[j + 1 : inner_close])
+        if not ident:
+            ident = _iostream_object_expr(s[j + 1 : inner_close])
         j = inner_close + 1
     else:
         m = re.match(r"([A-Za-z_]\w*)", s[j:])
@@ -1446,10 +1535,26 @@ def _fold_ostream_insert_chain(s: str) -> str:
                 continue
             after_asgn, ident, inner = parsed
             nxt = _parse_deref_ostream_insert(blob, after_asgn)
-            if not nxt or nxt[1] != ident:
+            chained_end = None
+            chained = None
+            if nxt and nxt[1] == ident:
+                chained_end, _name, rhs = nxt
+                chained = f"{inner} << {rhs}"
+            else:
+                asgn2 = _parse_addr_insert_assign(blob, after_asgn)
+                if asgn2:
+                    end2, ident2, inner2 = asgn2
+                    d = _parse_deref_ostream_insert(inner2.lstrip(), 0)
+                    if d and d[1] == ident:
+                        stripped = inner2.lstrip()
+                        tail = stripped[d[0]:]
+                        semi = ";" if end2 > 0 and blob[end2 - 1] == ";" else ""
+                        chained_end = end2
+                        chained = f"{ident2} = (&({inner} << {d[2]}{tail})){semi}"
+            if chained_end is None or chained is None:
                 i = k + 2
                 continue
-            end, _name, rhs = nxt
+            end = chained_end
             uses = _ident_span_uses(blob, ident)
             allowed: set[int] = {start}
             for u in uses:
@@ -1460,11 +1565,9 @@ def _fold_ostream_insert_chain(s: str) -> str:
                 if after_asgn <= u < end:
                     insert_ident = u
                     allowed.add(u)
-                    break
             if insert_ident is None or any(u not in allowed for u in uses):
                 i = k + 2
                 continue
-            chained = f"{inner} << {rhs}"
             blob = blob[:start] + chained + blob[end:]
             trial = re.sub(
                 rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(ident)}\s*;[ \t]*\n?",
@@ -1511,6 +1614,53 @@ def _drop_unused_lshift_addr(s: str) -> str:
         i = copied
     out.append(blob[copied:])
     return "".join(out)
+
+
+def _drop_unused_lshift_addr_assign(s: str) -> str:
+    """`p = &(a << b);` with p unread is `a << b;` — ostream* glue temp."""
+    blob = s or ""
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while True:
+            k = blob.find("(&(", i)
+            if k < 0:
+                break
+            lhs = re.search(r"([A-Za-z_]\w*)\s*=\s*$", blob[:k])
+            if not lhs:
+                i = k + 2
+                continue
+            start = lhs.start(1)
+            parsed = _parse_addr_insert_assign(blob, start)
+            if not parsed:
+                i = k + 2
+                continue
+            end, ident, inner = parsed
+            uses = _ident_span_uses(blob, ident)
+            decl_hits = [u for u in uses if _at_local_decl_name(blob, u, ident)]
+            if not decl_hits:
+                i = k + 2
+                continue
+            allowed: set[int] = {start, *decl_hits}
+            if any(u not in allowed for u in uses):
+                i = k + 2
+                continue
+            semi = ";" if end > 0 and blob[end - 1] == ";" else ""
+            blob = blob[:start] + inner + semi + blob[end:]
+            trial = re.sub(
+                rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(ident)}\s*;[ \t]*\n?",
+                "",
+                blob,
+                count=1,
+                flags=re.M,
+            )
+            if not re.search(rf"\b{re.escape(ident)}\b", trial):
+                blob = trial
+            changed = True
+            i = start
+            break
+    return blob
 
 
 def rewrite_gmp_amp_args(code: str) -> str:
@@ -1919,11 +2069,12 @@ def emit_sanitized_restore(data: dict) -> None:
     """Sanitize the run body. Does not write the restore cache key.
 
     Keeps cpp_code_raw once so the cached LLM text stays comparable.
+    Optional func_bytes recover dword array fills Ghidra dead-stored.
     """
     raw = data.get("cpp_code") or ""
     if not str(raw).strip():
         return
-    emitted = sanitize_ghidra_cpp(raw)
+    emitted = sanitize_ghidra_cpp(raw, func_bytes=data.get("func_bytes") or b"")
     if emitted == raw:
         return
     data.setdefault("cpp_code_raw", raw)
@@ -2332,8 +2483,7 @@ def _ptr_cast_lparen(s: str, i: int) -> int | None:
     return None
 
 
-def _stack_home_arg(a: str) -> str | None:
-    """CONCAT operand that is a 4-byte incoming stack home (casts stripped)."""
+def _strip_concat_operand(a: str) -> str:
     a = (a or "").strip()
     prev = None
     while a != prev:
@@ -2341,8 +2491,275 @@ def _stack_home_arg(a: str) -> str | None:
         a = re.sub(r"^\([^()]*\)\s*", "", a).strip()
         if len(a) >= 2 and a[0] == "(" and a[-1] == ")":
             a = a[1:-1].strip()
-    hit = _RE_STACK_HOME_IDENT.fullmatch(a)
+    return a
+
+
+_RE_PIECE_TEMP = re.compile(
+    r"^(?:in_stack_[0-9A-Fa-f]+|in_stk_n?\d+|"
+    r"(?:[usil]|pu|pb|pc|pi|pl|ps|pp|pf|pd)?Var\d+)$"
+)
+
+
+def _is_piece_temp(name: str) -> bool:
+    """Stack home or Ghidra temp. Not a source-level formal like n."""
+    return bool(name and _RE_PIECE_TEMP.match(name))
+
+
+def _stack_home_arg(a: str) -> str | None:
+    """CONCAT operand that is a 4-byte incoming stack home (casts stripped)."""
+    hit = _RE_STACK_HOME_IDENT.fullmatch(_strip_concat_operand(a))
     return hit.group(1) if hit else None
+
+
+_RE_INT_CAST_TYPE = re.compile(
+    r"(?:unsigned(?:\s+(?:long\s+)?long)?|signed(?:\s+int)?|"
+    r"uint(?:32_t|64_t)?|uint|int|long|short|char)"
+)
+
+
+def _is_int_cast_type(s: str) -> bool:
+    return bool(_RE_INT_CAST_TYPE.fullmatch((s or "").strip()))
+
+
+def _simple_ident_arg(a: str) -> str | None:
+    """CONCAT operand that is a bare ident after Ghidra/C casts."""
+    a = _strip_concat_operand(a)
+    if not re.fullmatch(r"[A-Za-z_]\w*", a) or a in _NOT_FN_NAMES:
+        return None
+    if _is_int_cast_type(a):
+        return None
+    return a
+
+
+def _match_open_paren(s: str, close_i: int) -> int | None:
+    if close_i < 0 or close_i >= len(s) or s[close_i] != ")":
+        return None
+    depth = 0
+    k = close_i
+    while k >= 0:
+        if s[k] == ")":
+            depth += 1
+        elif s[k] == "(":
+            depth -= 1
+            if depth == 0:
+                return k
+        k -= 1
+    return None
+
+
+def _ident_span_left(s: str, i: int) -> tuple[str, int] | None:
+    """Ident immediately left of ``i``, through Ghidra/C casts and parens."""
+    j = i
+    while j > 0 and s[j - 1] in " \t\n\r":
+        j -= 1
+    while j > 0 and s[j - 1] == ")":
+        open_p = _match_open_paren(s, j - 1)
+        if open_p is None:
+            return None
+        inner = s[open_p + 1 : j - 1].strip()
+        if _is_int_cast_type(inner):
+            j = open_p
+            while j > 0 and s[j - 1] in " \t\n\r":
+                j -= 1
+            continue
+        ident = _simple_ident_arg(inner)
+        if ident:
+            start = open_p
+            k = open_p
+            while k > 0 and s[k - 1] in " \t\n\r":
+                k -= 1
+            while k > 0 and s[k - 1] == ")":
+                o2 = _match_open_paren(s, k - 1)
+                if o2 is None:
+                    break
+                cast = s[o2 + 1 : k - 1].strip()
+                if not _is_int_cast_type(cast):
+                    break
+                start = o2
+                k = o2
+                while k > 0 and s[k - 1] in " \t\n\r":
+                    k -= 1
+            return ident, start
+        return None
+    k = j
+    while k > 0 and (s[k - 1].isalnum() or s[k - 1] == "_"):
+        k -= 1
+    ident = s[k:j]
+    if re.fullmatch(r"[A-Za-z_]\w*", ident) and ident not in _NOT_FN_NAMES:
+        return ident, k
+    return None
+
+
+def _ident_span_right(s: str, i: int) -> tuple[str, int] | None:
+    """Ident immediately right of ``i``, through Ghidra/C casts and parens."""
+    j = i
+    while j < len(s) and s[j] in " \t\n\r":
+        j += 1
+    while j < len(s) and s[j] == "(":
+        close = _match_forward(s, j, "(", ")")
+        if close < 0:
+            return None
+        inner = s[j + 1 : close].strip()
+        if _is_int_cast_type(inner):
+            j = close + 1
+            while j < len(s) and s[j] in " \t\n\r":
+                j += 1
+            continue
+        ident = _simple_ident_arg(inner)
+        if ident:
+            return ident, close + 1
+        return None
+    m = re.match(r"[A-Za-z_]\w*", s[j:])
+    if not m or m.group(0) in _NOT_FN_NAMES:
+        return None
+    return m.group(0), j + len(m.group(0))
+
+
+def _wrap_shift32_span(blob: str, start: int, end: int) -> tuple[int, int]:
+    """Absorb grouping parens around ``hi<<32|lo``, not a surrounding call."""
+    while start > 0:
+        i = start
+        while i > 0 and blob[i - 1] in " \t\n\r":
+            i -= 1
+        if i == 0 or blob[i - 1] != "(":
+            break
+        close = _match_forward(blob, i - 1, "(", ")")
+        if close < 0:
+            break
+        start = i - 1
+        if close >= end - 1:
+            end = close + 1
+    return start, end
+
+
+def _next_shift32_or_span(body: str) -> tuple[int, int, str, str] | None:
+    """``hi << 32 | lo`` of two idents: Ghidra CONCAT44 expand / restorer arithmetic."""
+    for m in re.finditer(r"<<\s*32\b", body):
+        left = _ident_span_left(body, m.start())
+        if left is None:
+            continue
+        hi, start = left
+        j = m.end()
+        while j < len(body) and body[j] in " \t\n\r":
+            j += 1
+        if j < len(body) and body[j] == ")":
+            j += 1
+            while j < len(body) and body[j] in " \t\n\r":
+                j += 1
+        if j >= len(body) or body[j] != "|":
+            continue
+        right = _ident_span_right(body, j + 1)
+        if right is None:
+            continue
+        lo, end = right
+        start, end = _wrap_shift32_span(body, start, end)
+        return start, end, hi, lo
+    return None
+
+
+def _piece_used_as_ptr(body: str, start: int) -> bool:
+    if _ptr_cast_lparen(body, start) is not None:
+        return True
+    after = body[start:].lstrip()
+    return after.startswith("->") or (start > 0 and body[start - 1 : start + 2] == "->")
+
+
+def _next_concat_ptr_span(body: str) -> tuple[int, int, list[str]] | None:
+    """8-byte PIECE used as T*: CONCAT or shift-or. Piece names may be homes, formals, temps."""
+    for m in _RE_GHIDRA_PIECE.finditer(body):
+        if m.group(1) != "CONCAT":
+            continue
+        sizes = _piece_sizes(m.group(2))
+        if not sizes or sizes[0] + sizes[1] != 8:
+            continue
+        open_c = m.end() - 1
+        close_c = _match_forward(body, open_c, "(", ")")
+        if close_c < 0:
+            continue
+        args = [a.strip() for a in _split_top_args(body[open_c + 1 : close_c])]
+        if len(args) != 2:
+            continue
+        hi_id = _simple_ident_arg(args[0])
+        lo_id = _simple_ident_arg(args[1])
+        if hi_id is None or lo_id is None:
+            continue
+        start = m.start()
+        end = close_c + 1
+        hi_home = _stack_home_arg(args[0])
+        lo_home = _stack_home_arg(args[1])
+        both_homes = bool(hi_home and lo_home)
+        cast_l = _ptr_cast_lparen(body, start)
+        if cast_l is not None:
+            start = cast_l
+        elif not both_homes and not _piece_used_as_ptr(body, start):
+            continue
+        if not both_homes and cast_l is None:
+            continue
+        return start, end, [hi_id, lo_id]
+    hit = _next_shift32_or_span(body)
+    if hit is None:
+        return None
+    start, end, hi, lo = hit
+    cast_l = _ptr_cast_lparen(body, start)
+    if cast_l is None:
+        return None
+    return cast_l, end, [hi, lo]
+
+
+def _at_ptr_cast(s: str, i: int) -> bool:
+    if _ptr_cast_lparen(s, i) is not None:
+        return True
+    if i < 0 or i >= len(s) or s[i] != "(":
+        return False
+    close = _match_forward(s, i, "(", ")")
+    return close > i and "*" in s[i + 1 : close]
+
+
+def leftover_concat_shift_ptr(code: str) -> list[str]:
+    """8-byte PIECE still written as pointer arithmetic (CONCAT expand / restorer)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    blob = code or ""
+    pos = 0
+    while pos < len(blob):
+        hit = _next_concat_ptr_span(blob[pos:])
+        if hit is None:
+            break
+        start, end, names = hit
+        start += pos
+        end += pos
+        if not _at_ptr_cast(blob, start):
+            pos = max(end, pos + 1)
+            continue
+        for name in names:
+            if name and name not in seen:
+                seen.add(name)
+                out.append(name)
+        pos = max(end, pos + 1)
+    return out
+
+
+_RE_OSTREAM_ADDR_INSERT = re.compile(
+    r"\(\s*&\s*\(\s*\(\s*\*\s*\("
+    r"|\(\s*\*\s*\(\s*(?:std::)?c(?:out|err|log)\s*\)"
+    r"|\*\s*\(\s*(?:std::)?c(?:out|err|log)\s*\)"
+)
+
+
+def leftover_ostream_addr_insert(code: str) -> list[str]:
+    """Address-of inserter with a deref, or deref of a stream object.
+
+    Human writes ``std::cout << x`` / ``*p << x``. Leftover
+    ``p = (&((*(std::cout)) << x)`` is the same ostream-addr-insert class.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _RE_OSTREAM_ADDR_INSERT.finditer(code or ""):
+        tok = re.sub(r"\s+", "", m.group(0))[:48]
+        if tok and tok not in seen:
+            seen.add(tok)
+            out.append(tok)
+    return out
 
 
 def _concat_ptr_target(
@@ -2455,7 +2872,7 @@ def _home_use_is_ptr(
 def _rewrite_one_concat_stack_ptr(
     blob: str, ident: str, t0: int, close: int, end: int
 ) -> str:
-    """CONCAT of two 4-byte stack homes is one incoming pointer."""
+    """8-byte PIECE used as T* is that pointer. Pieces may already be formals or temps."""
     if ident == "main":
         return blob
     mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
@@ -2468,41 +2885,20 @@ def _rewrite_one_concat_stack_ptr(
     brace = _brace_after_params(blob, close)
     if brace < 0:
         return blob
-    body = blob[brace : end + 1]
+    fn_end = end
+    body = blob[brace : fn_end + 1]
     target = _concat_ptr_target(ret, formals, body)
     if not target:
         return blob
     new_body = body
     homes: list[str] = []
     while True:
-        hit = None
-        for m in _RE_GHIDRA_PIECE.finditer(new_body):
-            if m.group(1) != "CONCAT":
-                continue
-            sizes = _piece_sizes(m.group(2))
-            if not sizes or sizes[0] + sizes[1] != 8:
-                continue
-            open_c = m.end() - 1
-            close_c = _match_forward(new_body, open_c, "(", ")")
-            if close_c < 0:
-                continue
-            args = [a.strip() for a in _split_top_args(new_body[open_c + 1 : close_c])]
-            if len(args) != 2:
-                continue
-            hi = _stack_home_arg(args[0])
-            lo = _stack_home_arg(args[1])
-            if hi is None or lo is None:
-                continue
-            start = m.start()
-            cast_l = _ptr_cast_lparen(new_body, start)
-            if cast_l is not None:
-                start = cast_l
-            homes.extend((hi, lo))
-            hit = (start, close_c + 1)
-            break
+        hit = _next_concat_ptr_span(new_body)
         if hit is None:
             break
-        new_body = new_body[: hit[0]] + target + new_body[hit[1] :]
+        start, stop, extra = hit
+        homes.extend(n for n in extra if _is_piece_temp(n))
+        new_body = new_body[:start] + target + new_body[stop:]
     if new_body == body:
         return blob
     new_body = re.sub(
@@ -2534,11 +2930,11 @@ def _rewrite_one_concat_stack_ptr(
     formal_names = {pname for _pty, pname in formals}
     if target in formal_names:
         new_body = _strip_dup_formal_decl(new_body, target)
-    return blob[:brace] + new_body + blob[end + 1 :]
+    return blob[:brace] + new_body + blob[fn_end + 1 :]
 
 
 def _rewrite_msx64_concat_stack_ptr(code: str) -> str:
-    """Bind CONCAT44 of adjacent 4-byte stack homes to the 8-byte pointer."""
+    """Bind an 8-byte PIECE (CONCAT / shift-or) used as T* to that pointer."""
     blob = code or ""
     spans = list(_iter_function_defs(blob, skip_qualified=True))
     for ident, t0, close, end in reversed(spans):
@@ -2660,7 +3056,211 @@ def _strip_compiler_instrumentation(code: str) -> str:
     return t
 
 
-def sanitize_ghidra_cpp(code: str) -> str:
+_RE_INT_ARRAY_DECL = re.compile(
+    r"^([ \t]*)((?:unsigned\s+)?(?:int|uint|undefined4|uint32_t))\s+"
+    r"([A-Za-z_]\w*)\s*\[\s*(\d+)\s*\]\s*;[ \t]*$",
+    re.M,
+)
+_RE_ARRAY_ELEM_ASSIGN = re.compile(
+    r"^([ \t]*)([A-Za-z_]\w*)\s*\[\s*(\d+)\s*\]\s*=\s*"
+    r"(-?\d+|0x[0-9A-Fa-f]+)\s*;[ \t]*$",
+    re.M,
+)
+_RE_FOR_COUNT = re.compile(
+    r"for\s*\(\s*([A-Za-z_]\w*)\s*=\s*0\s*;\s*\1\s*<\s*(\d+)\s*;"
+    r"\s*\1\s*=\s*\1\s*\+\s*1\s*\)"
+)
+_RE_INT_HOME_DECL = re.compile(
+    r"^([ \t]*)((?:unsigned\s+)?(?:int|uint|undefined4|uint32_t))\s+"
+    r"(in_stk_\w+|in_stack_[0-9A-Fa-f]+)\s*;[ \t]*$",
+    re.M,
+)
+
+
+def _parse_int_lit(raw: str) -> int:
+    s = (raw or "").strip()
+    if s.lower().startswith("0x"):
+        v = int(s, 16)
+        return v - 0x100000000 if v >= 0x80000000 else v
+    return int(s, 10)
+
+
+def _array_has_init(decl_line: str) -> bool:
+    return "=" in (decl_line or "")
+
+
+def _rewrite_local_array_elem_inits(code: str) -> str:
+    """Ghidra often prints `xs[0]=1; xs[1]=2;` for a local array fill."""
+    blob = code or ""
+    decls = list(_RE_INT_ARRAY_DECL.finditer(blob))
+    if not decls:
+        return blob
+    assigns: dict[str, list[tuple[int, int, int, int]]] = {}
+    for m in _RE_ARRAY_ELEM_ASSIGN.finditer(blob):
+        name = m.group(2)
+        idx = int(m.group(3))
+        val = _parse_int_lit(m.group(4))
+        assigns.setdefault(name, []).append((idx, val, m.start(), m.end()))
+    reps: list[tuple[int, int, str]] = []
+    for d in decls:
+        name = d.group(3)
+        n = int(d.group(4))
+        hits = assigns.get(name) or []
+        if len(hits) != n:
+            continue
+        idxs = sorted(i for i, _v, _a, _b in hits)
+        if idxs != list(range(n)):
+            continue
+        by_i = {i: v for i, v, _a, _b in hits}
+        vals = ", ".join(str(by_i[i]) for i in range(n))
+        indent, ty = d.group(1), d.group(2)
+        reps.append((d.start(), d.end(), f"{indent}{ty} {name}[{n}] = {{{vals}}};"))
+        for _i, _v, a, b in hits:
+            line_start = blob.rfind("\n", 0, a) + 1
+            line_end = blob.find("\n", b)
+            line_end = len(blob) if line_end < 0 else line_end + 1
+            reps.append((line_start, line_end, ""))
+    if not reps:
+        return blob
+    out = blob
+    for a, b, text in sorted(reps, key=lambda r: -r[0]):
+        out = out[:a] + text + out[b:]
+    return out
+
+
+def _for_body_span(blob: str, header_end: int) -> tuple[int, int] | None:
+    i = header_end
+    while i < len(blob) and blob[i] in " \t\r\n":
+        i += 1
+    if i >= len(blob) or blob[i] != "{":
+        return None
+    depth = 0
+    for j in range(i, len(blob)):
+        if blob[j] == "{":
+            depth += 1
+        elif blob[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return i, j + 1
+    return None
+
+
+def _iter_dead_array_homes(
+    code: str,
+) -> list[tuple[str, str, str, int]]:
+    """Unused `T xs[N]` plus `for (i=0; i<N)` reading a unique int home.
+
+    Ghidra dead-stores the fill; the indexed load looks like in_stk.
+    Unique array and unique int home only. Not T* vs U*.
+    """
+    blob = code or ""
+    arrays = {
+        m.group(3): int(m.group(4))
+        for m in _RE_INT_ARRAY_DECL.finditer(blob)
+    }
+    if not arrays:
+        return []
+    homes = [m.group(3) for m in _RE_INT_HOME_DECL.finditer(blob)]
+    if not homes:
+        return []
+    stripped = _RE_INT_ARRAY_DECL.sub("", blob)
+    found: list[tuple[str, str, str, int]] = []
+    for hm in _RE_FOR_COUNT.finditer(blob):
+        idx, n_s = hm.group(1), hm.group(2)
+        n = int(n_s)
+        matches = [name for name, sz in arrays.items() if sz == n]
+        if len(matches) != 1:
+            continue
+        arr = matches[0]
+        if re.search(rf"\b{re.escape(arr)}\s*\[", stripped):
+            continue
+        span = _for_body_span(blob, hm.end())
+        if span is None:
+            continue
+        body = blob[span[0] : span[1]]
+        used = [h for h in homes if re.search(rf"\b{re.escape(h)}\b", body)]
+        if len(used) != 1:
+            continue
+        found.append((arr, used[0], idx, n))
+    return found
+
+
+def leftover_dead_array_home(code: str) -> list[str]:
+    """Array names still unused while a same-width int home is the loop load."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for arr, _home, _idx, _n in _iter_dead_array_homes(code):
+        if arr in seen:
+            continue
+        seen.add(arr)
+        out.append(arr)
+    return out
+
+
+def _rewrite_local_array_loop_index(code: str) -> str:
+    """Unused `T xs[N]` plus `for (i=0; i<N)` using an int home is `xs[i]`."""
+    blob = code or ""
+    hits = _iter_dead_array_homes(blob)
+    if not hits:
+        return blob
+    arr, home, idx, _n = hits[0]
+    for hm in _RE_FOR_COUNT.finditer(blob):
+        if hm.group(1) != idx or int(hm.group(2)) != _n:
+            continue
+        span = _for_body_span(blob, hm.end())
+        if span is None:
+            continue
+        a, b = span
+        new_body = re.sub(
+            rf"\b{re.escape(home)}\b", f"{arr}[{idx}]", blob[a:b]
+        )
+        blob = blob[:a] + new_body + blob[b:]
+        blob = re.sub(
+            rf"^[ \t]*(?:unsigned\s+)?(?:int|uint|undefined4|uint32_t)\s+"
+            rf"{re.escape(home)}\s*;[ \t]*\r?\n?",
+            "",
+            blob,
+            count=1,
+            flags=re.M,
+        )
+        return blob
+    return blob
+
+
+def _rewrite_local_array_imm_stores(code: str, func_bytes: bytes | bytearray) -> str:
+    """Fill `T xs[N];` from consecutive RBP dword immediates Ghidra DSE dropped.
+
+    Machine stores are dump-faithful. Sample source is not consulted.
+    Unique matching array only.
+    """
+    blob = code or ""
+    if not func_bytes:
+        return blob
+    from src.analysis.pe_image import consecutive_i32_runs, rbp_imm32_stores
+
+    runs = consecutive_i32_runs(rbp_imm32_stores(bytes(func_bytes)))
+    if not runs:
+        return blob
+    decls = list(_RE_INT_ARRAY_DECL.finditer(blob))
+    if not decls:
+        return blob
+    for run in runs:
+        n = len(run)
+        hits = [d for d in decls if int(d.group(4)) == n and "=" not in d.group(0)]
+        if len(hits) != 1:
+            continue
+        d = hits[0]
+        vals = ", ".join(str(v) for v in run)
+        indent, ty, name = d.group(1), d.group(2), d.group(3)
+        new_decl = f"{indent}{ty} {name}[{n}] = {{{vals}}};"
+        blob = blob[: d.start()] + new_decl + blob[d.end() :]
+        decls = list(_RE_INT_ARRAY_DECL.finditer(blob))
+    return blob
+
+
+def sanitize_ghidra_cpp(
+    code: str, *, func_bytes: bytes | bytearray | None = None
+) -> str:
     """Rewrite Ghidra type spellings and member-call syntax into parseable C++."""
     t = (code or "").replace("\r\n", "\n").replace("\r", "\n")
     # Even if an earlier quote makes _outside_strings skip a chunk.
@@ -2733,6 +3333,7 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = rewrite_ghidra_member_calls(t)
     t = _outside_strings(t, _strip_empty_allocator_dtors)
     t = _rewrite_msx64_incoming(t)
+    t = _rewrite_msx64_concat_stack_ptr(t)
     t = _rewrite_msx64_stack_homes(t)
     t = _rewrite_msx64_extraout(t)
     t = _rewrite_const_iter_begin_assign(t)
@@ -2753,9 +3354,13 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _outside_strings(t, _strip_compiler_instrumentation)
     t = _rewrite_msx64_concat_stack_ptr(t)
     t = _outside_strings(t, _rewrite_ghidra_piece_ops)
+    t = _rewrite_msx64_concat_stack_ptr(t)
     t = _outside_strings(t, _rewrite_ghidra_func_ops)
     t = _outside_strings(t, _rewrite_bool_xor)
     t = _rewrite_ghidra_this_local(t)
     t = _outside_strings(t, _elide_default_allocator_args)
+    t = _rewrite_local_array_elem_inits(t)
+    t = _rewrite_local_array_loop_index(t)
+    t = _rewrite_local_array_imm_stores(t, func_bytes or b"")
     t = _outside_strings(t, lambda chunk: re.sub(r"\n[ \t]*\n+", "\n", chunk))
     return t

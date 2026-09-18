@@ -26,9 +26,85 @@ def _default_preamble() -> List[str]:
         "// restored_v2.cpp: symbol linking + struct dedup + noise removal"
     )
 
+
+def _addr_hex(addr: str) -> str:
+    a = (addr or "").strip().lower()
+    if a.startswith("0x"):
+        a = a[2:]
+    return a
+
+
+def thunk_fold_map(
+    thunks: Optional[Sequence[Dict[str, Any]]] = None,
+    functions: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Dict[str, str]:
+    """thunk/function address hex → library/import ident from the dump.
+
+    IAT ``ext_name`` first; then in-image FUN_ at the same address whose
+    dump prototype is an ostream inserter or CRT stdio. Anonymous
+    ``thunk_FUN_*`` stay unmapped and still get a parse stub.
+    """
+    from src.analysis.platform import fold_ident_from_dump_fn, fold_library_ident
+
+    out: Dict[str, str] = {}
+    for t in thunks or []:
+        hx = _addr_hex(str(t.get("address") or ""))
+        ident = fold_library_ident(str(t.get("ext_name") or t.get("external") or ""))
+        if not ident:
+            ident = fold_library_ident(str(t.get("name") or ""))
+        if hx and ident:
+            out[hx] = ident
+    for f in functions or []:
+        hx = _addr_hex(str(f.get("address") or ""))
+        if not hx or hx in out:
+            continue
+        ident = fold_ident_from_dump_fn(f)
+        if ident:
+            out[hx] = ident
+    return out
+
+
+def fold_thunk_calls(
+    code: str,
+    thunks: Optional[Sequence[Dict[str, Any]]] = None,
+    functions: Optional[Sequence[Dict[str, Any]]] = None,
+    fmap: Optional[Dict[str, str]] = None,
+) -> str:
+    """Rewrite ``thunk_FUN_<addr>`` to the dump's import/STL spelling."""
+    names = fmap if fmap is not None else thunk_fold_map(thunks, functions)
+    if not names:
+        return code or ""
+
+    def repl_call(mo: re.Match) -> str:
+        ident = names.get(mo.group(1).lower())
+        if ident:
+            return ident + "("
+        return mo.group(0)
+
+    def repl_id(mo: re.Match) -> str:
+        ident = names.get(mo.group(1).lower())
+        return ident if ident else mo.group(0)
+
+    s = RE_THUNK_CALL.sub(repl_call, code or "")
+    return RE_THUNK_ID.sub(repl_id, s)
+
+
+def _blank_non_code(blob: str) -> str:
+    """Keep newlines; blank string/char/comment spans so ident( is not a call."""
+
+    def repl(mo: re.Match) -> str:
+        return "".join("\n" if c == "\n" else " " for c in mo.group(0))
+
+    return _RE_NON_CODE.sub(repl, blob or "")
+
 RE_THUNK_CALL = re.compile(r"\bthunk_FUN_([0-9a-fA-F]+)\s*\(")
 RE_THUNK_ID = re.compile(r"\bthunk_FUN_([0-9a-fA-F]+)\b")
 RE_DAT_ID = re.compile(r"\bDAT_([0-9a-fA-F]+)\b")
+# Strings, char lits, and comments are not callees (`"%d ("` is not `d(`).
+_RE_NON_CODE = re.compile(
+    r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/',
+    re.DOTALL,
+)
 RE_DEBUG_LINE = re.compile(
     r"^[ \t]*(__CheckForDebuggerJustMyCode|_RTC_CheckStackVars2?|DebuggerProbe|DebuggerRuntime)\(.*$"
 )
@@ -519,13 +595,16 @@ def _undeclared_callee_stubs(
     from src.analysis.platform import is_runtime_noise
 
     blob = code or ""
+    scan = _blank_non_code(blob)
     already = defined | struct_names | _declared_free_names(blob)
     names: List[str] = []
     seen: Set[str] = set()
-    for m in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", blob):
+    for m in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", scan):
         name = m.group(1)
         start = m.start(1)
         if name in seen or name in already:
+            continue
+        if len(name) < 2:
             continue
         if name in _CALL_NOT_CALLEE or name in _CALL_NOT_TYPE:
             continue
@@ -632,9 +711,11 @@ def assemble(
         unresolved.add(t)
         return mo.group(0)
 
+    fold_map = thunk_fold_map(thunks, functions)
     cleaned: List[Tuple[str, str, str]] = []
     dropped: List[Tuple[str, str]] = []
     for addr, name, code in bodies:
+        code = fold_thunk_calls(code, fmap=fold_map)
         code = RE_THUNK_CALL.sub(repl, code)
         code = strip_int_dat_redecls(_clean_code(code, name=name))
         if _is_ctor_shaped_free_fn(name, code):

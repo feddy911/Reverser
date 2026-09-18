@@ -269,6 +269,71 @@ class TestRuntimeNoise(unittest.TestCase):
         self.assertFalse(looks_like_user_restore_name("find"))
         self.assertFalse(looks_like_user_restore_name("hash"))
 
+        from src.analysis.platform import fold_library_ident
+        self.assertEqual(fold_library_ident("printf"), "printf")
+        self.assertEqual(fold_library_ident("__gmpz_init"), "__gmpz_init")
+        self.assertEqual(fold_library_ident("operator<<"), "operator<<")
+        self.assertEqual(
+            fold_library_ident(
+                "basic_ostream<char,std::char_traits<char>_>::operator<<"
+            ),
+            "operator<<",
+        )
+        self.assertEqual(fold_library_ident("thunk_FUN_140014360"), "")
+        self.assertEqual(fold_library_ident("FUN_14001ea40"), "")
+
+        from src.analysis.platform import fold_ident_from_dump_fn
+        self.assertEqual(
+            fold_ident_from_dump_fn({
+                "name": "FUN_1",
+                "ghidra_code": (
+                    "basic_ostream<char,std::char_traits<char>_> * "
+                    "FUN_1(basic_ostream<char,std::char_traits<char>_> *p, char *s) {}\n"
+                ),
+            }),
+            "operator<<",
+        )
+        self.assertEqual(
+            fold_ident_from_dump_fn({
+                "name": "FUN_2",
+                "ghidra_code": (
+                    "void FUN_2(basic_ostream<char,std::char_traits<char>_> *p, "
+                    "longlong v) {}\n"
+                ),
+            }),
+            "operator<<",
+        )
+        self.assertEqual(
+            fold_ident_from_dump_fn({
+                "name": "FUN_3",
+                "ghidra_code": (
+                    "basic_ostream<char,std::char_traits<char>_> * FUN_3("
+                    "basic_ostream<char,std::char_traits<char>_> *p, longlong a, "
+                    "uint b, int c, int d) {}\n"
+                ),
+            }),
+            "",
+        )
+        self.assertEqual(
+            fold_ident_from_dump_fn({
+                "name": "FUN_4",
+                "ghidra_code": "undefined4 FUN_4(undefined8 a, undefined8 b) {}\n",
+                "ext_calls": ["__acrt_iob_func"],
+            }),
+            "printf",
+        )
+        self.assertEqual(
+            fold_ident_from_dump_fn({
+                "name": "FUN_5",
+                "ghidra_code": (
+                    "basic_ostream<char,std::char_traits<char>_> * FUN_5("
+                    "basic_ostream<char,std::char_traits<char>_> *p) {}\n"
+                ),
+                "ext_calls": ["flush"],
+            }),
+            "std::flush",
+        )
+
         scored = [
             {"name": "__mingw_pformat", "score": 0.9, "address": "0x1"},
             {"name": "main", "score": 0.8, "address": "0x2"},
@@ -278,11 +343,17 @@ class TestRuntimeNoise(unittest.TestCase):
             {"name": "_GetPEImageBase", "score": 0.4, "address": "0x7"},
             {"name": "path_length", "score": 0.4, "address": "0x4"},
             {"name": "collect_matches", "score": 0.02, "address": "0x8"},
+            {
+                "name": "FUN_140003000",
+                "score": 0.99,
+                "address": "0x9",
+                "lib_matched": True,
+            },
         ]
         top, n_filt = select_llm_targets(scored, 13)
         names = [s["name"] for s in top]
         self.assertEqual(names, ["main", "path_length", "collect_matches"])
-        self.assertGreaterEqual(n_filt, 5)
+        self.assertGreaterEqual(n_filt, 6)
 
     def test_scoring_manifest_skips_missing_dumps(self):
         from src.analysis.eval_harness import run_manifest
@@ -660,6 +731,69 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("in_RCX", field0)
         self.assertIn("p == 0", field0)
 
+    def test_local_array_elem_init_and_rbp_imm_fill(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+        from src.analysis.pe_image import consecutive_i32_runs, rbp_imm32_stores
+
+        stores = sanitize_ghidra_cpp(
+            "void wrap(void)\n"
+            "{\n"
+            "  int xs [4];\n"
+            "  xs[0] = 1;\n"
+            "  xs[1] = 2;\n"
+            "  xs[2] = 3;\n"
+            "  xs[3] = 4;\n"
+            "  (void)xs[0];\n"
+            "}\n"
+        )
+        self.assertIn("int xs[4] = {1, 2, 3, 4}", stores)
+        self.assertNotIn("xs[0] = 1", stores)
+        loop = sanitize_ghidra_cpp(
+            "void use(int n);\n"
+            "void wrap(void)\n"
+            "{\n"
+            "  int xs [4];\n"
+            "  int i;\n"
+            "  int in_stack_ffffffffffffffa0;\n"
+            "  for (i = 0; i < 4; i = i + 1) {\n"
+            "    use(in_stack_ffffffffffffffa0);\n"
+            "  }\n"
+            "}\n"
+        )
+        self.assertIn("use(xs[i])", loop)
+        self.assertNotIn("in_stack_", loop)
+        self.assertNotIn("in_stk_", loop)
+        raw = (
+            bytes.fromhex("c745f001000000")
+            + bytes.fromhex("c745f402000000")
+            + bytes.fromhex("c745f803000000")
+            + bytes.fromhex("c745fc04000000")
+        )
+        self.assertEqual(
+            consecutive_i32_runs(rbp_imm32_stores(raw)),
+            [[1, 2, 3, 4]],
+        )
+        filled = sanitize_ghidra_cpp(
+            "void wrap(void)\n"
+            "{\n"
+            "  int xs [4];\n"
+            "  (void)xs;\n"
+            "}\n",
+            func_bytes=raw,
+        )
+        self.assertIn("int xs[4] = {1, 2, 3, 4}", filled)
+        ambig = sanitize_ghidra_cpp(
+            "void wrap(void)\n"
+            "{\n"
+            "  int xs [4];\n"
+            "  int ys [4];\n"
+            "  (void)xs;\n"
+            "  (void)ys;\n"
+            "}\n",
+            func_bytes=raw,
+        )
+        self.assertNotIn("= {1, 2, 3, 4}", ambig)
+
     def test_austack_overlay_slot_is_byte_offset_cast(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 
@@ -733,6 +867,24 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertIn("<< (", got)
         self.assertNotIn("operator<<((", got)
         self.assertIn("*(os)", got)
+
+    def test_ostream_insert_keeps_paren_inside_string(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        got = sanitize_ghidra_cpp(
+            "void wrap(std::ostream *os)\n"
+            "{\n"
+            "  operator<<((std::ostream *)os, \" (\");\n"
+            "  operator<<((std::ostream *)os, \"0%)\");\n"
+            "  operator<<((std::ostream *)&std::cout, \"n\");\n"
+            "  operator<<((std::ostream *)std::cout, \"m\");\n"
+            "}\n"
+        )
+        self.assertIn('" ("', got)
+        self.assertIn('"0%)"', got)
+        self.assertNotIn("0%)))", got)
+        self.assertIn("std::cout <<", got)
+        self.assertNotIn("*(std::cout)", got)
 
     def test_undefined_byte_slot_is_not_ampersand_invent(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -1005,6 +1157,30 @@ int main(int argc, char **argv) { return 0; }
         self.assertNotIn("ghidra_this", chain)
         self.assertNotIn("this =", chain)
         self.assertNotIn("(*((", chain)
+        glued = sanitize_ghidra_cpp(
+            "void wrap(void) {\n"
+            "  std::ostream *pbVar1;\n"
+            "  std::ostream *pbVar3;\n"
+            "  std::ostream *pbVar4;\n"
+            "  unsigned long long n;\n"
+            "  pbVar1 = (&((*(std::cout)) << (\"Number: \")));\n"
+            "  pbVar3 = (&((*(std::cout)) << (\"\\rSteps: \")));\n"
+            "  pbVar4 = (&((*(pbVar3)) << (n)));\n"
+            "  pbVar3 = (&((*(pbVar4)) << (\" (\")));\n"
+            "}\n"
+        )
+        self.assertIn("std::cout <<", glued)
+        self.assertNotIn("*(std::cout)", glued)
+        self.assertIn('" ("', glued)
+        member = sanitize_ghidra_cpp(
+            "void wrap(void) {\n"
+            "  std::ostream *p;\n"
+            "  p = std::basic_ostream<char,std::char_traits<char>>::operator<<"
+            "(std::cout, \"Number: \");\n"
+            "}\n"
+        )
+        self.assertIn("std::cout <<", member)
+        self.assertNotIn("*(std::cout)", member)
 
     def test_free_fn_dump_this_local_renamed(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -1171,6 +1347,49 @@ int main(int argc, char **argv) { return 0; }
         self.assertIn("use(in_stk_n72)", concat_int)
         self.assertNotIn("use(p)", concat_int)
         self.assertNotIn("CONCAT", concat_int)
+        concat_int_piece = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "Rec * helper(Rec *q, int k);\n"
+            "Rec * wrap(Rec *p, int n)\n"
+            "{\n"
+            "  Rec *r;\n"
+            "  uint in_stk_n36;\n"
+            "  r = helper((Rec *)CONCAT44(in_stk_n36, n), n);\n"
+            "  return r;\n"
+            "}\n"
+        )
+        self.assertIn("helper(p, n)", concat_int_piece)
+        self.assertNotIn("CONCAT", concat_int_piece)
+        self.assertNotIn("in_stk_", concat_int_piece)
+        self.assertNotIn("<< 32", concat_int_piece)
+        concat_shift = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "Rec * helper(Rec *q, int k);\n"
+            "Rec * wrap(Rec *p, int n)\n"
+            "{\n"
+            "  Rec *r;\n"
+            "  uint in_stk_n36;\n"
+            "  r = helper((Rec *)(((unsigned)(in_stk_n36) << 32) | (unsigned)(n)), n);\n"
+            "  return r;\n"
+            "}\n"
+        )
+        self.assertIn("helper(p, n)", concat_shift)
+        self.assertNotIn("in_stk_", concat_shift)
+        self.assertNotIn("<< 32", concat_shift)
+        concat_temp = sanitize_ghidra_cpp(
+            "struct Rec { int n; };\n"
+            "Rec * helper(Rec *q, int k);\n"
+            "Rec * wrap(Rec *p, int n)\n"
+            "{\n"
+            "  Rec *r;\n"
+            "  uint uVar1;\n"
+            "  r = helper((Rec *)CONCAT44(uVar1, n), n);\n"
+            "  return r;\n"
+            "}\n"
+        )
+        self.assertIn("helper(p, n)", concat_temp)
+        self.assertNotIn("CONCAT", concat_temp)
+        self.assertNotIn("uVar1", concat_temp)
 
     def test_emit_sanitized_restore_keeps_raw(self):
         from src.analysis.ghidra_cpp import emit_sanitized_restore

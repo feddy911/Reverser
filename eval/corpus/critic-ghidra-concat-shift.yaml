@@ -1,0 +1,19 @@
+id: critic-ghidra-concat-shift
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  Rec * helper(Rec *q, int k);
+  Rec * wrap(Rec *p, int n)
+  {
+    Rec *r;
+    uint in_stk_n36;
+    r = helper((Rec *)(((unsigned)(in_stk_n36) << 32) | (unsigned)(n)), n);
+    return r;
+  }
+contains:
+  - "==ghidra:concat_shift:in_stk_n36=="
+not_contains:
+  - "==0=="
+compile: false
+notes: "Ghidra integer_size 4 splits an 8-byte pointer. CONCAT expand / restorer arithmetic used as T* is that pointer, not human C++. Identity leftover like leftover in_RCX. Mix wrap. One class, not one spelling."
