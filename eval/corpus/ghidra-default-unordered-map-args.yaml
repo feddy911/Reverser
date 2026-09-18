@@ -1,0 +1,16 @@
+id: ghidra-default-unordered-map-args
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void wrap(std::unordered_map<int,int,std::hash<int>,std::equal_to<int>,std::allocator<std::pair<const int,int>>> *p)
+  {
+    (void)p;
+  }
+contains:
+  - "std::unordered_map<int, int>"
+not_contains:
+  - "allocator"
+  - "std::hash"
+  - "equal_to"
+compile: true
+notes: "ISO unord.map.overview: Hash = hash<Key>, Pred = equal_to<Key>, Allocator = allocator<pair<const Key, T>>. Ghidra prints every default; humans write unordered_map of int to int."

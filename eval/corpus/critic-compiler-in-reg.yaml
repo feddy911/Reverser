@@ -1,0 +1,17 @@
+id: critic-compiler-in-reg
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(void)
+  {
+    undefined8 *in_RCX;
+    (void)*in_RCX;
+  }
+contains:
+  - "==compiler:abi_reg:in_RCX=="
+  - "==ghidra:type:undefined8=="
+not_contains:
+  - "==0=="
+compile: false
+notes: "Microsoft x64 first integer/pointer argument is RCX. Ghidra names the home in_RCX. That is compiler ABI plus a decompiler type, not a human local."

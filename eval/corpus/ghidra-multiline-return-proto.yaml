@@ -13,7 +13,7 @@ ghidra_cpp: |
     return m;
   }
 contains:
-  - "std::unordered_map<int,int"
+  - "std::unordered_map<int, int"
   - " * collect("
 not_contains:
   - "prototypes ----\n* collect"

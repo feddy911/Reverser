@@ -333,11 +333,51 @@ class TestGhidraCppSanitize(unittest.TestCase):
         )
         got = sanitize_ghidra_cpp(raw)
         self.assertIn("std::string", got)
-        self.assertIn("std::vector<", got)
-        self.assertIn("unsigned char", got)
-        self.assertIn("std::allocator<", got)
+        self.assertIn("std::vector<unsigned char>", got)
+        self.assertNotIn("allocator", got)
         self.assertNotIn("_std::", got)
         self.assertNotIn("_>", got)
+        default_alloc = sanitize_ghidra_cpp(
+            "void wrap(std::vector<int,std::allocator<int>> *p) { (void)p; }\n"
+        )
+        self.assertIn("std::vector<int>", default_alloc)
+        self.assertNotIn("allocator", default_alloc)
+        custom_alloc = sanitize_ghidra_cpp(
+            "void wrap(std::vector<int, MyAlloc<int>> *p) { (void)p; }\n"
+        )
+        self.assertIn("MyAlloc<int>", custom_alloc)
+        default_map = sanitize_ghidra_cpp(
+            "void wrap(std::map<std::basic_string<char, std::char_traits<char>>,int,"
+            "std::less<std::basic_string<char, std::char_traits<char>>>,"
+            "std::allocator<std::pair<const std::basic_string<char, std::char_traits<char>>,int>>>"
+            " *p) { (void)p; }\n"
+        )
+        self.assertIn("std::map<std::string, int>", default_map)
+        self.assertNotIn("allocator", default_map)
+        self.assertNotIn("char_traits", default_map)
+        self.assertNotIn("basic_string", default_map)
+        self.assertNotIn("std::less", default_map)
+        custom_cmp = sanitize_ghidra_cpp(
+            "void wrap(std::map<int, int, MyLess<int>> *p) { (void)p; }\n"
+        )
+        self.assertIn("MyLess<int>", custom_cmp)
+        default_str = sanitize_ghidra_cpp(
+            "void wrap(std::basic_string<char, std::char_traits<char>, "
+            "std::allocator<char>> *s) { (void)s; }\n"
+        )
+        self.assertIn("std::string *", default_str)
+        self.assertNotIn("basic_string", default_str)
+        default_umap = sanitize_ghidra_cpp(
+            "void wrap(std::unordered_map<int,int,std::hash<int>,std::equal_to<int>,"
+            "std::allocator<std::pair<const int,int>>> *p) { (void)p; }\n"
+        )
+        self.assertIn("std::unordered_map<int, int>", default_umap)
+        self.assertNotIn("allocator", default_umap)
+        self.assertNotIn("std::hash", default_umap)
+        custom_hash = sanitize_ghidra_cpp(
+            "void wrap(std::unordered_map<int, int, MyHash<int>> *p) { (void)p; }\n"
+        )
+        self.assertIn("MyHash<int>", custom_hash)
 
     def test_const_ref_arrow_not_string_star(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -1230,9 +1270,10 @@ int main(int argc, char **argv) { return 0; }
         got = sanitize_ghidra_cpp(raw)
         self.assertIn("std::map<", got)
         self.assertIn("unsigned long long", got)
-        self.assertIn("int const", got)
         self.assertNotIn("_unsigned", got)
         self.assertNotIn("int_const", got)
+        self.assertNotIn("allocator", got)
+        self.assertNotIn("std::less", got)
 
     def test_const_std_not_glued_to_conststd(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
@@ -1240,7 +1281,7 @@ int main(int argc, char **argv) { return 0; }
         got = sanitize_ghidra_cpp(
             "std::allocator<std::pair<const_std::__cxx11::basic_string<char>, int> > *m;"
         )
-        self.assertIn("const std::basic_string", got)
+        self.assertIn("const std::string", got)
         self.assertNotIn("conststd", got)
         self.assertNotIn("const_std::", got)
 
@@ -1270,8 +1311,9 @@ int main(int argc, char **argv) { return 0; }
             "  (void)n; (void)pbVar3; (void)pbVar4;\n"
             "}\n"
         )
-        self.assertIn("std::basic_ostream<char,std::char_traits<char>>", got)
+        self.assertIn("std::ostream", got)
         self.assertNotIn("structstd", got)
+        self.assertNotIn("char_traits", got)
         self.assertNotRegex(got, r"(?<!std::)basic_ostream")
 
     def test_underscore_false_true_nttp(self):
@@ -1665,6 +1707,66 @@ class TestCompileVerify(unittest.TestCase):
         self.assertIn("dist2", blob)
         self.assertNotIn("inline ghidra_word nearest(", blob)
 
+    def test_typedefs_for_source_emits_only_named_aliases(self):
+        from src.domains.pack import typedefs_for_source
+
+        glue = "\n".join(typedefs_for_source("uint wrap(uint n) { return n; }\n"))
+        self.assertIn("using uint =", glue)
+        self.assertNotIn("ghidra_word", glue)
+        self.assertNotIn("operator()", glue)
+        self.assertNotIn("undefined8", glue)
+        self.assertNotIn("allocator_type", glue)
+        self.assertNotIn("PIMAGE_SECTION_HEADER", glue)
+
+    def test_typedefs_for_source_operator_call_only_when_word_invoked(self):
+        from src.domains.pack import typedefs_for_source
+
+        silent = "\n".join(typedefs_for_source("int f(ghidra_word w) { return (int)w; }\n"))
+        self.assertIn("struct ghidra_word", silent)
+        self.assertNotIn("operator()", silent)
+        called = "\n".join(
+            typedefs_for_source("int f(ghidra_word w) { return (int)w(); }\n")
+        )
+        self.assertIn("operator()", called)
+
+    def test_typedefs_for_source_thunk_return_is_not_operator_call(self):
+        from src.domains.pack import typedefs_for_source
+
+        blob = (
+            "inline ghidra_word thunk_FUN_1(...) { return {}; }\n"
+            "void go() { char *p = thunk_FUN_1(\"x\"); (void)p; }\n"
+        )
+        glue = "\n".join(typedefs_for_source(blob))
+        self.assertIn("struct ghidra_word", glue)
+        self.assertNotIn("operator()", glue)
+
+    def test_missing_typedefs_ignores_include_header_tokens(self):
+        from src.domains.pack import missing_typedefs
+
+        have = "\n".join((
+            "#include <string>",
+            "#include <iostream>",
+            "#include <fstream>",
+            "using uint = unsigned int;",
+        ))
+        extra = "uint wrap(uint n) { return n; }\n"
+        glue = "\n".join(missing_typedefs(have, extra))
+        self.assertNotIn("using string", glue)
+        self.assertNotIn("using iostream", glue)
+        self.assertNotIn("using fstream", glue)
+        self.assertNotIn("using uint", glue)
+
+    def test_missing_typedefs_keeps_ostream_shift_close_brace(self):
+        from src.domains.pack import _ghidra_word_lines, missing_typedefs
+
+        have = "\n".join(_ghidra_word_lines(stream=False, call=False, index=False,
+                                           arrow=False, inc=False, pair=False))
+        extra = "int f(ghidra_word w) { return (int)w; std::cout << w; }\n"
+        glue = "\n".join(missing_typedefs(have, extra))
+        self.assertIn("operator<<(std::ostream &os, ghidra_word w)", glue)
+        self.assertIn("return os << w.v;", glue)
+        self.assertRegex(glue, r"return os << w\.v;\n\}")
+
     def test_ghidra_typedefs_compile(self):
         from src.analysis.compile_verify import compile_cpp, find_cxx_compiler
         from src.analysis.includes import make_preamble
@@ -1672,10 +1774,12 @@ class TestCompileVerify(unittest.TestCase):
         cxx = find_cxx_compiler()
         if not cxx:
             self.skipTest("no C++ compiler on PATH")
-        preamble = make_preamble("// test", [], [])
-        src = "\n".join(preamble) + (
-            "int f(undefined8 x, longlong y, __uint64 z, int7 w) { return (int)(x + y + z + w); }\n"
+        body = (
+            "int f(undefined8 x, longlong y, __uint64 z, int7 w) "
+            "{ return (int)(x + y + z + w); }\n"
         )
+        preamble = make_preamble("// test", [{"cpp_code": body}], [])
+        src = "\n".join(preamble) + body
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "ghidra_types.cpp"
             p.write_text(src, encoding="utf-8")
@@ -1690,8 +1794,7 @@ class TestCompileVerify(unittest.TestCase):
         cxx = find_cxx_compiler()
         if not cxx:
             self.skipTest("no C++ compiler on PATH")
-        preamble = make_preamble("// test", [], [])
-        src = "\n".join(preamble) + (
+        body = (
             "int f(ghidra_word w) {\n"
             "  (void)w[0];\n"
             "  (void)w();\n"
@@ -1700,6 +1803,8 @@ class TestCompileVerify(unittest.TestCase):
             "  return (int)w;\n"
             "}\n"
         )
+        preamble = make_preamble("// test", [{"cpp_code": body}], [])
+        src = "\n".join(preamble) + body
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "ghidra_word_ops.cpp"
             p.write_text(src, encoding="utf-8")
@@ -1721,7 +1826,7 @@ class TestCompileVerify(unittest.TestCase):
             "  std::vector<int>::push_back(p, 1);\n"
             "}\n"
         )
-        preamble = make_preamble("// test", [], [])
+        preamble = make_preamble("// test", [{"cpp_code": body}], [])
         with tempfile.TemporaryDirectory() as td:
             rep = compile_snippet(
                 body,
@@ -1752,7 +1857,13 @@ class TestCompileVerify(unittest.TestCase):
                 "}\n"
             ),
         }]
-        text, _n = assemble(restored, [], [])
+        from src.analysis.includes import make_preamble
+
+        preamble = make_preamble("// test", restored, [])
+        text, _n = assemble(restored, [], [], preamble_lines=preamble)
+        self.assertIn("struct ghidra_word", text)
+        self.assertNotIn("operator()", text)
+        self.assertNotIn("PIMAGE_SECTION_HEADER", text)
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "thunk.cpp"
             p.write_text(text + "\n", encoding="utf-8")
@@ -1838,7 +1949,7 @@ class TestCompileVerify(unittest.TestCase):
         text, n = assemble(restored, [], [])
         self.assertEqual(n, 1)
         self.assertNotIn("structstd", text)
-        self.assertIn("std::char_traits", text)
+        self.assertIn("std::ostream", text)
 
 
 if __name__ == "__main__":

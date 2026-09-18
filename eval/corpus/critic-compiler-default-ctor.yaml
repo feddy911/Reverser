@@ -1,0 +1,16 @@
+id: critic-compiler-default-ctor
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: Rec
+ghidra_cpp: |
+  Rec() {
+    std::string *in_stk_n40;
+    std::string(in_stk_n40);
+  }
+contains:
+  - "==compiler:special_member:Rec=="
+  - "==compiler:stack_home:in_stk_n40=="
+not_contains:
+  - "==0=="
+compile: false
+notes: "The compiler emits a default constructor. Ghidra recovers it as a free function T() that constructs members through in_stk homes. That is not a constructor a person wrote."

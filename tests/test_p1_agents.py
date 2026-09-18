@@ -17,7 +17,9 @@ from src.agents.compiler import (
 )
 from src.agents.critic import (
     ROLE_RANK,
+    dialect_hits,
     director_contract,
+    prefer_dump_if_stub,
     review_compile_fix,
     review_function,
     review_run,
@@ -1284,6 +1286,91 @@ class TestCritic(unittest.TestCase):
         self.assertFalse(verdict.accept)
         self.assertTrue(any("unscored" in r for r in verdict.reasons))
         self.assertTrue(director_contract(verdict))
+
+    def test_dialect_hits_split_ghidra_compiler_human(self):
+        ghidra = dialect_hits(
+            "void wrap(unsigned long long x) { x = CONCAT44(a, b); (void)x; }\n"
+        )
+        self.assertTrue(any(h.source == "ghidra" and h.kind == "concat" for h in ghidra))
+        self.assertFalse(any(h.source == "compiler" for h in ghidra))
+        abi = dialect_hits(
+            "void wrap(void) { undefined8 *in_RCX; (void)*in_RCX; }\n"
+        )
+        sources = {h.source for h in abi}
+        self.assertIn("compiler", sources)
+        self.assertIn("ghidra", sources)
+        self.assertTrue(any(h.token == "in_RCX" for h in abi))
+        human = dialect_hits(
+            "void wrap(std::vector<int> *p) {\n"
+            "  p->push_back(1);\n"
+            "  std::cout << \"n=\" << 1;\n"
+            "}\n"
+        )
+        self.assertEqual(human, [])
+        ctor = dialect_hits(
+            "Rec(Rec *param_2) {\n"
+            "  *(undefined4 *)(in_RCX + 8) = *(undefined4 *)(in_RDX + 8);\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(h.source == "compiler" and h.kind == "special_member" and h.token == "Rec" for h in ctor)
+        )
+        dctor = dialect_hits(
+            "Rec() {\n"
+            "  std::string *in_stk_n40;\n"
+            "  std::string(in_stk_n40);\n"
+            "}\n"
+        )
+        self.assertTrue(
+            any(h.source == "compiler" and h.kind == "special_member" and h.token == "Rec" for h in dctor)
+        )
+        human_ctor = dialect_hits(
+            "Rec() {\n"
+            "  id.clear();\n"
+            "}\n"
+        )
+        self.assertFalse(any(h.kind == "special_member" for h in human_ctor))
+
+    def test_dialect_leftover_does_not_reject_run(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "FUN_1",
+            "name": "FUN_1",
+            "cpp_code": (
+                "void wrap(unsigned long long x) {\n"
+                "  x = CONCAT44(a, b);\n"
+                "  puts(\"k\");\n"
+                "  (void)x;\n"
+                "}\n"
+            ),
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": (
+                "void FUN_1(unsigned long long x) {\n"
+                "  x = CONCAT44(a, b);\n"
+                "  puts(\"k\");\n"
+                "  (void)x;\n"
+                "}\n"
+            ),
+            "compile_ok": True,
+        }]
+        verdict = review_run(
+            restored,
+            tu_text=restored[0]["cpp_code"],
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertTrue(verdict.identity_ok)
+        self.assertTrue(verdict.fidelity_ok)
+        self.assertTrue(verdict.accept)
+        self.assertFalse(verdict.dialect_ok)
+        self.assertTrue(director_contract(verdict))
+        kinds = {s["sanction"] for s in verdict.sanctions}
+        self.assertIn("dialect_leftover", kinds)
+        self.assertNotIn("run_reject", kinds)
+        self.assertEqual(verdict.to_dict()["max_sanction_rank"], ROLE_RANK["polisher"])
 
 
 if __name__ == "__main__":

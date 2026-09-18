@@ -1,0 +1,20 @@
+id: ghidra-preamble-used-aliases
+profile: gcc_pe_x64
+recipe: assemble
+guessed_name: wrap
+ghidra_cpp: |
+  uint wrap(uint n)
+  {
+    return n;
+  }
+contains:
+  - "using uint ="
+  - "uint wrap"
+not_contains:
+  - "ghidra_word"
+  - "undefined8"
+  - "operator()"
+  - "allocator_type"
+  - "PIMAGE_SECTION_HEADER"
+compile: true
+notes: "Ghidra undefined/uint aliases and ghidra_word are assembler glue, not recovered source. Emit a using only when the TU names it. operator() on the dummy word is not C++ a person wrote."

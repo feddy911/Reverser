@@ -15,8 +15,9 @@ ghidra_cpp: |
     (void)pbVar4;
   }
 contains:
-  - "std::basic_ostream<char,std::char_traits<char>>"
+  - "std::ostream"
 not_contains:
   - "structstd"
+  - "char_traits"
 compile: true
-notes: "Ghidra may print bare basic_ostream and glue structstd::char_traits; qualify std. Not from a user exe dump."
+notes: "Ghidra may print bare basic_ostream and glue structstd::char_traits; qualify std and elide default traits. Humans write ostream. Not from a user exe dump."

@@ -1,0 +1,17 @@
+id: ghidra-default-map-args
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void wrap(std::map<std::basic_string<char, std::char_traits<char>>,int,std::less<std::basic_string<char, std::char_traits<char>>>,std::allocator<std::pair<const std::basic_string<char, std::char_traits<char>>,int>>> *p)
+  {
+    (void)p;
+  }
+contains:
+  - "std::map<std::string, int>"
+not_contains:
+  - "allocator"
+  - "char_traits"
+  - "basic_string"
+  - "std::less"
+compile: true
+notes: "ISO map.overview: Compare = less<Key>, Allocator = allocator<pair<const Key, T>>. ISO string.syn: string = basic_string<char>. Ghidra prints every default; humans write map of string to int."

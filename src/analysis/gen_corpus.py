@@ -23,6 +23,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from src.analysis.corpus import CorpusCase, apply_recipe, load_corpus
 from src.analysis.ghidra_cpp import _KNOWN_CLASSES, _KNOWN_MEMBERS, _UNDERSCORE_TYPE_BASE
+from src.domains.pack import GHIDRA_ALIAS_NAMES
 
 _IDENT = re.compile(r"(?<!::)\b([A-Za-z_]\w*)\b")
 
@@ -95,6 +96,8 @@ _PROTECTED_EXTRA = frozenset({
 
 def _is_protected(ident: str) -> bool:
     if ident in _CXX_KEYWORDS or ident in _PROTECTED_EXTRA:
+        return True
+    if ident in GHIDRA_ALIAS_NAMES:
         return True
     if ident in _KNOWN_CLASSES or ident in _KNOWN_MEMBERS:
         return True
@@ -206,7 +209,11 @@ def eval_variations(
     loaded = list(cases) if cases is not None else load_corpus()
     results = []
     for case in loaded:
-        varied, mapping = vary_case(case)
+        if case.recipe == "critic":
+            # Report tags are dialect taxonomy, not user identifiers.
+            varied, mapping = case, {}
+        else:
+            varied, mapping = vary_case(case)
         try:
             got = apply_recipe(varied)
         except Exception as exc:

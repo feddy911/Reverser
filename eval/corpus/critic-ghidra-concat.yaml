@@ -1,0 +1,17 @@
+id: critic-ghidra-concat
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(unsigned long long x)
+  {
+    x = CONCAT44(a, b);
+    (void)x;
+  }
+contains:
+  - "==ghidra:concat:CONCAT44=="
+not_contains:
+  - "==0=="
+  - "==compiler:"
+compile: false
+notes: "Critic labels Ghidra PIECE/CONCAT as decompiler glue, not C++ a person wrote. Report only; does not rewrite and does not REJECT."

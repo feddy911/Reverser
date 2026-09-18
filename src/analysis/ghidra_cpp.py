@@ -310,6 +310,160 @@ def _split_top_args(inner: str) -> list[str]:
     return args
 
 
+def _norm_targ(s: str) -> str:
+    t = re.sub(r"\s+", "", s or "")
+    t = t.replace("std::", "")
+    return t.replace("__cxx11::", "")
+
+
+_SEQ_ALLOC = frozenset({"vector", "list", "deque", "forward_list", "basic_string"})
+_SET_ALLOC = frozenset({
+    "set", "multiset", "unordered_set", "unordered_multiset",
+})
+_MAP_ALLOC = frozenset({
+    "map", "multimap", "unordered_map", "unordered_multimap",
+})
+_ASSOC_LESS = frozenset({"set", "multiset", "map", "multimap"})
+_UNORDERED = frozenset({
+    "unordered_map", "unordered_multimap",
+    "unordered_set", "unordered_multiset",
+})
+_TRAITS_HEAD = frozenset({
+    "basic_string", "basic_ostream", "basic_istream", "basic_iostream",
+    "basic_ofstream", "basic_ifstream", "basic_fstream",
+})
+_STRING_ALIAS = {
+    "char": "string",
+    "wchar_t": "wstring",
+    "char8_t": "u8string",
+    "char16_t": "u16string",
+    "char32_t": "u32string",
+}
+_STREAM_ALIAS = {
+    ("basic_ostream", "char"): "ostream",
+    ("basic_istream", "char"): "istream",
+    ("basic_iostream", "char"): "iostream",
+    ("basic_ofstream", "char"): "ofstream",
+    ("basic_ifstream", "char"): "ifstream",
+    ("basic_fstream", "char"): "fstream",
+}
+
+
+def _unary_inner(arg: str, names: tuple[str, ...]) -> str | None:
+    t = (arg or "").strip()
+    for n in names:
+        if not re.match(rf"(?:std::)?{n}\s*<", t):
+            continue
+        open_a = t.find("<")
+        close_a = _match_forward(t, open_a, "<", ">")
+        if close_a == len(t) - 1:
+            return t[open_a + 1 : close_a].strip()
+    return None
+
+
+def _is_map_alloc_elem(elem: str, key: str, val: str) -> bool:
+    e = _norm_targ(elem)
+    k = _norm_targ(key)
+    v = _norm_targ(val)
+    return e in {f"pair<const{k},{v}>", f"pair<{k}const,{v}>"}
+
+
+def _tpl_head(blob: str, angle: int) -> tuple[int, str]:
+    """Start index and unqualified name of `[std::[__cxx11::]]Foo<`."""
+    j = angle
+    while j > 0 and blob[j - 1].isspace():
+        j -= 1
+    end = j
+    while j > 0 and (blob[j - 1].isalnum() or blob[j - 1] == "_"):
+        j -= 1
+    name = blob[j:end]
+    head = j
+    while head >= 2 and blob[head - 2 : head] == "::":
+        k = head - 2
+        q = k
+        while q > 0 and (blob[q - 1].isalnum() or blob[q - 1] == "_"):
+            q -= 1
+        qual = blob[q:k]
+        if qual not in {"std", "__cxx11"}:
+            break
+        head = q
+    return head, name
+
+
+def _drop_default_last(name: str, args: list[str]) -> list[str] | None:
+    if len(args) < 2:
+        return None
+    last = args[-1]
+    alloc_elem = _unary_inner(last, ("allocator",))
+    if alloc_elem is not None:
+        if name in _MAP_ALLOC and len(args) >= 2 and _is_map_alloc_elem(
+            alloc_elem, args[0], args[1]
+        ):
+            return args[:-1]
+        if name in _SEQ_ALLOC | _SET_ALLOC | {"basic_string"}:
+            if _norm_targ(alloc_elem) == _norm_targ(args[0]):
+                return args[:-1]
+    less_key = _unary_inner(last, ("less",))
+    if less_key is not None and name in _ASSOC_LESS:
+        if _norm_targ(less_key) == _norm_targ(args[0]):
+            return args[:-1]
+    equal_key = _unary_inner(last, ("equal_to",))
+    if equal_key is not None and name in _UNORDERED:
+        if _norm_targ(equal_key) == _norm_targ(args[0]):
+            return args[:-1]
+    hash_key = _unary_inner(last, ("hash",))
+    if hash_key is not None and name in _UNORDERED:
+        if _norm_targ(hash_key) == _norm_targ(args[0]):
+            return args[:-1]
+    traits_c = _unary_inner(last, ("char_traits",))
+    if traits_c is not None and name in _TRAITS_HEAD:
+        if _norm_targ(traits_c) == _norm_targ(args[0]):
+            return args[:-1]
+    return None
+
+
+def _elide_default_allocator_args(chunk: str) -> str:
+    """Drop ISO default Compare/Traits/Allocator; alias basic_string<char> to string.
+
+    Ghidra prints every default template argument. A person writes map of
+    string to int, not allocator<pair<const basic_string<char, char_traits<char>>, int>>.
+    """
+    blob = chunk or ""
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while i < len(blob):
+            if blob[i] != "<":
+                i += 1
+                continue
+            close = _match_forward(blob, i, "<", ">")
+            if close < 0:
+                i += 1
+                continue
+            start, name = _tpl_head(blob, i)
+            args = [a.strip() for a in _split_top_args(blob[i + 1 : close])]
+            dropped = _drop_default_last(name, args)
+            if dropped is not None:
+                inner = ", ".join(dropped)
+                blob = blob[: i + 1] + inner + blob[close:]
+                changed = True
+                break
+            if len(args) == 1:
+                alias = None
+                if name == "basic_string":
+                    alias = _STRING_ALIAS.get(_norm_targ(args[0]))
+                else:
+                    alias = _STREAM_ALIAS.get((name, _norm_targ(args[0])))
+                if alias:
+                    prefix = "std::" if "std" in blob[start:i] or "__cxx11" in blob[start:i] else ""
+                    blob = blob[:start] + prefix + alias + blob[close + 1 :]
+                    changed = True
+                    break
+            i += 1
+    return blob
+
+
 def _deref_if_ident(expr: str) -> str:
     """Ghidra often passes T* where the real API wants T / T const&."""
     t = (expr or "").strip()
@@ -2421,4 +2575,5 @@ def sanitize_ghidra_cpp(code: str) -> str:
     t = _outside_strings(t, _rewrite_ghidra_func_ops)
     t = _outside_strings(t, _rewrite_bool_xor)
     t = _rewrite_ghidra_this_local(t)
+    t = _outside_strings(t, _elide_default_allocator_args)
     return t

@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from src.analysis.platform import is_system_dll
-from src.domains.pack import BASE_INCLUDES, GHIDRA_TYPEDEFS
+from src.domains.pack import BASE_INCLUDES, typedefs_for_source
 
 # Имя внешней функции / префикс -> include
 _CALL_INCLUDE_RULES: List[tuple] = [
@@ -176,6 +176,11 @@ def make_preamble(
     lines = [comment]
     lines.extend(collect_dynamic_includes(restored, functions))
     lines.append("")
-    lines.extend(GHIDRA_TYPEDEFS)
-    lines.append("")
+    blob = "\n".join(
+        str(r.get("cpp_code") or "") for r in restored or []
+    )
+    glue = typedefs_for_source(blob)
+    if glue:
+        lines.extend(glue)
+        lines.append("")
     return lines

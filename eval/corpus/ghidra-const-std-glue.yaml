@@ -5,7 +5,7 @@ recipe: sanitize
 ghidra_cpp: |
   int n_str_keys(std::allocator<std::pair<const_std::__cxx11::basic_string<char,_std::char_traits<char>,_std::allocator<char>_>, int> > *m);
 contains:
-  - "const std::basic_string"
+  - "const std::string"
 not_contains:
   - "conststd"
   - "const_std::"

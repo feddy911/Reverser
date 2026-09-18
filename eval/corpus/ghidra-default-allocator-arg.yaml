@@ -1,0 +1,14 @@
+id: ghidra-default-allocator-arg
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void wrap(std::vector<int,std::allocator<int>> *p)
+  {
+    (void)p;
+  }
+contains:
+  - "std::vector<int>"
+not_contains:
+  - "allocator"
+compile: true
+notes: "ISO vector.overview: Allocator = allocator<T>. Ghidra prints the default; humans write vector<T>."

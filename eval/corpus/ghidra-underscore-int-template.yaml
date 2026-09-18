@@ -7,11 +7,13 @@ ghidra_cpp: |
   int has_key(unordered_map<int,_int,_std::hash<int>,_std::equal_to<int>,_std::allocator<std::pair<int_const,_int>_>_> *m, int k);
 contains:
   - "std::pair<int,int>"
-  - "std::unordered_map<int,int"
-  - "int const"
+  - "std::unordered_map<int, int>"
 not_contains:
   - "_int"
   - "_std::"
   - "int_const"
+  - "allocator"
+  - "std::hash"
+  - "equal_to"
 compile: false
-notes: "Ghidra prefixes a template primitive with _ after a comma: pair<int,_int>"
+notes: "Ghidra prefixes a template primitive with _ after a comma: pair<int,_int>. ISO unordered_map defaults (hash/equal_to/allocator) are then dropped."

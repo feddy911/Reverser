@@ -13,7 +13,7 @@ ghidra_cpp: |
     (void)pbVar4;
   }
 contains:
-  - "std::char_traits"
+  - "std::ostream"
 not_contains:
   - "structstd"
 compile: true

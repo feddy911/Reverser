@@ -1,0 +1,16 @@
+id: ghidra-default-string-args
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void wrap(std::basic_string<char, std::char_traits<char>, std::allocator<char>> *s)
+  {
+    (void)s;
+  }
+contains:
+  - "std::string *"
+not_contains:
+  - "basic_string"
+  - "char_traits"
+  - "allocator"
+compile: true
+notes: "ISO string.syn: using string = basic_string<char> with Traits = char_traits<charT>, Allocator = allocator<charT>. Ghidra prints the defaults."

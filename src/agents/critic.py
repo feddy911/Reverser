@@ -8,6 +8,10 @@ is not the compile gate. ``compile_ok`` is per-function syntax of LLM
 user_code targets. The assembled TU is ``assembled_ok`` (report only)
 and does not block ACCEPT.
 
+Dialect leftovers (Ghidra pcode, MSVC ABI homes, assembler dummy word)
+are labeled ``ghidra`` / ``compiler`` / ``assembler`` vs human C++.
+That report sanctions polisher/assembler and does not REJECT the run.
+
 Higher rank → harsher sanction (see ROLE_RANK). Director's own crime
 (ACCEPT while identity/fidelity/per-fn failed) is illegal; tests assert
 ``director_contract``.
@@ -63,6 +67,143 @@ ROLE_RANK = {
     "compiler": 4,
     "critic": 5,
 }
+
+
+@dataclass(frozen=True)
+class DialectHit:
+    """One leftover construct: who produced it, not a rewrite."""
+
+    source: str
+    kind: str
+    token: str
+
+    def tag(self) -> str:
+        return f"=={self.source}:{self.kind}:{self.token}=="
+
+    def to_dict(self) -> Dict[str, str]:
+        return {"source": self.source, "kind": self.kind, "token": self.token}
+
+
+def _code_body(code: str) -> str:
+    blob = re.sub(r'"(?:\\.|[^"\\])*"', " ", code or "")
+    blob = re.sub(r"//.*?$", " ", blob, flags=re.M)
+    return re.sub(r"/\*.*?\*/", " ", blob, flags=re.S)
+
+
+_RE_GHIDRA_CONCAT = re.compile(r"\b(CONCAT\d+)\b")
+_RE_GHIDRA_PCODE = re.compile(
+    r"\b(ZEXT\d+|SEXT\d+|SUB\d+|PIECE|CARRY|SCARRY|SBORROW|"
+    r"POPCOUNT|LZCOUNT|INT2FLOAT|FLOAT2FLOAT)\b"
+)
+_RE_GHIDRA_TYPE = re.compile(
+    r"\b(undefined[1-8]?|int[1-8]|uint[1-8]|__uint64|longlong|ulonglong|"
+    r"value_type_conflict|ghidra_word|ghidra_this)\b"
+)
+_RE_GHIDRA_TEMP = re.compile(
+    r"\b((?:u|i|l|s|b|c|d|f|w|pb|pc|pi|pu|pl|ps|pp|pf|pd)Var\d+|this_\d+|"
+    r"__for_(?:begin|end|range))\b"
+)
+_RE_GHIDRA_SYMBOL = re.compile(r"\b((?:FUN|DAT|thunk_FUN)_[0-9A-Fa-f]+)\b")
+_RE_GHIDRA_LOCAL = re.compile(r"\b(local_\d+|param_\d+|auStack[0-9A-Fa-f]+)\b")
+_RE_GHIDRA_OSTREAM = re.compile(
+    r"(\(\s*&\s*\(\s*(?:\(\s*)*(?:std::)?cout|\bghidra_this\b)"
+)
+_RE_GHIDRA_QUAL_MEM = re.compile(
+    r"\b(std::(?:vector|basic_string|basic_ostream)\s*<[^\n>]*>\s*::)"
+)
+_RE_COMPILER_REG = re.compile(
+    r"\b(in_(?:RCX|RDX|R8|R9|RAX|EAX|ECX|EDX|RSI|RDI|RBX|RBP|XMM\d+))\b"
+)
+_RE_COMPILER_STACK = re.compile(r"\b(in_stack_[0-9A-Fa-f]+|in_stk_n?\d+)\b")
+_RE_COMPILER_EXTRA = re.compile(r"\b(extraout_[A-Za-z][A-Za-z0-9]*|unaff_[A-Za-z0-9]+)\b")
+_RE_COMPILER_FILL = re.compile(r"\b(0xcccccccc)\b")
+_RE_COMPILER_DEBUG = re.compile(
+    r"\b(__CheckForDebuggerJustMyCode|_RTC_CheckStackVars2?|__main)\b"
+)
+_RE_ASSEMBLER_CALL = re.compile(r"(ghidra_word\s+operator\(\))")
+_RE_COPY_CTOR_FREE = re.compile(
+    r"(?:^|\n)\s*([A-Z][A-Za-z0-9]*)\s*\(\s*(?:const\s+)?\1\s*\*"
+)
+_RE_DEFAULT_CTOR_FREE = re.compile(
+    r"(?:^|\n)\s*([A-Z][A-Za-z0-9]*)\s*\(\s*\)\s*\{"
+    r"(?=[^}]{0,400}?\b(?:in_stk_|in_stack_|in_RCX))"
+)
+
+
+def _default_allocator_tokens(blob: str) -> List[str]:
+    from src.analysis.ghidra_cpp import _match_forward, _norm_targ, _split_top_args
+
+    found: List[str] = []
+    i = 0
+    text = blob or ""
+    while i < len(text):
+        if text[i] != "<":
+            i += 1
+            continue
+        close = _match_forward(text, i, "<", ">")
+        if close < 0:
+            i += 1
+            continue
+        args = [a.strip() for a in _split_top_args(text[i + 1 : close])]
+        if len(args) >= 2:
+            last = args[-1]
+            if re.match(r"(?:std::)?allocator\s*<", last):
+                open_a = last.find("<")
+                close_a = _match_forward(last, open_a, "<", ">")
+                if close_a == len(last) - 1:
+                    elem = last[open_a + 1 : close_a].strip()
+                    if _norm_targ(elem) == _norm_targ(args[0]):
+                        token = last[:open_a].strip() or "allocator"
+                        found.append(token)
+        i += 1
+    return found
+
+
+def dialect_hits(code: str) -> List[DialectHit]:
+    """Leftover Ghidra / compiler / assembler glue vs human C++."""
+    blob = _code_body(code)
+    hits: List[DialectHit] = []
+    seen: set[Tuple[str, str, str]] = set()
+
+    def add(source: str, kind: str, token: str) -> None:
+        tok = (token or "").strip()
+        if not tok:
+            return
+        key = (source, kind, tok)
+        if key in seen:
+            return
+        seen.add(key)
+        hits.append(DialectHit(source, kind, tok))
+
+    for rx, source, kind in (
+        (_RE_GHIDRA_CONCAT, "ghidra", "concat"),
+        (_RE_GHIDRA_PCODE, "ghidra", "pcode"),
+        (_RE_GHIDRA_TYPE, "ghidra", "type"),
+        (_RE_GHIDRA_TEMP, "ghidra", "temp"),
+        (_RE_GHIDRA_SYMBOL, "ghidra", "symbol"),
+        (_RE_GHIDRA_LOCAL, "ghidra", "local"),
+        (_RE_GHIDRA_OSTREAM, "ghidra", "ostream"),
+        (_RE_GHIDRA_QUAL_MEM, "ghidra", "qualified_member"),
+        (_RE_COMPILER_REG, "compiler", "abi_reg"),
+        (_RE_COMPILER_STACK, "compiler", "stack_home"),
+        (_RE_COMPILER_EXTRA, "compiler", "extraout"),
+        (_RE_COMPILER_FILL, "compiler", "stack_fill"),
+        (_RE_COMPILER_DEBUG, "compiler", "debug"),
+        (_RE_ASSEMBLER_CALL, "assembler", "word_call"),
+        (_RE_COPY_CTOR_FREE, "compiler", "special_member"),
+        (_RE_DEFAULT_CTOR_FREE, "compiler", "special_member"),
+    ):
+        for m in rx.finditer(blob):
+            add(source, kind, m.group(1))
+    for token in _default_allocator_tokens(blob):
+        add("ghidra", "allocator", token)
+    return hits
+
+
+def format_dialect_report(hits: Sequence[DialectHit]) -> str:
+    if not hits:
+        return "==0==\n"
+    return "".join(h.tag() + "\n" for h in hits)
 
 
 def _haystacks(entry: Dict[str, Any]) -> str:
@@ -209,6 +350,8 @@ class FunctionVerdict:
     missing_literals: List[str] = field(default_factory=list)
     missing_calls: List[str] = field(default_factory=list)
     missing_ext: List[str] = field(default_factory=list)
+    dialect_ok: bool = True
+    dialect_hits: List[Dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -222,6 +365,8 @@ class FunctionVerdict:
             "missing_literals": list(self.missing_literals)[:8],
             "missing_calls": list(self.missing_calls)[:8],
             "missing_ext": list(self.missing_ext)[:8],
+            "dialect_ok": self.dialect_ok,
+            "dialect_hits": list(self.dialect_hits)[:16],
         }
 
 
@@ -232,9 +377,11 @@ class RunVerdict:
     assembled_ok: Optional[bool] = None
     identity_ok: bool = True
     fidelity_ok: bool = True
+    dialect_ok: bool = True
     functions: List[FunctionVerdict] = field(default_factory=list)
     reasons: List[str] = field(default_factory=list)
     sanctions: List[Dict[str, Any]] = field(default_factory=list)
+    tu_dialect_hits: List[Dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         ranks = [int(s.get("rank") or 0) for s in self.sanctions]
@@ -244,10 +391,12 @@ class RunVerdict:
             "assembled_ok": self.assembled_ok,
             "identity_ok": self.identity_ok,
             "fidelity_ok": self.fidelity_ok,
+            "dialect_ok": self.dialect_ok,
             "reasons": list(self.reasons),
             "n_functions": len(self.functions),
             "n_reject": sum(1 for f in self.functions if not f.accept),
             "functions": [f.to_dict() for f in self.functions],
+            "tu_dialect_hits": list(self.tu_dialect_hits)[:16],
             "sanctions": list(self.sanctions),
             "max_sanction_rank": max(ranks) if ranks else 0,
         }
@@ -291,6 +440,33 @@ def collect_sanctions(verdict: RunVerdict) -> List[Dict[str, Any]]:
             "sanction": "function_reject",
             "address": fn.address,
             "reason": "; ".join(fn.reasons[:3]),
+        })
+    for fn in verdict.functions:
+        if fn.dialect_ok:
+            continue
+        out.append({
+            "issuer": "critic",
+            "target": "polisher",
+            "rank": ROLE_RANK["polisher"],
+            "scope": "function",
+            "sanction": "dialect_leftover",
+            "address": fn.address,
+            "reason": "; ".join(
+                f"{h.get('source')}:{h.get('kind')}:{h.get('token')}"
+                for h in (fn.dialect_hits or [])[:3]
+            ),
+        })
+    if verdict.tu_dialect_hits:
+        out.append({
+            "issuer": "critic",
+            "target": "assembler",
+            "rank": ROLE_RANK["assembler"],
+            "scope": "tu",
+            "sanction": "dialect_glue",
+            "reason": "; ".join(
+                f"{h.get('source')}:{h.get('kind')}:{h.get('token')}"
+                for h in verdict.tu_dialect_hits[:3]
+            ),
         })
     if verdict.assembled_ok is False:
         out.append({
@@ -368,6 +544,7 @@ def review_function(
         reasons.append(
             f"fidelity {fid.get('fidelity')} drift={fid.get('drift')}"
         )
+    hits = dialect_hits(code)
     return FunctionVerdict(
         address=addr,
         accept=identity_ok and fidelity_ok,
@@ -379,6 +556,8 @@ def review_function(
         missing_literals=list(fid.get("missing_literals") or []),
         missing_calls=list(fid.get("missing_calls") or []),
         missing_ext=list(fid.get("missing_ext") or []),
+        dialect_ok=not hits,
+        dialect_hits=[h.to_dict() for h in hits],
     )
 
 
@@ -431,6 +610,17 @@ def review_run(
 
     identity_ok = all(f.identity_ok for f in fns) and not tu_reasons
     fidelity_ok = all(f.fidelity_ok for f in fns) if fns else True
+    fn_hit_keys = {
+        (h.get("source"), h.get("kind"), h.get("token"))
+        for f in fns
+        for h in (f.dialect_hits or [])
+    }
+    tu_extra = [
+        h.to_dict()
+        for h in dialect_hits(tu_text)
+        if (h.source, h.kind, h.token) not in fn_hit_keys
+    ]
+    dialect_ok = all(f.dialect_ok for f in fns) and not tu_extra
     reasons = list(tu_reasons)
     for f in fns:
         if not f.accept:
@@ -450,8 +640,10 @@ def review_run(
         assembled_ok=assembled_ok,
         identity_ok=identity_ok,
         fidelity_ok=fidelity_ok,
+        dialect_ok=dialect_ok,
         functions=fns,
         reasons=reasons,
+        tu_dialect_hits=tu_extra,
     )
     verdict.sanctions = collect_sanctions(verdict)
     return verdict

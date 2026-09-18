@@ -18,7 +18,7 @@ from src.analysis.ghidra_cpp import (
     _match_forward,
     _split_top_args,
 )
-from src.domains.pack import NONE_PACK
+from src.domains.pack import NONE_PACK, missing_typedefs
 
 
 def _default_preamble() -> List[str]:
@@ -380,6 +380,9 @@ def type_stubs_for_snippet(
             lines.append("")
     lines.extend(_ghidra_stubs(blob))
     lines.extend(_sibling_call_stubs(blob, sibling_names or [], current_name))
+    glue = missing_typedefs(preamble or "", blob + "\n" + "\n".join(lines))
+    if glue:
+        lines = glue + [""] + lines
     return lines
 
 
@@ -530,18 +533,31 @@ def assemble(
 
     parts: List[str] = list(preamble_lines) if preamble_lines is not None else _default_preamble()
     already = set(best) | _preamble_type_names("\n".join(parts))
+    blob = "\n".join(c for _, _, c in cleaned)
+    inferred = _infer_structs(blob, already)
+    stub_lines = _ghidra_stubs(blob)
+    inferred_src = "\n".join(
+        _format_inferred_struct(name, inferred[name])
+        for name in sorted(inferred)
+        if name not in best and name not in already
+    )
+    extra_glue = "\n".join([blob, inferred_src, "\n".join(stub_lines)])
+    glue = missing_typedefs("\n".join(parts), extra_glue)
+    if glue:
+        if parts and parts[-1].strip():
+            parts.append("")
+        parts.extend(glue)
+        parts.append("")
     parts.append("// ---- types (dedup) ----")
     for name in sorted(best):
         parts.append(best[name].strip())
         parts.append("")
-    blob = "\n".join(c for _, _, c in cleaned)
-    inferred = _infer_structs(blob, already)
     for name in sorted(inferred):
         if name in best or name in already:
             continue
         parts.append(_format_inferred_struct(name, inferred[name]))
         parts.append("")
-    parts.extend(_ghidra_stubs(blob))
+    parts.extend(stub_lines)
     parts.append("// ---- prototypes ----")
     for addr, name, code in cleaned:
         proto = _prototype(name, code)

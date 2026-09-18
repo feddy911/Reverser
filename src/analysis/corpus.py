@@ -20,6 +20,7 @@ Recipes (do not add sanitizer regex here):
   sanitize                 sanitize_ghidra_cpp
   assemble                 assembler.assemble
   sanitize_then_assemble   sanitize each body, then assemble
+  critic                   dialect leftover report (ghidra/compiler/assembler vs human)
 """
 
 from dataclasses import dataclass, field
@@ -28,7 +29,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import yaml
 
-RECIPES = ("sanitize", "assemble", "sanitize_then_assemble")
+RECIPES = ("sanitize", "assemble", "sanitize_then_assemble", "critic")
 DEFAULT_CORPUS_DIR = Path(__file__).resolve().parents[2] / "eval" / "corpus"
 
 
@@ -152,6 +153,10 @@ def apply_recipe(case: CorpusCase) -> str:
         return _assemble_text(case, bodies_sanitized=False)
     if case.recipe == "sanitize_then_assemble":
         return _assemble_text(case, bodies_sanitized=True)
+    if case.recipe == "critic":
+        from src.agents.critic import dialect_hits, format_dialect_report
+
+        return format_dialect_report(dialect_hits(case.ghidra_cpp))
     raise ValueError(f"unknown recipe {case.recipe!r}")
 
 

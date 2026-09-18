@@ -222,6 +222,56 @@ class TestCorpusEval(unittest.TestCase):
         self.assertIn("(*((std::ostream *)this))", chain.ghidra_cpp)
         self.assertNotIn("Series", chain.ghidra_cpp)
         self.assertNotIn("FibTimer", chain.ghidra_cpp)
+        alloc = cases["ghidra-default-allocator-arg"]
+        self.assertTrue(alloc.compile)
+        self.assertIn("std::allocator<int>", alloc.ghidra_cpp)
+        self.assertNotIn("unsigned long long", alloc.ghidra_cpp)
+        self.assertNotIn("FibTimer", alloc.ghidra_cpp)
+        margs = cases["ghidra-default-map-args"]
+        self.assertTrue(margs.compile)
+        self.assertIn("std::map<", margs.ghidra_cpp)
+        self.assertIn("char_traits", margs.ghidra_cpp)
+        self.assertNotIn("FibTimer", margs.ghidra_cpp)
+        sargs = cases["ghidra-default-string-args"]
+        self.assertTrue(sargs.compile)
+        self.assertIn("basic_string<char", sargs.ghidra_cpp)
+        self.assertNotIn("FibTimer", sargs.ghidra_cpp)
+        umap = cases["ghidra-default-unordered-map-args"]
+        self.assertTrue(umap.compile)
+        self.assertIn("std::hash", umap.ghidra_cpp)
+        self.assertNotIn("FibTimer", umap.ghidra_cpp)
+        preamble = cases["ghidra-preamble-used-aliases"]
+        self.assertTrue(preamble.compile)
+        self.assertEqual(preamble.recipe, "assemble")
+        self.assertIn("uint wrap", preamble.ghidra_cpp)
+        self.assertNotIn("ghidra_word", preamble.ghidra_cpp)
+        self.assertNotIn("FibTimer", preamble.ghidra_cpp)
+
+    def test_critic_dialect_fixtures_are_loaded(self):
+        cases = {c.id: c for c in load_corpus()}
+        concat = cases["critic-ghidra-concat"]
+        self.assertEqual(concat.recipe, "critic")
+        self.assertIn("CONCAT44", concat.ghidra_cpp)
+        self.assertNotIn("FibTimer", concat.ghidra_cpp)
+        abi = cases["critic-compiler-in-reg"]
+        self.assertIn("in_RCX", abi.ghidra_cpp)
+        self.assertNotIn("FibTimer", abi.ghidra_cpp)
+        human = cases["critic-human-vector"]
+        self.assertIn("push_back", human.ghidra_cpp)
+        self.assertNotIn("CONCAT", human.ghidra_cpp)
+        self.assertNotIn("FibTimer", human.ghidra_cpp)
+        alloc = cases["critic-ghidra-default-allocator"]
+        self.assertIn("std::allocator<int>", alloc.ghidra_cpp)
+        self.assertNotIn("FibTimer", alloc.ghidra_cpp)
+        ctor = cases["critic-compiler-copy-ctor"]
+        self.assertEqual(ctor.recipe, "critic")
+        self.assertIn("Rec(Rec *param_2)", ctor.ghidra_cpp)
+        self.assertNotIn("Item", ctor.ghidra_cpp)
+        self.assertNotIn("FibTimer", ctor.ghidra_cpp)
+        dctor = cases["critic-compiler-default-ctor"]
+        self.assertEqual(dctor.recipe, "critic")
+        self.assertIn("Rec() {", dctor.ghidra_cpp)
+        self.assertNotIn("Item", dctor.ghidra_cpp)
 
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):

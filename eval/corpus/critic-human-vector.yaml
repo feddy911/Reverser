@@ -1,0 +1,22 @@
+id: critic-human-vector
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(std::vector<int> *p)
+  {
+    p->push_back(1);
+    std::cout << "n=" << 1;
+  }
+contains:
+  - "==0=="
+not_contains:
+  - "==ghidra:"
+  - "==compiler:"
+  - "==assembler:"
+  - "CONCAT"
+  - "in_RCX"
+  - "ghidra_word"
+  - "allocator"
+compile: false
+notes: "Human C++: vector of T, member push_back, chained insert. Critic must not treat stdlib as Ghidra dialect."

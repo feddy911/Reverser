@@ -1,0 +1,15 @@
+id: critic-ghidra-default-allocator
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(std::vector<int,std::allocator<int>> *p)
+  {
+    (void)p;
+  }
+contains:
+  - "==ghidra:allocator:std::allocator=="
+not_contains:
+  - "==0=="
+compile: false
+notes: "ISO vector.overview default Allocator = allocator<T>. Ghidra prints it; a person writes vector of T. Critic reports leftover default allocator."
