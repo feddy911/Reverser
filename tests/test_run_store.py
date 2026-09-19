@@ -87,6 +87,131 @@ class TestRunStore(unittest.TestCase):
             rid = record_run(old, db_path=db, prompt_ver="p4")
             self.assertGreater(rid, 0)
 
+    def test_ostream_diagnostic_is_leftover_stack(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        stack = build_analysis_stack(
+            [{
+                "message": (
+                    "no match for 'operator*' (operand type is 'std::ostream'"
+                    " {aka 'std::basic_ostream<char>'})"
+                ),
+            }],
+            tu_text='p = (&((*(std::cout)) << ("n")));\n',
+        )
+        self.assertGreaterEqual(stack["n_leftover"], 1)
+        self.assertIn("leftover", stack["counts"])
+        self.assertTrue(
+            any(i["reason"] == "ostream_addr" for i in stack["items"])
+        )
+
+    def test_overlay_insert_diagnostic_is_leftover_stack(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        stack = build_analysis_stack(
+            [{
+                "message": (
+                    "no matching function for call to "
+                    "'operator<<(undefined1 [292], longlong&)'"
+                ),
+            }],
+            tu_text=(
+                "undefined1 local_298[292];\n"
+                "operator<<(local_298, n);\n"
+            ),
+        )
+        self.assertGreaterEqual(stack["n_leftover"], 1)
+        self.assertTrue(
+            any(i["reason"] == "ostream_overlay" for i in stack["items"])
+        )
+
+    def test_concat71_low_compiles_is_leftover_stack(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        stack = build_analysis_stack(
+            [],
+            tu_text=(
+                "uVar1 = (((unsigned long long)((int7)((ulonglong)uVar2 >> 8)) << 8)"
+                " | (unsigned char)(1));\n"
+            ),
+        )
+        self.assertGreaterEqual(stack["n_leftover"], 1)
+        self.assertEqual(stack["n_unknown"], 0)
+        self.assertTrue(
+            any(i["reason"] == "concat71_low" for i in stack["items"])
+        )
+
+    def test_extra_star_stack_array_is_leftover_stack(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        stack = build_analysis_stack(
+            [],
+            tu_text=(
+                "longlong ****xs[8];\n"
+                "p = (longlong ***)xs;\n"
+                "helper((longlong *)p);\n"
+            ),
+        )
+        self.assertGreaterEqual(stack["n_leftover"], 1)
+        self.assertEqual(stack["n_unknown"], 0)
+        self.assertTrue(
+            any(i["reason"] == "extra_star" for i in stack["items"])
+        )
+        self.assertNotIn("disasm_facts", stack)
+
+    def test_gs_cookie_slot_is_leftover_stack(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        stack = build_analysis_stack(
+            [],
+            tu_text=(
+                "undefined1 local_40[32];\n"
+                "longlong n;\n"
+                "n = 1;\n"
+            ),
+        )
+        self.assertGreaterEqual(stack["n_leftover"], 1)
+        self.assertEqual(stack["n_unknown"], 0)
+        self.assertTrue(
+            any(i["reason"] == "gs_cookie" for i in stack["items"])
+        )
+
+    def test_opt_in_facts_go_to_stack_not_as_c(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        leftover = (
+            "longlong ****xs[8];\n"
+            "p = (longlong ***)xs;\n"
+            "helper((longlong *)p);\n"
+        )
+        facts = {
+            "addr": "0x1",
+            "size": 16,
+            "callees": [],
+            "stack_alloc": 64,
+            "lea_arg_slots": [-32],
+            "qword_store_slots": [-32],
+            "source": "dump_meta+func_bytes",
+            "has_byte_facts": True,
+        }
+        stack = build_analysis_stack(
+            [],
+            tu_text=leftover,
+            disasm_facts=[facts],
+            restored=[{
+                "cpp_code": leftover,
+                "fn_facts": facts,
+            }],
+        )
+        self.assertTrue(stack["disasm_facts"]["opt_in"])
+        self.assertEqual(stack["disasm_facts"]["n"], 1)
+        dumped = json.dumps(stack["disasm_facts"])
+        self.assertNotIn("****", dumped)
+        self.assertNotIn("ghidra_code", dumped)
+        self.assertTrue(
+            any(i["reason"] == "facts_disagree" for i in stack["items"])
+        )
+
     def test_it_stays_unknown(self):
         with tempfile.TemporaryDirectory() as td:
             logs = Path(td) / "logs"

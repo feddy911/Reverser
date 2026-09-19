@@ -1,0 +1,20 @@
+id: critic-ghidra-extra-star-stack-array
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void helper(longlong *out);
+  void wrap(void)
+  {
+    longlong ***p;
+    longlong ****xs[8];
+    p = (longlong ***)xs;
+    helper((longlong *)p);
+    (void)xs[0];
+  }
+contains:
+  - "==ghidra:extra_star:xs=="
+not_contains:
+  - "==0=="
+compile: false
+notes: "Ghidra over-stars a word stack array used as T* out-param. Identity leftover like leftover in_RCX; sanitizer should emit longlong xs[N] and pass xs. Mix wrap. One class, not one spelling. Not T* vs Rec*."

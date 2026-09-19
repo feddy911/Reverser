@@ -84,7 +84,11 @@ def build_restore_prompt(
     profile: str = "generic",
     pcode: str = "",
 ) -> str:
-    """p4 user prompt. Optional pcode is mini/p5 only — live restore omits it."""
+    """p4 user prompt. Optional pcode is mini/p5 only — live restore omits it.
+
+    Do not insert FnFacts here. That is gated P7; P5 keeps facts off the prompt.
+    P8: do not insert a second decompiler C (IDA / Hex-Rays / BN).
+    """
     from src.analysis.pcode import clip_pcode, op_lines
 
     func_strings = entry.get("string_matches") or entry.get("literals") or []

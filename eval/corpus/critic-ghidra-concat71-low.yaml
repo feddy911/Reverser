@@ -1,0 +1,22 @@
+id: critic-ghidra-concat71-low
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  unsigned long long wrap(ulonglong uVar2)
+  {
+    unsigned long long uVar1;
+    uVar1 = (((unsigned long long)((int7)((ulonglong)uVar2 >> 8)) << 8) | (unsigned char)(1));
+    return uVar1;
+  }
+  unsigned long long put_lo(ulonglong w, char y)
+  {
+    return CONCAT71((int7)((ulonglong)w >> 8), y);
+  }
+contains:
+  - "==ghidra:concat71_low:uVar2=="
+  - "==ghidra:concat71_low:w=="
+not_contains:
+  - "==0=="
+compile: false
+notes: "CONCAT71((int7)(w >> 8), b) is replace-low-byte of w. Restorer may already expand the token to int7 shift-or; gcc is silent because int7 is a preamble alias. Identity leftover like leftover in_RCX; sanitizer emits (w & ~0xffull) | (unsigned char)(b). Mix wrap. One class, not one spelling. Not T* PIECE concat_shift."

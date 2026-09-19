@@ -128,10 +128,20 @@ class TestCorpusEval(unittest.TestCase):
             "ghidra-const-string-star-as-string-star",
             "ghidra-int-as-mpfr-rnd",
             "ghidra-ostream-star-ref-shift",
+            "ghidra-ostream-overlay-insert",
             "ghidra-ostream-string-paren",
             "ghidra-word-as-char-star",
             "ghidra-undefined-as-undefined-star",
             "ghidra-uchar-star-as-char-star",
+            "ghidra-int7",
+            "critic-ghidra-concat71-low",
+            "ghidra-extra-star-stack-array",
+            "critic-ghidra-extra-star-stack-array",
+            "critic-ghidra-extra-star-facts-disagree",
+            "ghidra-extra-star-facts-permit",
+            "ghidra-extra-star-facts-veto",
+            "ghidra-gs-cookie-slot",
+            "critic-ghidra-gs-cookie-slot",
             "ghidra-size-type-as-vector-star",
             "ghidra-value-type-not-member-of-user",
             "msvc-jmc-helper-undeclared",
@@ -267,7 +277,7 @@ class TestCorpusEval(unittest.TestCase):
         self.assertIn("CONCAT44", used.ghidra_cpp)
         chain = cases["ghidra-ostream-insert-chain"]
         self.assertTrue(chain.compile)
-        self.assertIn("(*((std::ostream *)this))", chain.ghidra_cpp)
+        self.assertIn("(&((*(p)) << (n)))", chain.ghidra_cpp)
         self.assertNotIn("Series", chain.ghidra_cpp)
         self.assertNotIn("FibTimer", chain.ghidra_cpp)
         ptr_addr = cases["ghidra-ostream-ptr-addr-insert"]
@@ -360,6 +370,7 @@ class TestCorpusEval(unittest.TestCase):
         self.assertEqual(ostream_addr.recipe, "critic")
         self.assertIn("(*((std::ostream *)p))", ostream_addr.ghidra_cpp)
         self.assertIn("*(std::cout)", ostream_addr.ghidra_cpp)
+        self.assertTrue((ostream_addr.gcc_fingerprint or "").strip())
         self.assertNotIn("NestWalk", ostream_addr.ghidra_cpp)
         self.assertNotIn("FibTimer", ostream_addr.ghidra_cpp)
         dead = cases["critic-dead-array-home"]
@@ -375,6 +386,77 @@ class TestCorpusEval(unittest.TestCase):
         self.assertIn("in_stk_n36", shift.ghidra_cpp)
         self.assertNotIn("NestWalk", shift.ghidra_cpp)
         self.assertNotIn("FibTimer", shift.ghidra_cpp)
+        overlay = cases["ghidra-ostream-overlay-insert"]
+        self.assertEqual(overlay.recipe, "sanitize")
+        self.assertTrue(overlay.compile)
+        self.assertIn("operator<<(local_40, n)", overlay.ghidra_cpp)
+        self.assertTrue((overlay.gcc_fingerprint or "").strip())
+        self.assertNotIn("NestWalk", overlay.ghidra_cpp)
+        self.assertNotIn("MyCollatz", overlay.ghidra_cpp)
+        overlay_c = cases["critic-ghidra-ostream-overlay-insert"]
+        self.assertEqual(overlay_c.recipe, "critic")
+        self.assertIn("operator<<(local_40, n)", overlay_c.ghidra_cpp)
+        self.assertIn("undefined1 local_40[40]", overlay_c.ghidra_cpp)
+        self.assertNotIn("NestWalk", overlay_c.ghidra_cpp)
+        self.assertNotIn("MyCollatz", overlay_c.ghidra_cpp)
+        concat71 = cases["ghidra-int7"]
+        self.assertEqual(concat71.recipe, "sanitize")
+        self.assertTrue(concat71.compile)
+        self.assertIn("put_lo_exp", concat71.ghidra_cpp)
+        self.assertIn("(int7)((ulonglong)w >> 8)", concat71.ghidra_cpp)
+        self.assertNotIn("NestWalk", concat71.ghidra_cpp)
+        self.assertNotIn("MyCollatz", concat71.ghidra_cpp)
+        concat71_c = cases["critic-ghidra-concat71-low"]
+        self.assertEqual(concat71_c.recipe, "critic")
+        self.assertIn("unsigned char)(1)", concat71_c.ghidra_cpp)
+        self.assertIn("CONCAT71", concat71_c.ghidra_cpp)
+        self.assertNotIn("NestWalk", concat71_c.ghidra_cpp)
+        self.assertNotIn("MyCollatz", concat71_c.ghidra_cpp)
+        star = cases["ghidra-extra-star-stack-array"]
+        self.assertEqual(star.recipe, "sanitize")
+        self.assertTrue(star.compile)
+        self.assertIn("longlong ****xs[8]", star.ghidra_cpp)
+        self.assertNotIn("NestWalk", star.ghidra_cpp)
+        self.assertNotIn("MyCollatz", star.ghidra_cpp)
+        star_c = cases["critic-ghidra-extra-star-stack-array"]
+        self.assertEqual(star_c.recipe, "critic")
+        self.assertIn("longlong ****xs[8]", star_c.ghidra_cpp)
+        self.assertNotIn("NestWalk", star_c.ghidra_cpp)
+        self.assertNotIn("MyCollatz", star_c.ghidra_cpp)
+        star_f = cases["critic-ghidra-extra-star-facts-disagree"]
+        self.assertEqual(star_f.recipe, "critic")
+        self.assertIn("longlong ****xs[8]", star_f.ghidra_cpp)
+        self.assertEqual(star_f.fn_facts.get("stack_alloc"), 64)
+        self.assertEqual(star_f.fn_facts.get("lea_arg_slots"), [-32])
+        self.assertNotIn("NestWalk", star_f.ghidra_cpp)
+        self.assertNotIn("MyCollatz", star_f.ghidra_cpp)
+        permit = cases["ghidra-extra-star-facts-permit"]
+        self.assertEqual(permit.recipe, "sanitize")
+        self.assertTrue(permit.compile)
+        self.assertEqual(permit.fn_facts.get("lea_arg_slots"), [-32])
+        self.assertNotIn("NestWalk", permit.ghidra_cpp)
+        veto = cases["ghidra-extra-star-facts-veto"]
+        self.assertEqual(veto.recipe, "sanitize")
+        self.assertFalse(veto.compile)
+        self.assertEqual(list(veto.fn_facts.keys()), ["stack_alloc"])
+        self.assertNotIn("NestWalk", veto.ghidra_cpp)
+        self.assertNotIn("MyCollatz", veto.ghidra_cpp)
+        from src.analysis.gen_corpus import vary_case
+
+        varied, _mapping = vary_case(veto)
+        self.assertEqual(varied.fn_facts.get("stack_alloc"), 64)
+        self.assertEqual(list(varied.fn_facts.keys()), ["stack_alloc"])
+        gs = cases["ghidra-gs-cookie-slot"]
+        self.assertEqual(gs.recipe, "sanitize")
+        self.assertTrue(gs.compile)
+        self.assertIn("undefined1 local_40[32]", gs.ghidra_cpp)
+        self.assertNotIn("NestWalk", gs.ghidra_cpp)
+        self.assertNotIn("MyCollatz", gs.ghidra_cpp)
+        gs_c = cases["critic-ghidra-gs-cookie-slot"]
+        self.assertEqual(gs_c.recipe, "critic")
+        self.assertIn("undefined1 local_40[32]", gs_c.ghidra_cpp)
+        self.assertNotIn("NestWalk", gs_c.ghidra_cpp)
+        self.assertNotIn("MyCollatz", gs_c.ghidra_cpp)
 
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):

@@ -2,19 +2,21 @@ id: ghidra-ostream-insert-chain
 profile: gcc_pe_x64
 recipe: sanitize
 ghidra_cpp: |
-  void report_n(void)
+  void wrap(longlong n, longlong m)
   {
-    std::ostream *this;
-    ulonglong n;
-    this = (&(std::cout << (' ')));
-    (*((std::ostream *)this)) << (n);
+    std::ostream *p;
+    std::ostream *q;
+    p = (&(std::cout << ("a")));
+    q = (&((*(p)) << (n)));
+    p = (&((*(q)) << ("b")));
+    (*(p)) << (m);
   }
 contains:
-  - "std::cout << (' ') << (n)"
+  - "std::cout << (\"a\") << (n) << (\"b\") << (m)"
 not_contains:
   - "ghidra_this"
   - "(*(("
-  - "this ="
-  - "ostream *this"
+  - "p ="
+  - "q ="
 compile: true
-notes: "C++ inserter returns basic_ostream& (*this). &(s << x) is &s. An adjacent insert through that pointer is s << x << y, not a this-temp."
+notes: "C++ inserter returns basic_ostream& (*this). &(s << x) is &s. Ping-pong ostream* temps holding that address are s << x << y, even when the first temp is rebound. Mix wrap, not a sample name."

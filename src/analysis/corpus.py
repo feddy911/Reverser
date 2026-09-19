@@ -14,6 +14,7 @@ YAML fields:
   requires          e.g. [gmp] — skip compile if the header is missing
   guessed_name      assemble: emitted function name (default: f)
   extra_functions   assemble: [{name, cpp}, ...] other TU members
+  fn_facts          optional byte facts for critic leftover facts_disagree
   notes
 
 Recipes (do not add sanitizer regex here):
@@ -48,6 +49,7 @@ class CorpusCase:
     requires: List[str] = field(default_factory=list)
     guessed_name: str = "f"
     extra_functions: List[Dict[str, str]] = field(default_factory=list)
+    fn_facts: Dict[str, Any] = field(default_factory=dict)
     notes: str = ""
 
 
@@ -76,6 +78,9 @@ def load_case(path: Path) -> CorpusCase:
             "name": str(item.get("name") or "").strip(),
             "cpp": str(item.get("cpp") or ""),
         })
+    facts = data.get("fn_facts") or {}
+    if not isinstance(facts, dict):
+        facts = {}
     return CorpusCase(
         id=cid,
         profile=str(data.get("profile") or "generic").strip(),
@@ -90,6 +95,7 @@ def load_case(path: Path) -> CorpusCase:
         requires=_as_str_list(data.get("requires")),
         guessed_name=str(data.get("guessed_name") or "f").strip() or "f",
         extra_functions=extras,
+        fn_facts=facts,
         notes=str(data.get("notes") or ""),
     )
 
@@ -148,7 +154,7 @@ def apply_recipe(case: CorpusCase) -> str:
     from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 
     if case.recipe == "sanitize":
-        return sanitize_ghidra_cpp(case.ghidra_cpp)
+        return sanitize_ghidra_cpp(case.ghidra_cpp, fn_facts=case.fn_facts or None)
     if case.recipe == "assemble":
         return _assemble_text(case, bodies_sanitized=False)
     if case.recipe == "sanitize_then_assemble":
@@ -156,7 +162,7 @@ def apply_recipe(case: CorpusCase) -> str:
     if case.recipe == "critic":
         from src.agents.critic import dialect_hits, format_dialect_report
 
-        return format_dialect_report(dialect_hits(case.ghidra_cpp))
+        return format_dialect_report(dialect_hits(case.ghidra_cpp, facts=case.fn_facts))
     raise ValueError(f"unknown recipe {case.recipe!r}")
 
 

@@ -1,0 +1,19 @@
+id: critic-ghidra-gs-cookie-slot
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(void)
+  {
+    undefined1 local_40[32];
+    longlong n;
+    n = 1;
+    (void)n;
+  }
+contains:
+  - "==compiler:gs_cookie:local_40=="
+not_contains:
+  - "==0=="
+  - "mpz"
+compile: false
+notes: "Unused undefined1 name[32] is GS/RTC cookie pad identity leftover. Mix wrap. Sanitizer drops the decl. Used overlay [32] is not this class. Not ofstream. Not mpz_ptr."

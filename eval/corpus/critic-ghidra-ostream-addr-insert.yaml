@@ -15,4 +15,5 @@ contains:
 not_contains:
   - "==0=="
 compile: false
+gcc_fingerprint: "no match for 'operator\\*' \\(operand type is 'std::ostream'"
 notes: "Ghidra takes the address of an inserter result and casts it back to ostream*, or derefs std::cout as if it were a pointer. That is decompiler this-pointer glue, not an insert a person wrote. Identity leftover like leftover in_RCX; sanitizer should emit std::cout << x / *p << x. Mix wrap. One class, not one spelling."

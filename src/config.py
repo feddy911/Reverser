@@ -49,6 +49,8 @@ class AppConfig:
     compile_per_function: bool = True
     # Extra restore samples when fidelity is low (1 = off)
     llm_best_of: int = 1
+    # Live opt-in: byte facts to critic + analysis_stack, not the restore prompt
+    use_disasm_facts: bool = False
 
 
 def load_config(path: Union[str, Path]) -> AppConfig:
@@ -91,4 +93,7 @@ def load_config(path: Union[str, Path]) -> AppConfig:
             data.get("compile_per_function", AppConfig.compile_per_function)
         ),
         llm_best_of=int(data.get("llm_best_of", AppConfig.llm_best_of)),
+        use_disasm_facts=bool(
+            data.get("use_disasm_facts", AppConfig.use_disasm_facts)
+        ),
     )

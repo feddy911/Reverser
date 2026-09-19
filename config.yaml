@@ -38,3 +38,5 @@ compile_fix: true
 compile_timeout: 60
 compile_per_function: true
 # llm_best_of: 2
+# Byte facts to critic + analysis_stack (not the restore prompt). Default false.
+# use_disasm_facts: false

@@ -15,12 +15,30 @@ A dead local array plus the int home in ``for i<N`` is identity leftover
 (sanitizer should bind ``xs[i]``), same class as leftover ``in_RCX``.
 A ``T*`` rebuilt from an 8-byte PIECE (CONCAT or ``hi<<32|lo``) is identity
 leftover: Ghidra integer_size 4 split a pointer, not human arithmetic.
+``CONCAT71((int7)(w >> 8), b)`` still as int7 shift-or is identity leftover:
+replace-low-byte of ``w``, not a 7-byte value. Sanitizer emits
+``(w & ~0xffull) | (unsigned char)(b)``.
+A word stack array typed ``longlong ****xs[N]`` then ``p = (longlong ***)xs``
+is identity leftover: Ghidra over-starred an out-param slot, not a human
+pointer array. Sanitizer emits ``longlong xs[N]`` and passes ``xs``.
+Byte facts (lea-arg / qword-store) that disagree with that overlay are
+leftover ``facts_disagree``: the same class, not a second C. Empty fact
+bag is not this class and not a pass token.
 An inserter written ``p = (&((*(std::cout)) << x)`` or ``*(std::cout)`` is
-identity leftover: sanitizer should emit ``std::cout << x``.
+identity leftover: sanitizer should emit ``std::cout << x``. Insert into a
+byte overlay ``undefined1 local[N]`` is the same leftover class: Ghidra laid
+the stream object as ``T name[N]``, not a human ofstream field. A CRT startup
+(``mainCRTStartup`` / ``__scrt_common_main``) whose user ``FUN_`` callee is
+missing from the restored set is identity leftover: the entry is dump-shaped,
+not a sample name.
+Unused ``undefined1 name[32]`` with no other uses is GS/RTC cookie pad,
+identity leftover: sanitizer drops the decl. Used overlay ``padding[32]`` stays.
 
 Higher rank → harsher sanction (see ROLE_RANK). Director's own crime
 (ACCEPT while identity/fidelity/per-fn failed) is illegal; tests assert
-``director_contract``.
+``director_contract``. P8 forever: live restore is one Ghidra C dump.
+A second decompiler C (IDA / Hex-Rays / BN), an LLM arbiter of two dumps,
+or a swarm of restorers is illegal; tests assert ``p8_restore_contract``.
 
 Reject if restore swapped the function for a different well-known
 algorithm (starts_with to std::sort) or dropped Ghidra facts (fidelity).
@@ -33,12 +51,18 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from src.analysis.fidelity import build_call_tokens, check_function, dump_facts_ok
 from src.analysis.ghidra_cpp import (
     _first_function_span,
+    leftover_concat71_low_byte,
     leftover_concat_shift_ptr,
+    leftover_extra_star_stack_array,
+    leftover_facts_disagree,
+    leftover_gs_cookie_slot,
     leftover_dead_array_home,
     leftover_msx64_extraout,
     leftover_msx64_in_regs,
     leftover_ostream_addr_insert,
+    leftover_ostream_overlay_insert,
 )
+from src.analysis.platform import leftover_crt_user_entry
 
 FAMOUS_ALGOS: Tuple[str, ...] = (
     "std::sort",
@@ -186,7 +210,7 @@ def _default_allocator_tokens(blob: str) -> List[str]:
     return found
 
 
-def dialect_hits(code: str) -> List[DialectHit]:
+def dialect_hits(code: str, facts: object | None = None) -> List[DialectHit]:
     """Leftover Ghidra / compiler / assembler glue vs human C++."""
     blob = _code_body(code)
     hits: List[DialectHit] = []
@@ -228,10 +252,20 @@ def dialect_hits(code: str) -> List[DialectHit]:
         add("ghidra", "allocator", token)
     for name in leftover_dead_array_home(blob):
         add("compiler", "dead_array", name)
+    for name in leftover_gs_cookie_slot(blob):
+        add("compiler", "gs_cookie", name)
     for name in leftover_concat_shift_ptr(blob):
         add("ghidra", "concat_shift", name)
+    for name in leftover_concat71_low_byte(blob):
+        add("ghidra", "concat71_low", name)
+    for name in leftover_extra_star_stack_array(blob):
+        add("ghidra", "extra_star", name)
+    for name in leftover_facts_disagree(blob, facts):
+        add("ghidra", "facts_disagree", name)
     for tok in leftover_ostream_addr_insert(blob):
         add("ghidra", "ostream", tok)
+    for name in leftover_ostream_overlay_insert(blob):
+        add("ghidra", "overlay_insert", name)
     return hits
 
 
@@ -340,12 +374,27 @@ def identity_issues(entry: Dict[str, Any], code: str) -> List[str]:
     dead = leftover_dead_array_home(code)
     if dead:
         reasons.append("restore leftover dead_array " + dead[0])
+    gs_cookie = leftover_gs_cookie_slot(code)
+    if gs_cookie:
+        reasons.append("restore leftover gs_cookie " + gs_cookie[0])
     shift = leftover_concat_shift_ptr(code)
     if shift:
         reasons.append("restore leftover concat_shift " + shift[0])
+    concat71 = leftover_concat71_low_byte(code)
+    if concat71:
+        reasons.append("restore leftover concat71_low " + concat71[0])
+    extra_star = leftover_extra_star_stack_array(code)
+    if extra_star:
+        reasons.append("restore leftover extra_star " + extra_star[0])
+    disagree = leftover_facts_disagree(code, entry.get("fn_facts"))
+    if disagree:
+        reasons.append("restore leftover facts_disagree " + disagree[0])
     ostream_addr = leftover_ostream_addr_insert(code)
     if ostream_addr:
         reasons.append("restore leftover ostream_addr " + ostream_addr[0])
+    overlay = leftover_ostream_overlay_insert(code)
+    if overlay:
+        reasons.append("restore leftover ostream_overlay " + overlay[0])
     return reasons
 
 
@@ -540,8 +589,40 @@ def collect_sanctions(verdict: RunVerdict) -> List[Dict[str, Any]]:
     return out
 
 
-def director_contract(verdict: RunVerdict) -> bool:
-    """Director must not ACCEPT a run that failed identity, fidelity, or per-fn."""
+_P8_SECOND_C = (
+    "=== hex-rays",
+    "=== ida ",
+    "=== binary ninja",
+    "decompiled code (ida)",
+    "decompiled code (hex-rays)",
+    "декомпилированный код (ida)",
+    "декомпилированный код (hex-rays)",
+)
+
+
+def p8_restore_contract(prompt: str) -> bool:
+    """Forever: one Ghidra C in live restore. No second dump, arbiter, or swarm."""
+    low = (prompt or "").lower()
+    for marker in _P8_SECOND_C:
+        if marker in low:
+            return False
+    if low.count("декомпилированный код (ghidra)") > 1:
+        return False
+    if "кто прав" in low or "who is right" in low:
+        return False
+    if "social swarm" in low:
+        return False
+    return True
+
+
+def director_contract(
+    verdict: RunVerdict,
+    *,
+    restore_prompt: str | None = None,
+) -> bool:
+    """Director must not ACCEPT a failed run, and must not feed a second C dump."""
+    if restore_prompt is not None and not p8_restore_contract(restore_prompt):
+        return False
     if verdict.accept and verdict.compile_ok is False:
         return False
     if verdict.accept and not verdict.identity_ok:
@@ -588,7 +669,7 @@ def review_function(
         reasons.append(
             f"fidelity {fid.get('fidelity')} drift={fid.get('drift')}"
         )
-    hits = dialect_hits(code)
+    hits = dialect_hits(code, facts=entry.get("fn_facts"))
     return FunctionVerdict(
         address=addr,
         accept=identity_ok and fidelity_ok,
@@ -653,6 +734,30 @@ def review_run(
         tu_unexpected = unexpected_algos(tu_text, "\n".join(allowed_all))
         if tu_unexpected:
             tu_reasons.append("TU unexpected " + ", ".join(tu_unexpected))
+        tu_ostream = leftover_ostream_addr_insert(tu_text)
+        if tu_ostream:
+            tu_reasons.append("restore leftover ostream_addr " + tu_ostream[0])
+        tu_overlay = leftover_ostream_overlay_insert(tu_text)
+        if tu_overlay:
+            tu_reasons.append("restore leftover ostream_overlay " + tu_overlay[0])
+        tu_concat71 = leftover_concat71_low_byte(tu_text)
+        if tu_concat71:
+            tu_reasons.append("restore leftover concat71_low " + tu_concat71[0])
+        tu_star = leftover_extra_star_stack_array(tu_text)
+        if tu_star:
+            tu_reasons.append("restore leftover extra_star " + tu_star[0])
+        tu_gs = leftover_gs_cookie_slot(tu_text)
+        if tu_gs:
+            tu_reasons.append("restore leftover gs_cookie " + tu_gs[0])
+    restored_addrs = [
+        str(r.get("address") or "")
+        for r in (restored or [])
+        if r.get("classification") in (None, "user_code")
+        and (r.get("cpp_code") or "").strip()
+    ]
+    crt_miss = leftover_crt_user_entry(functions, restored_addrs)
+    if crt_miss:
+        tu_reasons.append("restore leftover crt_entry " + crt_miss[0])
 
     identity_ok = all(f.identity_ok for f in fns) and not tu_reasons
     fidelity_ok = all(f.fidelity_ok for f in fns) if fns else True

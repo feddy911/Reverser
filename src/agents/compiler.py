@@ -145,7 +145,8 @@ SKIP_FOREVER: Sequence[tuple[str, str]] = (
         "undefined vs undefined*",
     ),
     (
-        r"invalid conversion from 'unsigned char\*' to 'char\*'",
+        r"invalid conversion from '(?:undefined\*|unsigned char\*)'"
+        r"(?: \{aka '[^']+'\})? to '(?:const )?char\*'",
         "unsigned char* vs char*",
     ),
     (

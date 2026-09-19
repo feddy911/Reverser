@@ -91,6 +91,17 @@ class TestFeaturesSmoke(unittest.TestCase):
         live = build_restore_prompt(fn, fn["ghidra_code"])
         self.assertNotIn(PCODE_SECTION_TITLE, live)
         self.assertNotIn("COPY", live)
+        poisoned = dict(fn)
+        poisoned["fn_facts"] = {
+            "stack_alloc": 64,
+            "lea_arg_slots": [-32],
+            "qword_store_slots": [-32],
+        }
+        still = build_restore_prompt(poisoned, poisoned["ghidra_code"])
+        self.assertNotIn("lea_arg", still)
+        self.assertNotIn("fn_facts", still)
+        self.assertNotIn("stack_alloc", still)
+        self.assertNotIn("qword_store", still)
         with_p = build_restore_prompt(fn, fn["ghidra_code"], pcode=fn["pcode"])
         self.assertIn(PCODE_SECTION_TITLE, with_p)
         self.assertIn("COPY", with_p)

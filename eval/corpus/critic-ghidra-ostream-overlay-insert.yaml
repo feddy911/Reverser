@@ -1,0 +1,16 @@
+id: critic-ghidra-ostream-overlay-insert
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(longlong n)
+  {
+    undefined1 local_40[40];
+    operator<<(local_40, n);
+  }
+contains:
+  - "==ghidra:overlay_insert:local_40=="
+not_contains:
+  - "==0=="
+compile: false
+notes: "Ghidra stream object as undefined1[N] used as operator<< this. Identity leftover like leftover in_RCX; sanitizer should insert through (ostream*)overlay. Mix wrap. One class, not one spelling."

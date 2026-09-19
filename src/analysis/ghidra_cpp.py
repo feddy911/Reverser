@@ -1067,6 +1067,11 @@ def rewrite_ghidra_ostream(code: str) -> str:
     s = _drop_unused_lshift_addr_assign(s)
     s = _collapse_deref_iostream_obj(s)
     s = _RE_OSTREAM_ARRAY.sub(r"undefined1 \1\2", s)
+    s = _rewrite_overlay_ostream_insert(s)
+    s = _fold_ostream_insert_chain(s)
+    s = _drop_unused_lshift_addr_assign(s)
+    s = _drop_unused_lshift_addr(s)
+    s = _collapse_deref_iostream_obj(s)
     return s
 
 
@@ -1240,6 +1245,116 @@ _RE_OSTREAM_LSHIFT_ASSIGN = re.compile(
 _RE_OSTREAM_ARRAY = re.compile(
     r"(?:std::)?basic_ostream\s*<[^\n]*>\s+([A-Za-z_]\w*)\s*(\[\s*\d+\s*\])"
 )
+_RE_UNDEF1_ARRAY_DECL = re.compile(
+    r"\bundefined1\s+([A-Za-z_]\w*)\s*\[\s*\d+\s*\]"
+)
+_RE_OVERLAY_INSERT_CALL = re.compile(
+    r"\boperator\s*<<\s*\(\s*([A-Za-z_]\w*)\s*,"
+)
+
+
+def _overlay_byte_array_names(code: str) -> set[str]:
+    return set(_RE_UNDEF1_ARRAY_DECL.findall(code or ""))
+
+
+def _simple_overlay_ident(arg: str, names: set[str]) -> str:
+    t = re.sub(r"\s+", "", (arg or "").strip())
+    t = t.strip("()")
+    if t in names:
+        return t
+    return ""
+
+
+def _rewrite_overlay_ostream_insert(s: str) -> str:
+    """Inserter this is a Ghidra stream object laid as ``undefined1 name[N]``.
+
+    Dump types ``basic_ostream local[292]`` (one object, byte-sized). The
+    decl rewrite already emits ``undefined1 local[292]``. ``operator<<(local, x)``
+    is still that object used as insert this, not a human ofstream field.
+    """
+    names = _overlay_byte_array_names(s)
+    if not names:
+        return s or ""
+    blob = _rewrite_overlay_operator_lshift(s or "", names)
+    return _rewrite_overlay_deref_lshift(blob, names)
+
+
+def _rewrite_overlay_operator_lshift(s: str, names: set[str]) -> str:
+    needle = "operator<<"
+    n = len(s)
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while True:
+        k = s.find(needle, i)
+        if k < 0:
+            break
+        t = k + len(needle)
+        while t < n and s[t] in " \t\n\r":
+            t += 1
+        if t < n and s[t] == "_":
+            i = k + 2
+            continue
+        if t < n and s[t] == "<":
+            i = k + 2
+            continue
+        if t >= n or s[t] != "(":
+            i = k + 2
+            continue
+        close_p = _match_forward(s, t, "(", ")")
+        if close_p < 0:
+            i = k + 2
+            continue
+        args = _split_top_args(s[t + 1:close_p])
+        if len(args) != 2:
+            i = k + 2
+            continue
+        ident = _simple_overlay_ident(args[0], names)
+        if not ident:
+            i = k + 2
+            continue
+        out.append(s[copied:k])
+        out.append(_lshift_insert_expr(f"(std::ostream *){ident}", args[1]))
+        copied = close_p + 1
+        i = copied
+    out.append(s[copied:])
+    return "".join(out)
+
+
+def _rewrite_overlay_deref_lshift(s: str, names: set[str]) -> str:
+    blob = s or ""
+    for name in names:
+        pat = re.compile(
+            rf"\(\s*\*\s*(?:\(\s*)?{re.escape(name)}\s*\)+\s*<<\s*\("
+        )
+        blob = pat.sub(f"(*((std::ostream *){name})) << (", blob)
+    return blob
+
+
+def leftover_ostream_overlay_insert(code: str) -> list[str]:
+    """Inserter this is a byte overlay (Ghidra stream object as T[N])."""
+    names = _overlay_byte_array_names(code)
+    if not names:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _RE_OVERLAY_INSERT_CALL.finditer(code or ""):
+        ident = m.group(1)
+        if ident in names and ident not in seen:
+            seen.add(ident)
+            out.append(ident)
+    for name in names:
+        if name in seen:
+            continue
+        if re.search(
+            rf"\(\s*\*\s*(?:\(\s*)?{re.escape(name)}\s*\)+\s*<<\s*\(",
+            code or "",
+        ):
+            seen.add(name)
+            out.append(name)
+    return out
+
+
 _RE_GMP_CALL = re.compile(r"\b(?:__g)?mpz_[A-Za-z0-9_]+\s*\(")
 _RE_MPZ_PARAM = re.compile(r"\b(?:mpz_srcptr|mpz_ptr)\s+([A-Za-z_]\w*)\s*([,)])")
 
@@ -1426,20 +1541,29 @@ def _ident_after_ostream_ptr_cast(inner: str) -> str | None:
 
 
 def _parse_addr_insert_assign(s: str, i: int) -> tuple[int, str, str] | None:
-    m = re.match(r"\s*([A-Za-z_]\w*)\s*=\s*\(&\(", s[i:])
+    m = re.match(
+        r"\s*([A-Za-z_]\w*)\s*=\s*"
+        r"(?:\(\s*(?:std::)?(?:basic_)?w?ostream(?:\s*<[^>]*>)?\s*\*\s*\)\s*)?"
+        r"(\(&\(|&\()",
+        s[i:],
+    )
     if not m:
         return None
+    wrapped = m.group(2).startswith("(")
     ident = m.group(1)
     open_inner = i + m.end() - 1
     close_inner = _match_forward(s, open_inner, "(", ")")
     if close_inner < 0:
         return None
-    if close_inner + 1 >= len(s) or s[close_inner + 1] != ")":
-        return None
+    if wrapped:
+        if close_inner + 1 >= len(s) or s[close_inner + 1] != ")":
+            return None
+        j = close_inner + 2
+    else:
+        j = close_inner + 1
     inner = s[open_inner + 1 : close_inner].strip()
     if "<<" not in inner:
         return None
-    j = close_inner + 2
     while j < len(s) and s[j] in " \t":
         j += 1
     if j < len(s) and s[j] == ";":
@@ -1447,12 +1571,216 @@ def _parse_addr_insert_assign(s: str, i: int) -> tuple[int, str, str] | None:
     return j, ident, inner
 
 
-def _parse_deref_ostream_insert(s: str, i: int) -> tuple[int, str, str] | None:
-    """(*((ostream *)id)) << rhs, (*(id)) << rhs, or (*id) << rhs."""
+def _parse_operator_insert_through(
+    s: str, i: int, current: str
+) -> tuple[int, str, str] | None:
+    """``operator<<(p, x)`` or ``q = (ostream*)operator<<(p, x)`` through temp p."""
     n = len(s)
     j = i
     while j < n and s[j] in " \t\n\r":
         j += 1
+    lhs_ident: str | None = None
+    m = re.match(r"([A-Za-z_]\w*)\s*=\s*", s[j:])
+    if m:
+        lhs_ident = m.group(1)
+        j += m.end()
+        while j < n and s[j] in " \t\n\r":
+            j += 1
+        if j < n and s[j] == "(":
+            close = _match_forward(s, j, "(", ")")
+            if close < 0:
+                return None
+            cast = s[j : close + 1]
+            if "ostream" not in cast.lower() or "*" not in cast:
+                return None
+            j = close + 1
+            while j < n and s[j] in " \t\n\r":
+                j += 1
+    if not s.startswith("operator<<", j):
+        return None
+    if j >= 2 and s[j - 2:j] == "::":
+        return None
+    t = j + len("operator<<")
+    while t < n and s[t] in " \t\n\r":
+        t += 1
+    if t < n and s[t] == "_":
+        return None
+    if t < n and s[t] == "<":
+        return None
+    if t >= n or s[t] != "(":
+        return None
+    close_p = _match_forward(s, t, "(", ")")
+    if close_p < 0:
+        return None
+    args = _split_top_args(s[t + 1:close_p])
+    if len(args) != 2:
+        return None
+    a0 = re.sub(r"\s+", "", args[0].strip()).strip("()")
+    if a0 != current:
+        return None
+    end = close_p + 1
+    while end < n and s[end] in " \t":
+        end += 1
+    if end < n and s[end] == ";":
+        end += 1
+    rhs = args[1].strip()
+    if not (rhs.startswith("(") and rhs.endswith(")")):
+        rhs = f"({rhs})"
+    return end, (lhs_ident or current), rhs
+
+
+def _consume_ostream_chain_step(
+    s: str, i: int, current: str
+) -> tuple[int, str, str] | None:
+    """Next insert through the previous addr-of inserter temp."""
+    asgn = _parse_addr_insert_assign(s, i)
+    if asgn:
+        end, ident2, inner2 = asgn
+        d = _parse_deref_ostream_insert(inner2.lstrip(), 0)
+        if d and d[1] == current:
+            stripped = inner2.lstrip()
+            tail = stripped[d[0]:]
+            return end, ident2, d[2] + tail
+    d = _parse_deref_ostream_insert(s, i)
+    if d and d[1] == current:
+        end, _name, rhs = d
+        while end < len(s) and s[end] in " \t":
+            end += 1
+        if end < len(s) and s[end] == ";":
+            end += 1
+        return end, current, rhs
+    op = _parse_operator_insert_through(s, i, current)
+    if op:
+        return op
+    return None
+
+
+def _drop_unused_ident_decl(blob: str, ident: str) -> str:
+    if not ident or re.search(rf"\b{re.escape(ident)}\b", blob) is None:
+        return blob
+    trial = re.sub(
+        rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(ident)}\s*;[ \t]*\n?",
+        "",
+        blob,
+        count=1,
+        flags=re.M,
+    )
+    if not re.search(rf"\b{re.escape(ident)}\b", trial):
+        return trial
+    return blob
+
+
+def _ident_live_after(blob: str, name: str, pos: int) -> bool:
+    """True if the value at pos is read later. A later ``name =`` kills it."""
+    for u in _ident_span_uses(blob, name):
+        if u < pos:
+            continue
+        if _at_local_decl_name(blob, u, name):
+            continue
+        if re.match(rf"{re.escape(name)}\s*=", blob[u:]):
+            return False
+        return True
+    return False
+
+
+def _fold_ostream_insert_chain(s: str) -> str:
+    """Addr-of inserter temps (including ping-pong p/q) are ``s << x << y``.
+
+    Inserter returns ``*this``. ``p = &(s << x); q = &((*p) << y)`` is one
+    chain even when p is rebound later. ``operator<<(p, z)`` on that temp is
+    the same insert.
+    """
+    blob = s or ""
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while True:
+            k = blob.find("&(", i)
+            if k < 0:
+                break
+            if k > 0 and blob[k - 1] == "&":
+                i = k + 2
+                continue
+            lhs = re.search(
+                r"([A-Za-z_]\w*)\s*=\s*"
+                r"(?:\(\s*(?:std::)?(?:basic_)?w?ostream(?:\s*<[^>]*>)?\s*\*\s*\)\s*)?"
+                r"\(?$",
+                blob[:k],
+            )
+            if not lhs:
+                i = k + 2
+                continue
+            start = lhs.start(1)
+            parsed = _parse_addr_insert_assign(blob, start)
+            if not parsed:
+                i = k + 2
+                continue
+            after, ident, inner = parsed
+            current = ident
+            pos = after
+            steps = 0
+            temps = {ident}
+            last_lhs = ident
+            while True:
+                nxt = _consume_ostream_chain_step(blob, pos, current)
+                if not nxt:
+                    break
+                pos, current, rhs = nxt
+                inner = f"{inner} << {rhs}"
+                temps.add(current)
+                last_lhs = current
+                steps += 1
+            if steps == 0:
+                i = k + 2
+                continue
+            if _ident_live_after(blob, last_lhs, pos):
+                repl = f"{last_lhs} = (&({inner}));"
+            else:
+                repl = f"{inner};"
+                temps.add(last_lhs)
+            blob = blob[:start] + repl + blob[pos:]
+            for name in temps:
+                blob = _drop_unused_ident_decl(blob, name)
+            changed = True
+            i = start
+            break
+    return blob
+
+
+def _parse_deref_ostream_insert(s: str, i: int) -> tuple[int, str, str] | None:
+    """(*((ostream *)id)) << rhs, (*(id)) << rhs, (*id) << rhs, or *id << rhs."""
+    n = len(s)
+    j = i
+    while j < n and s[j] in " \t\n\r":
+        j += 1
+    mstar = re.match(r"\*\s*([A-Za-z_]\w*)\s*<<", s[j:])
+    if mstar:
+        ident = mstar.group(1)
+        j = j + mstar.end() - 2
+        while j < n and s[j] in " \t\n\r":
+            j += 1
+        if not s.startswith("<<", j):
+            return None
+        j += 2
+        while j < n and s[j] in " \t\n\r":
+            j += 1
+        if j < n and s[j] == "(":
+            rhs_close = _match_forward(s, j, "(", ")")
+            if rhs_close < 0:
+                return None
+            rhs = s[j : rhs_close + 1]
+            end = rhs_close + 1
+        else:
+            m = re.match(
+                r"([A-Za-z_]\w*|'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\")",
+                s[j:],
+            )
+            if not m:
+                return None
+            rhs = m.group(1)
+            end = j + len(rhs)
+        return end, ident, rhs
     if j >= n or s[j] != "(":
         return None
     j += 1
@@ -1511,77 +1839,6 @@ def _parse_deref_ostream_insert(s: str, i: int) -> tuple[int, str, str] | None:
 
 def _ident_span_uses(s: str, name: str) -> list[int]:
     return [m.start() for m in re.finditer(rf"\b{re.escape(name)}\b", s)]
-
-
-def _fold_ostream_insert_chain(s: str) -> str:
-    """p = &(a << b); *p << c  is  a << b << c. Inserter returns *this."""
-    blob = s or ""
-    changed = True
-    while changed:
-        changed = False
-        i = 0
-        while True:
-            k = blob.find("(&(", i)
-            if k < 0:
-                break
-            lhs = re.search(r"([A-Za-z_]\w*)\s*=\s*$", blob[:k])
-            if not lhs:
-                i = k + 2
-                continue
-            start = lhs.start(1)
-            parsed = _parse_addr_insert_assign(blob, start)
-            if not parsed:
-                i = k + 2
-                continue
-            after_asgn, ident, inner = parsed
-            nxt = _parse_deref_ostream_insert(blob, after_asgn)
-            chained_end = None
-            chained = None
-            if nxt and nxt[1] == ident:
-                chained_end, _name, rhs = nxt
-                chained = f"{inner} << {rhs}"
-            else:
-                asgn2 = _parse_addr_insert_assign(blob, after_asgn)
-                if asgn2:
-                    end2, ident2, inner2 = asgn2
-                    d = _parse_deref_ostream_insert(inner2.lstrip(), 0)
-                    if d and d[1] == ident:
-                        stripped = inner2.lstrip()
-                        tail = stripped[d[0]:]
-                        semi = ";" if end2 > 0 and blob[end2 - 1] == ";" else ""
-                        chained_end = end2
-                        chained = f"{ident2} = (&({inner} << {d[2]}{tail})){semi}"
-            if chained_end is None or chained is None:
-                i = k + 2
-                continue
-            end = chained_end
-            uses = _ident_span_uses(blob, ident)
-            allowed: set[int] = {start}
-            for u in uses:
-                if _at_local_decl_name(blob, u, ident):
-                    allowed.add(u)
-            insert_ident = None
-            for u in uses:
-                if after_asgn <= u < end:
-                    insert_ident = u
-                    allowed.add(u)
-            if insert_ident is None or any(u not in allowed for u in uses):
-                i = k + 2
-                continue
-            blob = blob[:start] + chained + blob[end:]
-            trial = re.sub(
-                rf"^[ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(ident)}\s*;[ \t]*\n?",
-                "",
-                blob,
-                count=1,
-                flags=re.M,
-            )
-            if not re.search(rf"\b{re.escape(ident)}\b", trial):
-                blob = trial
-            changed = True
-            i = start
-            break
-    return blob
 
 
 def _drop_unused_lshift_addr(s: str) -> str:
@@ -1781,6 +2038,188 @@ def _uint_cast(expr: str, nbytes: int) -> str:
     return f"({ty})({expr})"
 
 
+_RE_INT7_SHIFT8 = re.compile(
+    r"^\(?\s*int7\s*\)\s*\(\s*"
+    r"(?:\(\s*(?:ulonglong|unsigned\s+long\s+long)\s*\)\s*)?"
+    r"(.+?)\s*>>\s*8\s*\)\s*$",
+    re.S,
+)
+_RE_INT7_CAST = re.compile(r"\(\s*int7\s*\)")
+_RE_CONCAT71_CALL = re.compile(r"\bCONCAT71\s*\(")
+_RE_UCHAR_TAIL = re.compile(
+    r"\(\s*unsigned\s+char\s*\)\s*(?:\(([^)]*)\)|([A-Za-z_]\w*|\d+))"
+)
+
+
+def _concat71_replace_low_byte(hi: str, lo: str) -> str | None:
+    """CONCAT71((int7)(w >> 8), b) is replace-low-byte of w, not a 7-byte type."""
+    m = _RE_INT7_SHIFT8.match((hi or "").strip())
+    if not m:
+        return None
+    base = m.group(1).strip().strip("()")
+    if not base:
+        return None
+    return f"(({base} & ~0xffull) | {_uint_cast(lo, 1)})"
+
+
+def _unwrap_shift8_base(operand: str) -> str | None:
+    """Operand of ``(int7)(...)`` that is ``(cast)? ident >> 8``."""
+    t = (operand or "").strip()
+    while len(t) >= 2 and t[0] == "(":
+        close = _match_forward(t, 0, "(", ")")
+        if close != len(t) - 1:
+            break
+        inner = t[1:-1].strip()
+        if not inner:
+            break
+        t = inner
+    m = re.match(
+        r"^(?:\(\s*(?:ulonglong|unsigned\s+long\s+long)\s*\)\s*)?"
+        r"([A-Za-z_]\w*)\s*>>\s*8\s*$",
+        t,
+        re.S,
+    )
+    return m.group(1) if m else None
+
+
+def _span_from_concat71_token(s: str, m: re.Match[str]) -> tuple[int, int, str, str] | None:
+    close = _match_forward(s, m.end() - 1, "(", ")")
+    if close < m.end():
+        return None
+    args = _split_call_args(s[m.end() : close])
+    if len(args) != 2:
+        return None
+    if _concat71_replace_low_byte(args[0], args[1]) is None:
+        return None
+    hm = _RE_INT7_SHIFT8.match(args[0].strip())
+    if not hm:
+        return None
+    base = hm.group(1).strip().strip("()")
+    if not re.fullmatch(r"[A-Za-z_]\w*", base):
+        return None
+    return m.start(), close + 1, base, args[1]
+
+
+def _span_from_int7_expand(s: str, m: re.Match[str]) -> tuple[int, int, str, str] | None:
+    i = m.end()
+    while i < len(s) and s[i].isspace():
+        i += 1
+    if i >= len(s) or s[i] != "(":
+        return None
+    op_close = _match_forward(s, i, "(", ")")
+    if op_close < 0:
+        return None
+    base = _unwrap_shift8_base(s[i + 1 : op_close])
+    if not base:
+        return None
+    j = op_close + 1
+    k = j
+    while k < len(s) and s[k].isspace():
+        k += 1
+    if k < len(s) and s[k] == ")":
+        peek = k + 1
+        while peek < len(s) and s[peek].isspace():
+            peek += 1
+        if re.match(r"<<\s*8\b", s[peek:]):
+            j = k + 1
+    while j < len(s) and s[j].isspace():
+        j += 1
+    sh = re.match(r"<<\s*8\b", s[j:])
+    if not sh:
+        return None
+    j += sh.end()
+    while j < len(s) and s[j].isspace():
+        j += 1
+    if j < len(s) and s[j] == ")":
+        j += 1
+    while j < len(s) and s[j].isspace():
+        j += 1
+    if j >= len(s) or s[j] != "|":
+        return None
+    j += 1
+    while j < len(s) and s[j].isspace():
+        j += 1
+    uch = _RE_UCHAR_TAIL.match(s[j:])
+    if not uch:
+        return None
+    lo = (uch.group(1) or uch.group(2) or "").strip()
+    if not lo:
+        return None
+    uchar_end = j + uch.end()
+    jscan = m.start()
+    while jscan > 0:
+        jscan -= 1
+        ch = s[jscan]
+        if ch in ";{}":
+            break
+        if ch != "(":
+            continue
+        close = _match_forward(s, jscan, "(", ")")
+        if close >= uchar_end - 1:
+            return jscan, close + 1, base, lo
+    start = m.start()
+    cast = re.search(r"\(\s*unsigned\s+long\s+long\s*\)\s*$", s[:start])
+    if cast:
+        start = cast.start()
+    return start, uchar_end, base, lo
+
+
+def _next_concat71_low_span(
+    s: str, pos: int = 0
+) -> tuple[int, int, str, str] | None:
+    n = len(s or "")
+    while pos < n:
+        m71 = _RE_CONCAT71_CALL.search(s, pos)
+        m7 = _RE_INT7_CAST.search(s, pos)
+        kind = ""
+        m: re.Match[str] | None = None
+        if m71 and (not m7 or m71.start() <= m7.start()):
+            kind, m = "71", m71
+        elif m7:
+            kind, m = "7", m7
+        if m is None:
+            return None
+        hit = (
+            _span_from_concat71_token(s, m)
+            if kind == "71"
+            else _span_from_int7_expand(s, m)
+        )
+        if hit:
+            return hit
+        pos = m.start() + 1
+    return None
+
+
+def leftover_concat71_low_byte(code: str) -> list[str]:
+    """CONCAT71((int7)(w >> 8), b) still as int7 shift-or, not (w & ~0xff) | b."""
+    seen: set[str] = set()
+    out: list[str] = []
+    blob = code or ""
+    pos = 0
+    while pos < len(blob):
+        hit = _next_concat71_low_span(blob, pos)
+        if hit is None:
+            break
+        start, end, base, _lo = hit
+        if base and base not in seen:
+            seen.add(base)
+            out.append(base)
+        pos = max(end, pos + 1)
+    return out
+
+
+def _fold_expanded_concat71_low_byte(code: str) -> str:
+    """Restorer-expanded CONCAT71 low-byte: int7 shift-or → (w & ~0xff) | b."""
+    s = code or ""
+    for _ in range(64):
+        hit = _next_concat71_low_span(s, 0)
+        if hit is None:
+            return s
+        start, end, base, lo = hit
+        s = s[:start] + f"(({base} & ~0xffull) | {_uint_cast(lo, 1)})" + s[end:]
+    return s
+
+
 def _sint_cast(expr: str, nbytes: int) -> str:
     ty = _SINT_CAST.get(nbytes, "long long")
     return f"({ty})({expr})"
@@ -1817,6 +2256,10 @@ def _expand_piece_call(kind: str, digits: str, args: list[str]) -> str | None:
         if len(args) != 2:
             return None
         hi, lo = args[0], args[1]
+        if a_n == 7 and b_n == 1:
+            replaced = _concat71_replace_low_byte(hi, lo)
+            if replaced:
+                return replaced
         return f"(({_uint_cast(hi, min(a_n, 8))} << {b_n * 8}) | {_uint_cast(lo, min(b_n, 8))})"
     if kind == "ZEXT":
         if len(args) != 1:
@@ -2074,7 +2517,11 @@ def emit_sanitized_restore(data: dict) -> None:
     raw = data.get("cpp_code") or ""
     if not str(raw).strip():
         return
-    emitted = sanitize_ghidra_cpp(raw, func_bytes=data.get("func_bytes") or b"")
+    emitted = sanitize_ghidra_cpp(
+        raw,
+        func_bytes=data.get("func_bytes") or b"",
+        fn_facts=data.get("fn_facts"),
+    )
     if emitted == raw:
         return
     data.setdefault("cpp_code_raw", raw)
@@ -3056,6 +3503,199 @@ def _strip_compiler_instrumentation(code: str) -> str:
     return t
 
 
+_RE_WORD_TY = r"(?:unsigned\s+long\s+long|long\s+long|ulonglong|longlong|undefined8)"
+_RE_EXTRASTAR_WORD_ARRAY = re.compile(
+    rf"^([ \t]*)({_RE_WORD_TY})\s+(\*[\s\*]*)([A-Za-z_]\w*)\s*\[\s*(\d+)\s*\]\s*;[ \t]*\r?$",
+    re.M,
+)
+_RE_EXTRASTAR_CAST_ASSIGN = re.compile(
+    rf"^([ \t]*)([A-Za-z_]\w*)\s*=\s*"
+    rf"\(\s*{_RE_WORD_TY}(?:\s*\*){{2,}}\s*\)\s*"
+    rf"([A-Za-z_]\w*)(\s*\[\s*0\s*\])?\s*;[ \t]*\r?\n?",
+    re.M,
+)
+_RE_WORD_STAR_CAST = re.compile(rf"\(\s*{_RE_WORD_TY}\s*\*\s*\)\s*$")
+
+
+def _star_count(raw: str) -> int:
+    return (raw or "").count("*")
+
+
+def _extra_star_word_array_names(code: str) -> dict[str, str]:
+    """Stack array of word with two or more stars: Ghidra out-param overlay."""
+    found: dict[str, str] = {}
+    for m in _RE_EXTRASTAR_WORD_ARRAY.finditer(code or ""):
+        if _star_count(m.group(3)) >= 2:
+            found[m.group(4)] = m.group(2)
+    return found
+
+
+def leftover_extra_star_stack_array(code: str) -> list[str]:
+    """``longlong ****xs[N]`` used as a word out-param, not a human pointer array."""
+    blob = code or ""
+    seen: set[str] = set()
+    out: list[str] = []
+
+    def add(name: str) -> None:
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+
+    arrays: dict[str, None] = dict.fromkeys(_extra_star_word_array_names(blob))
+    for name in arrays:
+        add(name)
+    for m in re.finditer(
+        rf"\b({_RE_WORD_TY})\s+([A-Za-z_]\w*)\s*\[\s*\d+\s*\]",
+        blob,
+    ):
+        arrays.setdefault(m.group(2), None)
+    for m in _RE_EXTRASTAR_CAST_ASSIGN.finditer(blob):
+        if m.group(3) in arrays:
+            add(m.group(3))
+    return out
+
+
+def leftover_facts_disagree(code: str, facts: object | None = None) -> list[str]:
+    """C leftover vs byte facts. Empty bag is not a reject and not a pass.
+
+    Extra-star ``T****[N]`` plus lea-arg / qword-store slots is an out-param
+    overlay, not a human pointer array. Missing facts leave extra_star as
+    the leftover; they do not invent mpz_ptr or bind T* vs U*.
+    """
+    if facts is None:
+        return []
+    lea: tuple = ()
+    qstore: tuple = ()
+    if hasattr(facts, "lea_arg_slots"):
+        if not getattr(facts, "has_byte_facts", False):
+            return []
+        lea = tuple(getattr(facts, "lea_arg_slots") or ())
+        qstore = tuple(getattr(facts, "qword_store_slots") or ())
+    elif isinstance(facts, dict):
+        try:
+            lea = tuple(int(x) for x in (facts.get("lea_arg_slots") or ()))
+            qstore = tuple(int(x) for x in (facts.get("qword_store_slots") or ()))
+            stack = int(facts.get("stack_alloc") or 0)
+        except (TypeError, ValueError):
+            return []
+        if not (stack or lea or qstore):
+            return []
+    else:
+        return []
+    extra = leftover_extra_star_stack_array(code or "")
+    if extra and (lea or qstore):
+        return extra
+    return []
+
+
+def _facts_bag_empty(facts: object | None) -> bool:
+    """True if facts are missing or have no byte slots. Not a pass token."""
+    if facts is None:
+        return True
+    if hasattr(facts, "has_byte_facts"):
+        return not bool(getattr(facts, "has_byte_facts"))
+    if isinstance(facts, dict):
+        try:
+            lea = tuple(facts.get("lea_arg_slots") or ())
+            qstore = tuple(facts.get("qword_store_slots") or ())
+            stack = int(facts.get("stack_alloc") or 0)
+        except (TypeError, ValueError):
+            return True
+        return not (stack or lea or qstore)
+    return True
+
+
+def extra_star_rewrite_permitted(code: str, facts: object | None = None) -> bool:
+    """Existing extra-star recipe. Empty bag does not veto; facts may.
+
+    Out-param overlay needs lea-arg / qword-store. Stack-alloc alone is not
+    permission. Do not invent mpz_ptr or collapse [N] to a scalar.
+    """
+    if not leftover_extra_star_stack_array(code or ""):
+        return True
+    if _facts_bag_empty(facts):
+        return True
+    return bool(leftover_facts_disagree(code, facts))
+
+
+def _drop_unused_local_decl(blob: str, name: str) -> str:
+    uses = [
+        u
+        for u in _ident_span_uses(blob, name)
+        if not _at_local_decl_name(blob, u, name)
+    ]
+    if uses:
+        return blob
+    for m in re.finditer(
+        rf"^([ \t]*[A-Za-z_:][\w:\s\*&<>,]*\b{re.escape(name)}\s*;[ \t]*\n?)",
+        blob or "",
+        re.M,
+    ):
+        return blob[: m.start()] + blob[m.end() :]
+    return blob
+
+
+def _fold_extra_star_array_temps(blob: str, names: dict[str, str]) -> str:
+    """``p = (T ***)xs; f((T *)p)`` / ``p = (T ***)xs[0]`` is the array, not a T***."""
+    s = blob or ""
+    for _ in range(64):
+        hit = None
+        for m in _RE_EXTRASTAR_CAST_ASSIGN.finditer(s):
+            if m.group(3) in names:
+                hit = m
+                break
+        if hit is None:
+            break
+        lhs, arr, idx = hit.group(2), hit.group(3), hit.group(4)
+        repl = f"{arr}[0]" if idx else arr
+        live: list[int] = []
+        for u in _ident_span_uses(s, lhs):
+            if u < hit.end():
+                continue
+            if _at_local_decl_name(s, u, lhs):
+                continue
+            if re.match(rf"{re.escape(lhs)}\s*=", s[u:]):
+                break
+            live.append(u)
+        reps: list[tuple[int, int, str]] = []
+        for u in live:
+            end_id = u + len(lhs)
+            cast = _RE_WORD_STAR_CAST.search(s[:u])
+            if cast and not idx:
+                reps.append((cast.start(), end_id, repl))
+            else:
+                reps.append((u, end_id, repl))
+        reps.append((hit.start(), hit.end(), ""))
+        reps.sort(key=lambda t: -t[0])
+        new = s
+        for a, b, text in reps:
+            new = new[:a] + text + new[b:]
+        if new == s:
+            break
+        s = new
+        s = _drop_unused_local_decl(s, lhs)
+    return s
+
+
+def _rewrite_extra_star_word_arrays(
+    code: str, facts: object | None = None
+) -> str:
+    """Strip extra stars on word stack arrays; fold T*** temps back to the array."""
+    if not extra_star_rewrite_permitted(code, facts):
+        return code or ""
+    names = _extra_star_word_array_names(code or "")
+    if not names:
+        return code or ""
+
+    def repl_decl(m: re.Match[str]) -> str:
+        if _star_count(m.group(3)) < 2:
+            return m.group(0)
+        return f"{m.group(1)}{m.group(2)} {m.group(4)}[{m.group(5)}];"
+
+    blob = _RE_EXTRASTAR_WORD_ARRAY.sub(repl_decl, code or "")
+    return _fold_extra_star_array_temps(blob, names)
+
+
 _RE_INT_ARRAY_DECL = re.compile(
     r"^([ \t]*)((?:unsigned\s+)?(?:int|uint|undefined4|uint32_t))\s+"
     r"([A-Za-z_]\w*)\s*\[\s*(\d+)\s*\]\s*;[ \t]*$",
@@ -3185,6 +3825,48 @@ def _iter_dead_array_homes(
     return found
 
 
+_RE_UNDEF1_32_DECL = re.compile(
+    r"^[ \t]*undefined1\s+([A-Za-z_]\w*)\s*\[\s*32\s*\]\s*;[ \t]*\r?$",
+    re.M,
+)
+
+
+def leftover_gs_cookie_slot(code: str) -> list[str]:
+    """Unused ``undefined1 name[32]`` is GS/RTC cookie pad, not a human buffer.
+
+    Used overlay arrays (``padding._0_4_`` / RTC args) stay. Do not invent
+    ofstream fields. Do not invent mpz_ptr.
+    """
+    blob = code or ""
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _RE_UNDEF1_32_DECL.finditer(blob):
+        name = m.group(1)
+        extra = [
+            u
+            for u in _ident_span_uses(blob, name)
+            if not (m.start() <= u < m.end())
+        ]
+        if extra or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def _drop_unused_gs_cookie_slots(code: str) -> str:
+    blob = code or ""
+    for name in leftover_gs_cookie_slot(blob):
+        blob = re.sub(
+            rf"^[ \t]*undefined1\s+{re.escape(name)}\s*\[\s*32\s*\]\s*;[ \t]*\r?\n?",
+            "",
+            blob,
+            count=1,
+            flags=re.M,
+        )
+    return blob
+
+
 def leftover_dead_array_home(code: str) -> list[str]:
     """Array names still unused while a same-width int home is the loop load."""
     seen: set[str] = set()
@@ -3259,7 +3941,10 @@ def _rewrite_local_array_imm_stores(code: str, func_bytes: bytes | bytearray) ->
 
 
 def sanitize_ghidra_cpp(
-    code: str, *, func_bytes: bytes | bytearray | None = None
+    code: str,
+    *,
+    func_bytes: bytes | bytearray | None = None,
+    fn_facts: object | None = None,
 ) -> str:
     """Rewrite Ghidra type spellings and member-call syntax into parseable C++."""
     t = (code or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -3352,8 +4037,10 @@ def sanitize_ghidra_cpp(
     t = _outside_strings(t, _rewrite_stack_overlay)
     t = _outside_strings(t, _rewrite_in_stack_temps)
     t = _outside_strings(t, _strip_compiler_instrumentation)
+    t = _drop_unused_gs_cookie_slots(t)
     t = _rewrite_msx64_concat_stack_ptr(t)
     t = _outside_strings(t, _rewrite_ghidra_piece_ops)
+    t = _outside_strings(t, _fold_expanded_concat71_low_byte)
     t = _rewrite_msx64_concat_stack_ptr(t)
     t = _outside_strings(t, _rewrite_ghidra_func_ops)
     t = _outside_strings(t, _rewrite_bool_xor)
@@ -3362,5 +4049,12 @@ def sanitize_ghidra_cpp(
     t = _rewrite_local_array_elem_inits(t)
     t = _rewrite_local_array_loop_index(t)
     t = _rewrite_local_array_imm_stores(t, func_bytes or b"")
+    facts = fn_facts
+    blob = bytes(func_bytes or b"")
+    if facts is None and blob:
+        from src.analysis.fn_facts import fn_facts_from_dump_entry
+
+        facts = fn_facts_from_dump_entry({}, func_bytes=blob)
+    t = _rewrite_extra_star_word_arrays(t, facts=facts)
     t = _outside_strings(t, lambda chunk: re.sub(r"\n[ \t]*\n+", "\n", chunk))
     return t

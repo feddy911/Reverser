@@ -10,11 +10,22 @@ ghidra_cpp: |
   {
     return CONCAT71((int7)x, y);
   }
+  unsigned long long put_lo(ulonglong w, char y)
+  {
+    return CONCAT71((int7)((ulonglong)w >> 8), y);
+  }
+  unsigned long long put_lo_exp(ulonglong w, char y)
+  {
+    return (((unsigned long long)((int7)((ulonglong)w >> 8)) << 8) | (unsigned char)(y));
+  }
 contains:
   - "<< 8"
   - "int7"
+  - "& ~0xffull"
+  - "(unsigned char)(y)"
 not_contains:
   - "CONCAT71"
   - "struct int7"
+  - "(int7)((ulonglong)w >> 8)"
 compile: true
-notes: "Ghidra 7-byte signed type; CONCAT may leave an int7 cast. Alias like undefined7."
+notes: "Ghidra 7-byte signed type; CONCAT71 may leave an int7 cast. CONCAT71((int7)(w >> 8), b) is replace-low-byte of w, not a human 7-byte value. Mix wrap."

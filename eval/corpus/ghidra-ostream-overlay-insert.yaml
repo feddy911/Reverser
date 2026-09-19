@@ -1,0 +1,21 @@
+id: ghidra-ostream-overlay-insert
+profile: gcc_pe_x64
+recipe: sanitize
+gcc_fingerprint: "no matching function for call to 'operator<<\\(undefined1 \\["
+gcc_probe:
+  - "no matching function for call to 'operator<<(undefined1 [292], longlong&)'"
+ghidra_cpp: |
+  void wrap(longlong n)
+  {
+    std::basic_ostream<char, std::char_traits<char>> local_40[40];
+    operator<<(local_40, n);
+  }
+contains:
+  - "undefined1 local_40[40]"
+  - "(std::ostream *)local_40"
+  - "<< ("
+not_contains:
+  - "operator<<(local_40"
+  - "ofstream"
+compile: true
+notes: "Ghidra lays a stream object as T name[N]. Decl rewrite already emits undefined1 name[N]; leftover operator<<(name, x) is insert this on that overlay, not a human ofstream field. Mix wrap."

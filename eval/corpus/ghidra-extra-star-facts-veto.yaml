@@ -1,0 +1,23 @@
+id: ghidra-extra-star-facts-veto
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+fn_facts:
+  stack_alloc: 64
+ghidra_cpp: |
+  void helper(longlong *out);
+  void wrap(void)
+  {
+    longlong ***p;
+    longlong ****xs[8];
+    p = (longlong ***)xs;
+    helper((longlong *)p);
+    (void)xs[0];
+  }
+contains:
+  - "longlong ****xs[8]"
+not_contains:
+  - "longlong xs[8]"
+  - "mpz"
+compile: false
+notes: "Stack-alloc alone is not permission for extra-star fold. Facts veto, leftover stays. Empty bag would still apply the recipe. Mix wrap. Not mpz_ptr. Do not collapse [N]."

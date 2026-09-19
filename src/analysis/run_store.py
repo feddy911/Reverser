@@ -86,11 +86,68 @@ def _started_at(run_dir: Path) -> str:
     return m.group(1) if m else run_dir.name
 
 
-def _classify_errors(errors: Sequence[Dict[str, str]]) -> Dict[str, Any]:
+_LEFTOVER_CASE_MARKERS = (
+    "ostream-addr-insert",
+    "ostream-overlay-insert",
+    "dead-array-home",
+    "concat-shift",
+    "concat71-low",
+    "extra-star-stack-array",
+    "gs-cookie-slot",
+)
+
+
+def _classify_errors(
+    errors: Sequence[Dict[str, str]],
+    *,
+    tu_text: str = "",
+) -> Dict[str, Any]:
     from src.agents.compiler import match_errors
+    from src.analysis.ghidra_cpp import (
+        leftover_concat71_low_byte,
+        leftover_extra_star_stack_array,
+        leftover_gs_cookie_slot,
+        leftover_ostream_addr_insert,
+        leftover_ostream_overlay_insert,
+    )
 
     decision = match_errors(list(errors or []))
     rows: List[Dict[str, str]] = []
+    for tok in leftover_ostream_addr_insert(tu_text):
+        rows.append({
+            "message": tok,
+            "kind": "leftover",
+            "reason": "ostream_addr",
+        })
+        break
+    for name in leftover_ostream_overlay_insert(tu_text):
+        rows.append({
+            "message": name,
+            "kind": "leftover",
+            "reason": "ostream_overlay",
+        })
+        break
+    for name in leftover_concat71_low_byte(tu_text):
+        rows.append({
+            "message": name,
+            "kind": "leftover",
+            "reason": "concat71_low",
+        })
+        break
+    for name in leftover_extra_star_stack_array(tu_text):
+        rows.append({
+            "message": name,
+            "kind": "leftover",
+            "reason": "extra_star",
+        })
+        break
+    for name in leftover_gs_cookie_slot(tu_text):
+        rows.append({
+            "message": name,
+            "kind": "leftover",
+            "reason": "gs_cookie",
+        })
+        break
     for hit in decision.skip_forever:
         rows.append({
             "message": hit.message,
@@ -98,19 +155,116 @@ def _classify_errors(errors: Sequence[Dict[str, str]]) -> Dict[str, Any]:
             "reason": hit.reason,
         })
     for hit in decision.known:
+        joined = ",".join(hit.case_ids)
+        kind = "leftover" if any(m in joined for m in _LEFTOVER_CASE_MARKERS) else "known"
+        reason = "ostream_addr" if "ostream-addr-insert" in joined else joined
+        if kind == "leftover" and "ostream-overlay-insert" in joined:
+            reason = "ostream_overlay"
+        if kind == "leftover" and "dead-array" in joined:
+            reason = "dead_array"
+        if kind == "leftover" and "concat-shift" in joined:
+            reason = "concat_shift"
+        if kind == "leftover" and "concat71-low" in joined:
+            reason = "concat71_low"
+        if kind == "leftover" and "extra-star-stack-array" in joined:
+            reason = "extra_star"
+        if kind == "leftover" and "gs-cookie-slot" in joined:
+            reason = "gs_cookie"
         rows.append({
             "message": hit.message,
-            "kind": "known",
-            "reason": ",".join(hit.case_ids),
+            "kind": kind,
+            "reason": reason,
         })
     for msg in decision.unknown:
         rows.append({"message": msg, "kind": "unknown", "reason": ""})
+    leftover_n = sum(1 for r in rows if r["kind"] == "leftover")
     return {
         "rows": rows,
         "n_unknown": len(decision.unknown),
+        "n_leftover": leftover_n,
         "skip_forever": decision.skip_forever_reasons,
         "known_ids": decision.known_ids,
     }
+
+
+def build_analysis_stack(
+    errors: Sequence[Dict[str, str]],
+    *,
+    tu_text: str = "",
+    disasm_facts: Sequence[Any] | None = None,
+    restored: Sequence[Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    """Classified gcc / leftover bag for planning. Not a recipe catalog."""
+    classified = _classify_errors(errors, tu_text=tu_text)
+    rows: List[Dict[str, str]] = list(classified["rows"])
+    if restored:
+        from src.analysis.ghidra_cpp import leftover_facts_disagree
+
+        for rec in restored:
+            names = leftover_facts_disagree(
+                rec.get("cpp_code") or tu_text,
+                rec.get("fn_facts"),
+            )
+            if names:
+                rows.append({
+                    "message": names[0],
+                    "kind": "leftover",
+                    "reason": "facts_disagree",
+                })
+                break
+    counts: Dict[str, int] = {}
+    for row in rows:
+        counts[row["kind"]] = counts.get(row["kind"], 0) + 1
+    leftover_n = sum(1 for r in rows if r["kind"] == "leftover")
+    out: Dict[str, Any] = {
+        "n": len(rows),
+        "counts": counts,
+        "n_unknown": classified["n_unknown"],
+        "n_leftover": leftover_n,
+        "skip_forever": classified["skip_forever"],
+        "known_ids": classified["known_ids"],
+        "items": rows,
+    }
+    if disasm_facts is not None:
+        items: List[Dict[str, Any]] = []
+        keep = (
+            "addr",
+            "size",
+            "callees",
+            "stack_alloc",
+            "lea_arg_slots",
+            "qword_store_slots",
+            "source",
+            "has_byte_facts",
+        )
+        for raw in disasm_facts:
+            if hasattr(raw, "to_dict"):
+                payload = raw.to_dict()
+            elif isinstance(raw, dict):
+                payload = {k: raw[k] for k in keep if k in raw}
+            else:
+                continue
+            dumped = json.dumps(payload)
+            if "****" in dumped or "ghidra_code" in dumped or "cpp_code" in dumped:
+                continue
+            items.append(payload)
+        out["disasm_facts"] = {
+            "opt_in": True,
+            "n": len(items),
+            "n_byte": sum(1 for i in items if i.get("has_byte_facts")),
+            "items": items,
+        }
+    return out
+
+
+def write_analysis_stack(run_dir: Path, stack: Dict[str, Any]) -> Path:
+    path = Path(run_dir) / "analysis_stack.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(stack, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return path
 
 
 def record_run(
@@ -125,7 +279,24 @@ def record_run(
     critic = _load_json(run_dir / "critic.json") or {}
     compile_rep = _load_json(run_dir / "compile.json") or {}
     binary_info = _load_json(run_dir / "binary_info.json") or {}
-    classified = _classify_errors(compile_rep.get("errors") or [])
+    tu_text = ""
+    tu_path = run_dir / "restored_final.cpp"
+    if tu_path.exists():
+        tu_text = tu_path.read_text(encoding="utf-8", errors="replace")
+    classified = _classify_errors(compile_rep.get("errors") or [], tu_text=tu_text)
+    restored = _load_json(run_dir / "restored.json") or []
+    fact_rows = [
+        r.get("fn_facts")
+        for r in restored
+        if isinstance(r, dict) and isinstance(r.get("fn_facts"), dict)
+    ]
+    stack_kw: Dict[str, Any] = {}
+    if fact_rows:
+        stack_kw["disasm_facts"] = fact_rows
+        stack_kw["restored"] = restored
+    write_analysis_stack(run_dir, build_analysis_stack(
+        compile_rep.get("errors") or [], tu_text=tu_text, **stack_kw
+    ))
     compile_m = metrics.get("compile") or {}
     llm = metrics.get("llm") or {}
     fid = metrics.get("fidelity") or {}

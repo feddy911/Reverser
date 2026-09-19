@@ -1,0 +1,26 @@
+id: critic-ghidra-extra-star-facts-disagree
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+fn_facts:
+  stack_alloc: 64
+  lea_arg_slots: [-32]
+  qword_store_slots: [-32]
+ghidra_cpp: |
+  void helper(longlong *out);
+  void wrap(void)
+  {
+    longlong ***p;
+    longlong ****xs[8];
+    p = (longlong ***)xs;
+    helper((longlong *)p);
+    (void)xs[0];
+  }
+contains:
+  - "==ghidra:facts_disagree:xs=="
+  - "==ghidra:extra_star:xs=="
+not_contains:
+  - "==0=="
+  - "mpz"
+compile: false
+notes: "Byte facts (lea arg / qword store) disagree with T****[N] overlay. Empty bag is not this class. Mix wrap. Not T* vs Rec*. Not mpz_ptr."

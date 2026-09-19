@@ -199,6 +199,7 @@ def vary_case(case: CorpusCase, *, prefix: str = "v") -> Tuple[CorpusCase, Dict[
         requires=list(case.requires),
         guessed_name=apply_ident_map(case.guessed_name, mapping) or "f",
         extra_functions=extras,
+        fn_facts=dict(case.fn_facts),
         notes="identifier variation of " + case.id,
     )
     return varied, mapping

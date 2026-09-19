@@ -156,6 +156,92 @@ def looks_like_user_restore_name(name: str) -> bool:
     return "_" in base
 
 
+def _norm_fn_addr(addr: object) -> str:
+    a = str(addr or "").strip().lower()
+    if not a:
+        return ""
+    try:
+        if a.startswith("0x"):
+            return "0x" + format(int(a, 16), "x")
+        return "0x" + format(int(a, 16), "x")
+    except ValueError:
+        return a
+
+
+_CRT_ENTRY_NAMES = frozenset({
+    "mainCRTStartup",
+    "__tmainCRTStartup",
+    "WinMainCRTStartup",
+    "wWinMainCRTStartup",
+    "__scrt_common_main",
+    "__scrt_common_main_seh",
+})
+
+
+def crt_user_entry_addrs(functions: object) -> list[str]:
+    """User FUN_ addresses reached from named CRT startup. Empty if no CRT.
+
+    Walks dump callees through runtime-noise / CRT names. First non-thunk
+    FUN_/user-shaped callee is the entry the restored set must keep. Not a
+    sample identifier: the dump already named the CRT stub.
+    """
+    by_addr: dict[str, dict] = {}
+    starts: list[dict] = []
+    for f in functions or []:
+        if not isinstance(f, dict):
+            continue
+        addr = _norm_fn_addr(f.get("address"))
+        if addr:
+            by_addr[addr] = f
+        name = str(f.get("name") or "").strip()
+        if name in _CRT_ENTRY_NAMES:
+            starts.append(f)
+    if not starts:
+        return []
+    found: list[str] = []
+    seen: set[str] = set()
+    queue = list(starts)
+    while queue:
+        cur = queue.pop(0)
+        for raw in cur.get("callees") or []:
+            addr = _norm_fn_addr(raw)
+            if not addr or addr in seen:
+                continue
+            seen.add(addr)
+            child = by_addr.get(addr)
+            if not child:
+                continue
+            cname = str(child.get("name") or "").strip()
+            if cname in _CRT_ENTRY_NAMES or is_runtime_noise(cname):
+                queue.append(child)
+                continue
+            if cname.startswith("thunk_"):
+                continue
+            if child.get("lib_matched") in (True, 1, "true"):
+                continue
+            if looks_like_user_restore_name(cname) or cname.startswith("FUN_"):
+                if addr not in found:
+                    found.append(addr)
+                continue
+            queue.append(child)
+    return found
+
+
+def leftover_crt_user_entry(
+    functions: object,
+    restored_addrs: object,
+) -> list[str]:
+    """CRT reached a user FUN_ and none of those addresses were restored."""
+    want = crt_user_entry_addrs(functions)
+    if not want:
+        return []
+    have = {_norm_fn_addr(a) for a in (restored_addrs or [])}
+    have.discard("")
+    if any(a in have for a in want):
+        return []
+    return want
+
+
 # Ghidra / IAT external → a C++ call ident. Empty = still anonymous FUN_/thunk.
 _RE_FOLD_OPERATOR = re.compile(
     r"operator\s*(?:<<|>>|\+\+|--|->\*?|\(\)|\[\]|==|!=|<=|>=|[+\-*/%^&|~!=<>])"

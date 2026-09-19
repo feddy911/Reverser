@@ -643,6 +643,14 @@ def run(config: AppConfig) -> int:
                     data["func_bytes"] = read_va(config.binary_path, va, sz)
                 except Exception:
                     data["func_bytes"] = b""
+                from src.analysis.fn_facts import attach_fn_facts
+
+                attach_fn_facts(
+                    data,
+                    s,
+                    func_bytes=data.get("func_bytes") or b"",
+                    enabled=bool(config.use_disasm_facts),
+                )
                 emit_sanitized_restore(data)
                 data["cpp_code"] = repair_calls_from_dump(
                     data.get("cpp_code") or "",
@@ -1038,6 +1046,33 @@ def run(config: AppConfig) -> int:
                     metrics.compile_skipped = crep.skipped_reason
                     payload["assembled_ok"] = assembled_ok
                     _save_json(run_dir / "compile.json", payload)
+                    try:
+                        from src.analysis.run_store import (
+                            build_analysis_stack,
+                            write_analysis_stack,
+                        )
+
+                        tu_src = ""
+                        if source_cpp.exists():
+                            tu_src = source_cpp.read_text(
+                                encoding="utf-8", errors="replace"
+                            )
+                        facts_rows = [
+                            r.get("fn_facts")
+                            for r in user_parts
+                            if isinstance(r.get("fn_facts"), dict)
+                        ]
+                        write_analysis_stack(
+                            run_dir,
+                            build_analysis_stack(
+                                crep.errors or [],
+                                tu_text=tu_src,
+                                disasm_facts=facts_rows or None,
+                                restored=user_parts if facts_rows else None,
+                            ),
+                        )
+                    except Exception as exc:
+                        logger.warning("analysis stack failed: %s", exc)
                     print()
                     print("=== COMPILE VERIFY ===")
                     if crep.skipped_reason and not crep.attempted:

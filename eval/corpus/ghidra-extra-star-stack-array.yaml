@@ -1,0 +1,35 @@
+id: ghidra-extra-star-stack-array
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  void helper(longlong *a, longlong *b);
+  void wrap(void)
+  {
+    longlong ***p;
+    longlong ***q;
+    longlong ****xs[8];
+    longlong ****ys[7];
+    q = (longlong ***)ys;
+    p = (longlong ***)xs;
+    helper((longlong *)p, (longlong *)q);
+    p = (longlong ***)xs[0];
+    q = (longlong ***)ys[0];
+    (void)p;
+    (void)q;
+    (void)xs[0];
+    (void)ys[0];
+  }
+contains:
+  - "longlong xs[8]"
+  - "longlong ys[7]"
+  - "helper(xs, ys)"
+  - "(void)xs[0]"
+  - "(void)ys[0]"
+not_contains:
+  - "longlong ****"
+  - "(longlong ***)xs"
+  - "(longlong *)p"
+  - "mpz"
+compile: true
+notes: "Ghidra types a word out-param as T ****name[N] then p = (T ***)name; f((T *)p). Extra stars are the overlay, not a human pointer array. Mix wrap. Do not collapse [N] to a scalar. Not mpz_ptr."

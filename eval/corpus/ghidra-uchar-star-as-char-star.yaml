@@ -1,9 +1,10 @@
 id: ghidra-uchar-star-as-char-star
 profile: gcc_pe_x64
 recipe: sanitize
-gcc_fingerprint: "invalid conversion from 'unsigned char\\*' to 'char\\*'"
+gcc_fingerprint: "invalid conversion from '(?:undefined\\*|unsigned char\\*)'(?: \\{aka '[^']+'\\})? to '(?:const )?char\\*'"
 gcc_probe:
   - "invalid conversion from 'unsigned char*' to 'char*' [-fpermissive]"
+  - "invalid conversion from 'undefined*' {aka 'unsigned char*'} to 'const char*' [-fpermissive]"
 ghidra_cpp: |
   void take_p(unsigned char *src, char **dst)
   {

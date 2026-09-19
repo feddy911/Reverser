@@ -19,6 +19,7 @@ from src.agents.critic import (
     ROLE_RANK,
     dialect_hits,
     director_contract,
+    p8_restore_contract,
     prefer_dump_if_stub,
     review_compile_fix,
     review_function,
@@ -581,6 +582,17 @@ class TestCompilerAgent(unittest.TestCase):
         )
         self.assertFalse(decision.need_llm)
         self.assertIn("unsigned char* vs char*", decision.skip_forever_reasons)
+        aka = match_errors(
+            [{
+                "message": (
+                    "invalid conversion from 'undefined*' "
+                    "{aka 'unsigned char*'} to 'const char*' [-fpermissive]"
+                ),
+            }],
+            cases=[],
+        )
+        self.assertFalse(aka.need_llm)
+        self.assertIn("unsigned char* vs char*", aka.skip_forever_reasons)
 
     def test_skip_forever_size_type_vs_vector_star(self):
         decision = match_errors(
@@ -1428,6 +1440,429 @@ class TestCritic(unittest.TestCase):
         self.assertTrue(ok.identity_ok)
         self.assertFalse(any(h.kind == "ostream" for h in dialect_hits(human)))
 
+    def test_tu_ostream_addr_leftover_rejects_run(self):
+        clean = (
+            "void wrap(void)\n"
+            "{\n"
+            "  std::cout << \"n\";\n"
+            "}\n"
+        )
+        tu = (
+            "void wrap(void)\n"
+            "{\n"
+            "  std::ostream *p;\n"
+            "  p = (&((*(std::cout)) << (\"n\")));\n"
+            "}\n"
+        )
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "cpp_code": clean,
+            "literals": ["n"],
+            "ext_calls": [],
+            "ghidra_code": clean,
+            "compile_ok": True,
+        }]
+        verdict = review_run(
+            restored,
+            tu_text=tu,
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertFalse(verdict.identity_ok)
+        self.assertFalse(verdict.accept)
+        self.assertTrue(any("ostream_addr" in r for r in verdict.reasons))
+        self.assertTrue(director_contract(verdict))
+
+    def test_leftover_concat71_low_is_identity_fail(self):
+        leftover = (
+            "unsigned long long wrap(ulonglong uVar2)\n"
+            "{\n"
+            "  unsigned long long uVar1;\n"
+            "  uVar1 = (((unsigned long long)((int7)((ulonglong)uVar2 >> 8)) << 8)"
+            " | (unsigned char)(1));\n"
+            "  return uVar1;\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any("restore leftover concat71_low uVar2" in r for r in verdict.reasons)
+        )
+        self.assertTrue(
+            any(
+                h.source == "ghidra" and h.kind == "concat71_low" and h.token == "uVar2"
+                for h in dialect_hits(leftover)
+            )
+        )
+        human = (
+            "unsigned long long wrap(ulonglong uVar2)\n"
+            "{\n"
+            "  unsigned long long uVar1;\n"
+            "  uVar1 = ((uVar2 & ~0xffull) | (unsigned char)(1));\n"
+            "  return uVar1;\n"
+            "}\n"
+        )
+        ok = review_function(entry, human, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(any(h.kind == "concat71_low" for h in dialect_hits(human)))
+        mix = "unsigned long long wrap(int7 x, char y) { return CONCAT71((int7)x, y); }\n"
+        self.assertFalse(any(h.kind == "concat71_low" for h in dialect_hits(mix)))
+        tu = leftover
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "cpp_code": human,
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+            "compile_ok": True,
+        }]
+        run = review_run(
+            restored,
+            tu_text=tu,
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertFalse(run.identity_ok)
+        self.assertFalse(run.accept)
+        self.assertTrue(any("concat71_low" in r for r in run.reasons))
+        self.assertTrue(director_contract(run))
+
+    def test_leftover_extra_star_stack_array_is_identity_fail(self):
+        leftover = (
+            "void helper(longlong *out);\n"
+            "void wrap(void)\n"
+            "{\n"
+            "  longlong ***p;\n"
+            "  longlong ****xs[8];\n"
+            "  p = (longlong ***)xs;\n"
+            "  helper((longlong *)p);\n"
+            "  (void)xs[0];\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any("restore leftover extra_star xs" in r for r in verdict.reasons)
+        )
+        self.assertTrue(
+            any(
+                h.source == "ghidra" and h.kind == "extra_star" and h.token == "xs"
+                for h in dialect_hits(leftover)
+            )
+        )
+        human = (
+            "void helper(longlong *out);\n"
+            "void wrap(void)\n"
+            "{\n"
+            "  longlong xs[8];\n"
+            "  helper(xs);\n"
+            "  (void)xs[0];\n"
+            "}\n"
+        )
+        ok = review_function(entry, human, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(any(h.kind == "extra_star" for h in dialect_hits(human)))
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "cpp_code": human,
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+            "compile_ok": True,
+        }]
+        run = review_run(
+            restored,
+            tu_text=leftover,
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertFalse(run.identity_ok)
+        self.assertFalse(run.accept)
+        self.assertTrue(any("extra_star" in r for r in run.reasons))
+        self.assertTrue(director_contract(run))
+
+    def test_leftover_gs_cookie_slot_is_identity_fail(self):
+        leftover = (
+            "void wrap(void)\n"
+            "{\n"
+            "  undefined1 local_40[32];\n"
+            "  longlong n;\n"
+            "  n = 1;\n"
+            "  (void)n;\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any("restore leftover gs_cookie local_40" in r for r in verdict.reasons)
+        )
+        self.assertTrue(
+            any(
+                h.source == "compiler" and h.kind == "gs_cookie" and h.token == "local_40"
+                for h in dialect_hits(leftover)
+            )
+        )
+        human = (
+            "void wrap(void)\n"
+            "{\n"
+            "  longlong n;\n"
+            "  n = 1;\n"
+            "  (void)n;\n"
+            "}\n"
+        )
+        ok = review_function(entry, human, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(any(h.kind == "gs_cookie" for h in dialect_hits(human)))
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "cpp_code": human,
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+            "compile_ok": True,
+        }]
+        run = review_run(
+            restored,
+            tu_text=leftover,
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertFalse(run.identity_ok)
+        self.assertFalse(run.accept)
+        self.assertTrue(any("gs_cookie" in r for r in run.reasons))
+        self.assertTrue(director_contract(run))
+
+    def test_leftover_facts_disagree_is_identity_fail(self):
+        leftover = (
+            "void helper(longlong *out);\n"
+            "void wrap(void)\n"
+            "{\n"
+            "  longlong ***p;\n"
+            "  longlong ****xs[8];\n"
+            "  p = (longlong ***)xs;\n"
+            "  helper((longlong *)p);\n"
+            "  (void)xs[0];\n"
+            "}\n"
+        )
+        wrap_facts = {
+            "stack_alloc": 64,
+            "lea_arg_slots": [-32],
+            "qword_store_slots": [-32],
+        }
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+            "fn_facts": wrap_facts,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any("restore leftover facts_disagree xs" in r for r in verdict.reasons)
+        )
+        self.assertTrue(
+            any(
+                h.source == "ghidra" and h.kind == "facts_disagree" and h.token == "xs"
+                for h in dialect_hits(leftover, facts=wrap_facts)
+            )
+        )
+        self.assertFalse(
+            any(h.kind == "facts_disagree" for h in dialect_hits(leftover))
+        )
+        human = (
+            "void helper(longlong *out);\n"
+            "void wrap(void)\n"
+            "{\n"
+            "  longlong xs[8];\n"
+            "  helper(xs);\n"
+            "  (void)xs[0];\n"
+            "}\n"
+        )
+        ok = review_function({**entry, "fn_facts": wrap_facts}, human, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(
+            any(h.kind == "facts_disagree" for h in dialect_hits(human, facts=wrap_facts))
+        )
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "cpp_code": leftover,
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+            "fn_facts": wrap_facts,
+            "compile_ok": True,
+        }]
+        run = review_run(
+            restored,
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertFalse(run.identity_ok)
+        self.assertFalse(run.accept)
+        self.assertTrue(any("facts_disagree" in r for r in run.reasons))
+        self.assertTrue(director_contract(run))
+
+    def test_leftover_ostream_overlay_insert_is_identity_fail(self):
+        leftover = (
+            "void wrap(longlong n)\n"
+            "{\n"
+            "  undefined1 local_40[40];\n"
+            "  operator<<(local_40, n);\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(any("restore leftover ostream_overlay" in r for r in verdict.reasons))
+        self.assertTrue(
+            any(
+                h.source == "ghidra" and h.kind == "overlay_insert"
+                for h in dialect_hits(leftover)
+            )
+        )
+        human = (
+            "void wrap(longlong n)\n"
+            "{\n"
+            "  undefined1 local_40[40];\n"
+            "  (*((std::ostream *)local_40)) << (n);\n"
+            "}\n"
+        )
+        ok = review_function(entry, human, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(any(h.kind == "overlay_insert" for h in dialect_hits(human)))
+        tu = leftover
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "cpp_code": human,
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+            "compile_ok": True,
+        }]
+        run = review_run(
+            restored,
+            tu_text=tu,
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertFalse(run.identity_ok)
+        self.assertFalse(run.accept)
+        self.assertTrue(any("ostream_overlay" in r for r in run.reasons))
+        self.assertTrue(director_contract(run))
+
+    def test_crt_user_entry_missing_is_identity_fail(self):
+        dump = [
+            {
+                "address": "0x140001000",
+                "name": "mainCRTStartup",
+                "callees": ["0x140002000"],
+                "lib_matched": False,
+            },
+            {
+                "address": "0x140002000",
+                "name": "FUN_140002000",
+                "callees": [],
+                "lib_matched": False,
+            },
+        ]
+        other = {
+            "classification": "user_code",
+            "address": "0x140003000",
+            "guessed_name": "wrap",
+            "ghidra_name": "FUN_140003000",
+            "name": "FUN_140003000",
+            "cpp_code": 'void FUN_140003000(void) { puts("k"); }\n',
+            "literals": ["k"],
+            "ext_calls": [],
+            "ghidra_code": 'void FUN_140003000(void) { puts("k"); }\n',
+            "compile_ok": True,
+        }
+        miss = review_run(
+            [other],
+            functions=dump,
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertFalse(miss.identity_ok)
+        self.assertTrue(any("crt_entry" in r for r in miss.reasons))
+        kept = dict(other)
+        kept["address"] = "0x140002000"
+        kept["name"] = "FUN_140002000"
+        kept["ghidra_name"] = "FUN_140002000"
+        kept["cpp_code"] = 'void FUN_140002000(void) { puts("k"); }\n'
+        kept["ghidra_code"] = 'void FUN_140002000(void) { puts("k"); }\n'
+        ok = review_run(
+            [kept],
+            functions=dump,
+            compile_ok=True,
+            assembled_ok=True,
+        )
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(any("crt_entry" in r for r in ok.reasons))
+
     def test_restore_ellipsis_stub_is_identity_fail(self):
         entry = {
             "address": "0x1",
@@ -1591,6 +2026,45 @@ class TestCritic(unittest.TestCase):
         self.assertFalse(director_contract(bad))
         ok = RunVerdict(accept=True, compile_ok=True, identity_ok=True, fidelity_ok=True)
         self.assertTrue(director_contract(ok))
+
+    def test_p8_forbids_second_decompiler_c_and_arbiter(self):
+        from src.agents.critic import RunVerdict
+        from src.agents.restorer import USER_PROMPT, build_restore_prompt
+        from src.pipeline.runner import GHIDRA_CACHE_KEY, LLM_PROMPT_VER
+
+        live = build_restore_prompt(
+            {
+                "address": "0x140001000",
+                "name": "wrap",
+                "ghidra_name": "FUN_wrap",
+                "size": 16,
+                "ida_code": "int wrap() { return 1; }\n",
+                "hexrays_code": "int wrap() { return 2; }\n",
+            },
+            "void wrap(void) { }\n",
+        )
+        self.assertTrue(p8_restore_contract(USER_PROMPT))
+        self.assertTrue(p8_restore_contract(live))
+        self.assertNotIn("ida_code", live)
+        self.assertNotIn("hexrays", live.lower())
+        self.assertEqual(live.lower().count("декомпилированный код (ghidra)"), 1)
+        self.assertFalse(
+            p8_restore_contract(live + "\n=== HEX-RAYS ===\nint wrap() { return 1; }\n")
+        )
+        self.assertFalse(
+            p8_restore_contract(live + "\nДекомпилированный код (Ghidra):\nvoid g2(){}\n")
+        )
+        self.assertFalse(p8_restore_contract("скажи кто прав: Ghidra или IDA\n"))
+        ok = RunVerdict(accept=True, compile_ok=True, identity_ok=True, fidelity_ok=True)
+        self.assertTrue(director_contract(ok, restore_prompt=live))
+        self.assertFalse(
+            director_contract(
+                ok,
+                restore_prompt=live + "\n=== IDA ===\nint wrap(){return 1;}\n",
+            )
+        )
+        self.assertEqual(LLM_PROMPT_VER, "p4")
+        self.assertEqual(GHIDRA_CACHE_KEY, "ghidra_full_v6")
 
     def test_empty_fact_bag_is_not_fidelity_ok(self):
         restored = [{

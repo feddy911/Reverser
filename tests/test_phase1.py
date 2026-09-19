@@ -619,8 +619,8 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
             "  p = (std::ostream *)(&((*((std::ostream *)p)) << (n)));\n"
             "}\n"
         )
-        self.assertIn("*p << (n)", got)
-        self.assertIn("&(std::cout << \"n=\")", got)
+        self.assertIn("std::cout << \"n=\" << (n)", got)
+        self.assertNotIn("*p << (n)", got)
         self.assertNotIn("(*((", got)
 
     def test_msx64_stack_homes_bind_unused_formals(self):
@@ -908,6 +908,29 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         self.assertNotIn("CONCAT71", concat71)
         self.assertIn("int7", concat71)
         self.assertIn("<< 8", concat71)
+        low = sanitize_ghidra_cpp(
+            "uVar1 = CONCAT71((int7)((ulonglong)uVar2 >> 8), 1);\n"
+        )
+        self.assertNotIn("CONCAT71", low)
+        self.assertNotIn("(int7)", low)
+        self.assertIn("uVar2 & ~0xffull", low)
+        self.assertIn("(unsigned char)(1)", low)
+        from src.analysis.ghidra_cpp import leftover_concat71_low_byte
+
+        expanded = (
+            "uVar1 = (((unsigned long long)((int7)((ulonglong)uVar2 >> 8)) << 8)"
+            " | (unsigned char)(1));\n"
+        )
+        self.assertEqual(leftover_concat71_low_byte(expanded), ["uVar2"])
+        folded = sanitize_ghidra_cpp(expanded)
+        self.assertNotIn("int7", folded)
+        self.assertNotIn("<< 8", folded)
+        self.assertIn("uVar2 & ~0xffull", folded)
+        self.assertIn("(unsigned char)(1)", folded)
+        self.assertFalse(leftover_concat71_low_byte(folded))
+        self.assertFalse(
+            leftover_concat71_low_byte("return CONCAT71((int7)x, y);\n")
+        )
         zext = sanitize_ghidra_cpp("return ZEXT24(0xaabb);\n")
         self.assertNotIn("ZEXT24", zext)
         self.assertIn("unsigned", zext)
@@ -1157,6 +1180,22 @@ int main(int argc, char **argv) { return 0; }
         self.assertNotIn("ghidra_this", chain)
         self.assertNotIn("this =", chain)
         self.assertNotIn("(*((", chain)
+        ping = sanitize_ghidra_cpp(
+            "void wrap(longlong n, longlong m) {\n"
+            "  std::ostream *p;\n"
+            "  std::ostream *q;\n"
+            "  p = (&(std::cout << (\"a\")));\n"
+            "  q = (&((*(p)) << (n)));\n"
+            "  p = (&((*(q)) << (\"b\")));\n"
+            "  (*(p)) << (m);\n"
+            "}\n"
+        )
+        self.assertIn('std::cout << ("a") << (n) << ("b") << (m)', ping)
+        self.assertNotIn("(&((*(", ping)
+        self.assertNotIn("p =", ping)
+        from src.analysis.ghidra_cpp import leftover_ostream_addr_insert
+
+        self.assertFalse(leftover_ostream_addr_insert(ping))
         glued = sanitize_ghidra_cpp(
             "void wrap(void) {\n"
             "  std::ostream *pbVar1;\n"
@@ -1921,6 +1960,171 @@ int main(int argc, char **argv) { return 0; }
         self.assertIn("*pbVar3", got)
         self.assertNotIn("basic_ostream<char, std::char_traits<char>> local_298", got)
         self.assertIn("(mpz_ptr)(&obj->field7)", got)
+
+    def test_ostream_overlay_insert(self):
+        from src.analysis.ghidra_cpp import (
+            leftover_ostream_overlay_insert,
+            sanitize_ghidra_cpp,
+        )
+
+        raw = (
+            "void wrap(longlong n) {\n"
+            "  std::basic_ostream<char, std::char_traits<char>> local_40[40];\n"
+            "  operator<<(local_40, n);\n"
+            "}\n"
+        )
+        got = sanitize_ghidra_cpp(raw)
+        self.assertIn("undefined1 local_40[40]", got)
+        self.assertNotIn("operator<<(local_40", got)
+        self.assertIn("(std::ostream *)local_40", got)
+        self.assertNotIn("ofstream", got)
+        self.assertFalse(leftover_ostream_overlay_insert(got))
+        leftover = leftover_ostream_overlay_insert(
+            "void wrap(longlong n) {\n"
+            "  undefined1 local_40[40];\n"
+            "  operator<<(local_40, n);\n"
+            "}\n"
+        )
+        self.assertEqual(leftover, ["local_40"])
+
+    def test_extra_star_word_stack_array(self):
+        from src.analysis.ghidra_cpp import (
+            leftover_extra_star_stack_array,
+            sanitize_ghidra_cpp,
+        )
+
+        raw = (
+            "void helper(longlong *a, longlong *b);\n"
+            "void wrap(void)\n"
+            "{\n"
+            "  longlong ***p;\n"
+            "  longlong ***q;\n"
+            "  longlong ****xs[8];\n"
+            "  longlong ****ys[7];\n"
+            "  q = (longlong ***)ys;\n"
+            "  p = (longlong ***)xs;\n"
+            "  helper((longlong *)p, (longlong *)q);\n"
+            "  p = (longlong ***)xs[0];\n"
+            "  q = (longlong ***)ys[0];\n"
+            "  (void)p;\n"
+            "  (void)q;\n"
+            "  (void)xs[0];\n"
+            "  (void)ys[0];\n"
+            "}\n"
+        )
+        self.assertEqual(leftover_extra_star_stack_array(raw), ["xs", "ys"])
+        got = sanitize_ghidra_cpp(raw)
+        self.assertIn("longlong xs[8]", got)
+        self.assertIn("longlong ys[7]", got)
+        self.assertIn("helper(xs, ys)", got)
+        self.assertNotIn("longlong ****", got)
+        self.assertNotIn("(longlong ***)xs", got)
+        self.assertNotIn("(longlong *)p", got)
+        self.assertFalse(leftover_extra_star_stack_array(got))
+        ptrs = "void wrap(void) { longlong *xs[4]; (void)xs[0]; }\n"
+        self.assertFalse(leftover_extra_star_stack_array(ptrs))
+        self.assertIn("longlong *xs[4]", sanitize_ghidra_cpp(ptrs))
+        dump_crlf = (
+            "void wrap(void)\r\n"
+            "{\r\n"
+            "  longlong ****local_740 [8];\r\n"
+            "  param_3 = (longlong ***)local_740[0];\r\n"
+            "}\r\n"
+        )
+        self.assertEqual(leftover_extra_star_stack_array(dump_crlf), ["local_740"])
+
+    def test_extra_star_facts_permit_and_veto(self):
+        from src.analysis.ghidra_cpp import (
+            extra_star_rewrite_permitted,
+            leftover_extra_star_stack_array,
+            sanitize_ghidra_cpp,
+        )
+
+        raw = (
+            "void helper(longlong *out);\n"
+            "void wrap(void)\n"
+            "{\n"
+            "  longlong ***p;\n"
+            "  longlong ****xs[8];\n"
+            "  p = (longlong ***)xs;\n"
+            "  helper((longlong *)p);\n"
+            "  (void)xs[0];\n"
+            "}\n"
+        )
+        wrap_facts = {
+            "stack_alloc": 64,
+            "lea_arg_slots": [-32],
+            "qword_store_slots": [-32],
+        }
+        self.assertTrue(extra_star_rewrite_permitted(raw, None))
+        self.assertTrue(extra_star_rewrite_permitted(raw, {}))
+        self.assertTrue(extra_star_rewrite_permitted(raw, wrap_facts))
+        self.assertFalse(extra_star_rewrite_permitted(raw, {"stack_alloc": 64}))
+        permitted = sanitize_ghidra_cpp(raw, fn_facts=wrap_facts)
+        self.assertIn("longlong xs[8]", permitted)
+        self.assertNotIn("longlong ****", permitted)
+        self.assertFalse(leftover_extra_star_stack_array(permitted))
+        vetoed = sanitize_ghidra_cpp(raw, fn_facts={"stack_alloc": 64})
+        self.assertIn("longlong ****xs[8]", vetoed)
+        self.assertNotIn("longlong xs[8]", vetoed)
+        wrap_bytes = bytes.fromhex("4883ec40488d4de0488945e0c3")
+        from_bytes = sanitize_ghidra_cpp(raw, func_bytes=wrap_bytes)
+        self.assertIn("longlong xs[8]", from_bytes)
+
+    def test_unused_gs_cookie_slot_is_dropped(self):
+        from src.analysis.ghidra_cpp import (
+            leftover_gs_cookie_slot,
+            sanitize_ghidra_cpp,
+        )
+
+        raw = (
+            "void wrap(void)\n"
+            "{\n"
+            "  undefined1 local_40[32];\n"
+            "  longlong n;\n"
+            "  n = 1;\n"
+            "  (void)n;\n"
+            "}\n"
+        )
+        self.assertEqual(leftover_gs_cookie_slot(raw), ["local_40"])
+        got = sanitize_ghidra_cpp(raw)
+        self.assertNotIn("local_40", got)
+        self.assertNotIn("undefined1", got)
+        self.assertIn("n = 1", got)
+        self.assertFalse(leftover_gs_cookie_slot(got))
+        used = (
+            "void wrap(void)\n"
+            "{\n"
+            "  undefined1 padding[32];\n"
+            "  padding._0_4_ = 2;\n"
+            "}\n"
+        )
+        self.assertFalse(leftover_gs_cookie_slot(used))
+        kept = sanitize_ghidra_cpp(used)
+        self.assertIn("padding", kept)
+
+    def test_facts_disagree_needs_byte_slots(self):
+        from src.analysis.ghidra_cpp import leftover_facts_disagree
+        from src.analysis.fn_facts import fn_facts_from_dump_entry
+
+        leftover = "longlong ****xs[8];\n"
+        self.assertEqual(leftover_facts_disagree(leftover, None), [])
+        self.assertEqual(leftover_facts_disagree(leftover, {}), [])
+        empty = fn_facts_from_dump_entry({"address": "0x1", "size": 1})
+        self.assertEqual(leftover_facts_disagree(leftover, empty), [])
+        wrap = fn_facts_from_dump_entry(
+            {"address": "0x1", "size": 8},
+            func_bytes=bytes.fromhex("4883ec40488d4de0488945e0c3"),
+        )
+        self.assertEqual(leftover_facts_disagree(leftover, wrap), ["xs"])
+        self.assertEqual(
+            leftover_facts_disagree("longlong xs[8];\n", wrap),
+            [],
+        )
+        self.assertEqual(
+            leftover_facts_disagree(leftover, {"stack_alloc": 64}),
+            [],
+        )
 
     def test_dat_underscore_and_mpz_t_ptr(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
