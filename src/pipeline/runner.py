@@ -78,42 +78,60 @@ def _record_i5_metric(
     """I5 restored vs original stdout. Metric only: not ACCEPT, not a recipe."""
     from src.analysis.eval_behavior import (
         ROOT,
-        case_for_binary,
         eval_restored,
         i5_summary,
-        run_exe,
+        observe_cli,
     )
 
-    if source_cpp is None or not source_cpp.exists():
-        return
-    case = case_for_binary(binary_path)
-    if case is None:
-        return
     t0 = time.perf_counter()
     try:
-        golden = run_exe(
-            ROOT / case["exe"],
-            list(case.get("argv") or []),
-            cwd=ROOT,
-        )
+        obs = observe_cli(binary_path)
+        payload: Dict[str, Any] = {
+            "not_compile_gate": True,
+            "not_recipe_source": True,
+            "need_pin": False,
+            "observe": {
+                "id": obs.get("id"),
+                "kind": obs.get("kind"),
+                "skipped": obs.get("skipped"),
+                "reason": obs.get("reason"),
+                "stdout_n": obs.get("stdout_n"),
+                "exit": obs.get("exit"),
+                "source": obs.get("source"),
+            },
+        }
+        if (
+            source_cpp is None
+            or not source_cpp.exists()
+            or obs.get("skipped")
+            or obs.get("kind") != "observed"
+            or not obs.get("case")
+        ):
+            slim = i5_summary(obs)
+            metrics.i5 = slim
+            payload["summary"] = slim
+            _save_json(run_dir / "behavior.json", payload)
+            print()
+            print("=== I5 BEHAVIOR ===")
+            print(
+                f"SKIP: {slim.get('id') or 'i5'} kind={slim.get('kind')} "
+                f"reason={slim.get('reason')!r}"
+            )
+            print("  metric only; not critic ACCEPT and not a recipe")
+            metrics.mark_stage("i5", t0)
+            return
         rec = eval_restored(
             source_cpp,
-            case,
-            golden.get("stdout") or "",
+            obs["case"],
+            obs.get("stdout") or "",
             root=ROOT,
         )
         slim = i5_summary(rec)
         metrics.i5 = slim
-        _save_json(
-            run_dir / "behavior.json",
-            {
-                "not_compile_gate": True,
-                "not_recipe_source": True,
-                "golden_ok": bool(golden.get("ok")),
-                "restored": rec,
-                "summary": slim,
-            },
-        )
+        payload["golden_ok"] = True
+        payload["restored"] = rec
+        payload["summary"] = slim
+        _save_json(run_dir / "behavior.json", payload)
         print()
         print("=== I5 BEHAVIOR ===")
         flag = "OK" if rec.get("ok") else ("SKIP" if rec.get("skipped") else "FAIL")
@@ -131,6 +149,7 @@ def _record_i5_metric(
             "reason": str(exc),
             "not_compile_gate": True,
             "not_recipe_source": True,
+            "need_pin": False,
         }
     metrics.mark_stage("i5", t0)
 

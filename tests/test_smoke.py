@@ -97,11 +97,29 @@ class TestFeaturesSmoke(unittest.TestCase):
             "lea_arg_slots": [-32],
             "qword_store_slots": [-32],
         }
+        poisoned["call_sites"] = [
+            {"callee_va": "0x140002000", "imm_slots": [["rdx", 2]], "arg_regs": ["rcx"]}
+        ]
+        poisoned["iat_proto"] = {
+            "name": "__gmpz_clear",
+            "arity": 1,
+            "slots": [["rcx", "mpz_ptr"]],
+        }
+        poisoned["dat_facts"] = {
+            "blobs": [{"va": "0x140001000", "kind": "format", "text": "n=%d"}]
+        }
         still = build_restore_prompt(poisoned, poisoned["ghidra_code"])
         self.assertNotIn("lea_arg", still)
         self.assertNotIn("fn_facts", still)
         self.assertNotIn("stack_alloc", still)
         self.assertNotIn("qword_store", still)
+        self.assertNotIn("call_sites", still)
+        self.assertNotIn("imm_slots", still)
+        self.assertNotIn("arg_regs", still)
+        self.assertNotIn("iat_proto", still)
+        self.assertNotIn("mpz_ptr", still)
+        self.assertNotIn("dat_facts", still)
+        self.assertNotIn("format_blob", still)
         with_p = build_restore_prompt(fn, fn["ghidra_code"], pcode=fn["pcode"])
         self.assertIn(PCODE_SECTION_TITLE, with_p)
         self.assertIn("COPY", with_p)
@@ -1344,6 +1362,7 @@ class TestFidelitySmoke(unittest.TestCase):
 
     def test_restore_live_omits_pcode_even_if_entry_has_it(self):
         from src.agents.restorer import CodeRestorerLLM, PCODE_SECTION_TITLE
+        from src.analysis.restore_facts import FACTS_SECTION_TITLE
 
         class _Client:
             def __init__(self):
@@ -1361,6 +1380,7 @@ class TestFidelitySmoke(unittest.TestCase):
         client = _Client()
         CodeRestorerLLM(client).restore(fn, fn["ghidra_code"])
         self.assertNotIn(PCODE_SECTION_TITLE, client.prompt)
+        self.assertNotIn(FACTS_SECTION_TITLE, client.prompt)
         self.assertNotIn("COPY", client.prompt)
         client2 = _Client()
         CodeRestorerLLM(client2).restore(
@@ -1544,6 +1564,53 @@ class TestEvalBehavior(unittest.TestCase):
         )
         self.assertIsNone(case_for_binary("samples/EchoFilter.exe"))
         self.assertIsNone(case_for_binary("user.bin"))
+
+    def test_cli_case_self_golden_console_not_gui(self):
+        import struct
+        import tempfile
+        from pathlib import Path
+
+        from src.analysis.eval_behavior import SELF_CLI, cli_case_for_binary
+        from src.analysis.pe_image import (
+            SUBSYSTEM_WINDOWS_CUI,
+            SUBSYSTEM_WINDOWS_GUI,
+            pe_is_console,
+            pe_subsystem,
+        )
+        from src.pipeline.runner import GHIDRA_CACHE_KEY, LLM_PROMPT_VER
+
+        def fake(subsys: int) -> bytes:
+            blob = bytearray(0x200)
+            blob[0:2] = b"MZ"
+            struct.pack_into("<I", blob, 0x3C, 0x80)
+            blob[0x80:0x84] = b"PE\x00\x00"
+            coff = 0x84
+            struct.pack_into("<H", blob, coff + 16, 240)
+            opt = coff + 20
+            struct.pack_into("<H", blob, opt, 0x20B)
+            struct.pack_into("<H", blob, opt + 68, subsys)
+            return bytes(blob)
+
+        self.assertEqual(pe_subsystem(fake(SUBSYSTEM_WINDOWS_CUI)), 3)
+        self.assertTrue(pe_is_console(fake(SUBSYSTEM_WINDOWS_CUI)))
+        self.assertFalse(pe_is_console(fake(SUBSYSTEM_WINDOWS_GUI)))
+        with tempfile.TemporaryDirectory() as td:
+            cui = Path(td) / "wrap.exe"
+            gui = Path(td) / "win.exe"
+            cui.write_bytes(fake(SUBSYSTEM_WINDOWS_CUI))
+            gui.write_bytes(fake(SUBSYSTEM_WINDOWS_GUI))
+            cli = cli_case_for_binary(cui)
+            self.assertEqual((cli or {}).get("id"), SELF_CLI)
+            self.assertEqual((cli or {}).get("argv"), [])
+            self.assertTrue((cli or {}).get("not_recipe_source"))
+            self.assertIsNone(cli_case_for_binary(gui))
+            dumped = json.dumps(cli)
+            self.assertNotIn("MyCollatz", dumped)
+            self.assertNotIn("NestWalk", dumped)
+        named = cli_case_for_binary("samples/PointCloud.exe")
+        self.assertEqual((named or {}).get("id"), "pointcloud_default")
+        self.assertEqual(LLM_PROMPT_VER, "p4")
+        self.assertEqual(GHIDRA_CACHE_KEY, "ghidra_full_v6")
 
     def test_eval_restored_crash_is_metric_not_gate(self):
         import tempfile

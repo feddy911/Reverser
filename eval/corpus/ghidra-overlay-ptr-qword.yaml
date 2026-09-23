@@ -1,0 +1,25 @@
+id: ghidra-overlay-ptr-qword
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+gcc_fingerprint: "invalid conversion from 'undefined1\\*' (?:\\{aka '[^']+'\\})? to 'undefined8'"
+gcc_probe:
+  - "invalid conversion from 'undefined1*' {aka 'unsigned char*'} to 'undefined8' {aka 'long long unsigned int'} [-fpermissive]"
+ghidra_cpp: |
+  void wrap(void)
+  {
+    undefined1 local_9;
+    undefined1 auStack_20[16];
+    auStack_20._8_8_ = &local_9;
+    (void)auStack_20[0];
+  }
+contains:
+  - "(*(undefined8 *)((char *)(auStack_20) + 8)) = &local_9"
+  - "(void)auStack_20[0]"
+not_contains:
+  - "._8_8_"
+  - "reinterpret_cast"
+  - "static_cast"
+  - "mpz"
+compile: false
+notes: "Ghidra stores undefined1* into an 8-byte overlay slot. Cookie/GS-adjacent leftover. Mix wrap. Do not invent a cast. Do not drop the store. Do not bind T* vs U*. Not mpz_ptr."

@@ -1,0 +1,24 @@
+id: ghidra-glued-placement-new
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(void)
+  {
+    std::string *home;
+    (void)home;std::string::string(home);
+    if (home) {
+      (void)home;
+    }std::vector<std::string>::vector((std::vector<std::string> *)home);
+  }
+contains:
+  - "(void)home;\n"
+  - "new (home) std::string()"
+  - "new ((std::vector<std::string> *)home) std::vector<std::string>()"
+not_contains:
+  - ";new ("
+  - "}new ("
+  - "string::string"
+  - "mpz"
+compile: true
+notes: "Ghidra Type::Type ctor rewrite glued onto the previous stmt as ;new ( / }new (. Split to a new line. Mix wrap. Do not drop the placement new. Do not invent begin/end. Not mpz_ptr."

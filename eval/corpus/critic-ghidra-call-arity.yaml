@@ -1,0 +1,28 @@
+id: critic-ghidra-call-arity
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+call_sites:
+  sites:
+    - off: 12
+      kind: rel
+      callee_va: "0x140002000"
+      iat_name: ""
+      arg_regs: ["rcx", "rdx"]
+      imm_slots:
+        - ["rdx", 2]
+      lea_slots: []
+ghidra_cpp: |
+  void helper(longlong *xs);
+  void wrap(void)
+  {
+    longlong *xs;
+    helper(xs);
+  }
+contains:
+  - "==ghidra:call_arity:helper=="
+not_contains:
+  - "==0=="
+  - "mpz"
+compile: false
+notes: "C helper(xs) has one arg; bytes show RCX and RDX. Identity leftover truncated call. Empty bag is not this class. Mix wrap. Do not invent immediate 2. Not T* vs U*."

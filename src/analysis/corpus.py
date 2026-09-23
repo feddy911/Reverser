@@ -15,6 +15,9 @@ YAML fields:
   guessed_name      assemble: emitted function name (default: f)
   extra_functions   assemble: [{name, cpp}, ...] other TU members
   fn_facts          optional byte facts for critic leftover facts_disagree
+  dat_facts         optional PE format blobs for critic leftover format_dat
+  call_sites        optional CallSiteFacts dict for leftover call_arity / imm fill
+  iat_facts         optional IAT proto bag for leftover call_arity / new formals
   notes
 
 Recipes (do not add sanitizer regex here):
@@ -22,6 +25,7 @@ Recipes (do not add sanitizer regex here):
   assemble                 assembler.assemble
   sanitize_then_assemble   sanitize each body, then assemble
   critic                   dialect leftover report (ghidra/compiler/assembler vs human)
+  feedback                 skip-forever gcc → Q0–Q2 facts (leftover+Q4 or stay skip)
 """
 
 from dataclasses import dataclass, field
@@ -30,7 +34,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import yaml
 
-RECIPES = ("sanitize", "assemble", "sanitize_then_assemble", "critic")
+RECIPES = ("sanitize", "assemble", "sanitize_then_assemble", "critic", "feedback")
 DEFAULT_CORPUS_DIR = Path(__file__).resolve().parents[2] / "eval" / "corpus"
 
 
@@ -50,6 +54,9 @@ class CorpusCase:
     guessed_name: str = "f"
     extra_functions: List[Dict[str, str]] = field(default_factory=list)
     fn_facts: Dict[str, Any] = field(default_factory=dict)
+    dat_facts: Dict[str, Any] = field(default_factory=dict)
+    call_sites: Dict[str, Any] = field(default_factory=dict)
+    iat_facts: Dict[str, Any] = field(default_factory=dict)
     notes: str = ""
 
 
@@ -81,6 +88,15 @@ def load_case(path: Path) -> CorpusCase:
     facts = data.get("fn_facts") or {}
     if not isinstance(facts, dict):
         facts = {}
+    dats = data.get("dat_facts") or {}
+    if not isinstance(dats, dict):
+        dats = {}
+    sites = data.get("call_sites") or {}
+    if not isinstance(sites, dict):
+        sites = {}
+    iat = data.get("iat_facts") or {}
+    if not isinstance(iat, dict):
+        iat = {}
     return CorpusCase(
         id=cid,
         profile=str(data.get("profile") or "generic").strip(),
@@ -96,6 +112,9 @@ def load_case(path: Path) -> CorpusCase:
         guessed_name=str(data.get("guessed_name") or "f").strip() or "f",
         extra_functions=extras,
         fn_facts=facts,
+        dat_facts=dats,
+        call_sites=sites,
+        iat_facts=iat,
         notes=str(data.get("notes") or ""),
     )
 
@@ -154,7 +173,12 @@ def apply_recipe(case: CorpusCase) -> str:
     from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
 
     if case.recipe == "sanitize":
-        return sanitize_ghidra_cpp(case.ghidra_cpp, fn_facts=case.fn_facts or None)
+        return sanitize_ghidra_cpp(
+            case.ghidra_cpp,
+            fn_facts=case.fn_facts or None,
+            call_sites=case.call_sites or None,
+            iat_facts=case.iat_facts or None,
+        )
     if case.recipe == "assemble":
         return _assemble_text(case, bodies_sanitized=False)
     if case.recipe == "sanitize_then_assemble":
@@ -162,7 +186,27 @@ def apply_recipe(case: CorpusCase) -> str:
     if case.recipe == "critic":
         from src.agents.critic import dialect_hits, format_dialect_report
 
-        return format_dialect_report(dialect_hits(case.ghidra_cpp, facts=case.fn_facts))
+        return format_dialect_report(
+            dialect_hits(
+                case.ghidra_cpp,
+                facts=case.fn_facts,
+                dat_facts=case.dat_facts,
+                call_sites=case.call_sites,
+                iat_facts=case.iat_facts,
+            )
+        )
+    if case.recipe == "feedback":
+        from src.analysis.feedback_facts import format_feedback_report, plan_errors
+
+        msgs = case.gcc_probe or []
+        plan = plan_errors(
+            [{"message": m} for m in msgs],
+            case.ghidra_cpp,
+            call_sites=case.call_sites or None,
+            iat_facts=case.iat_facts or None,
+            dat_facts=case.dat_facts or None,
+        )
+        return format_feedback_report(plan)
     raise ValueError(f"unknown recipe {case.recipe!r}")
 
 

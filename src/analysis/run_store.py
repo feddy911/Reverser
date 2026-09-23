@@ -93,7 +93,10 @@ _LEFTOVER_CASE_MARKERS = (
     "concat-shift",
     "concat71-low",
     "extra-star-stack-array",
+    "extra-star-formal",
     "gs-cookie-slot",
+    "glued-placement-new",
+    "overlay-ptr-qword",
 )
 
 
@@ -101,12 +104,19 @@ def _classify_errors(
     errors: Sequence[Dict[str, str]],
     *,
     tu_text: str = "",
+    call_sites: object | None = None,
+    iat_facts: object | None = None,
+    dat_facts: object | None = None,
 ) -> Dict[str, Any]:
     from src.agents.compiler import match_errors
+    from src.analysis.feedback_facts import ACTION_LEFTOVER, plan_one
     from src.analysis.ghidra_cpp import (
         leftover_concat71_low_byte,
+        leftover_extra_star_formal,
         leftover_extra_star_stack_array,
+        leftover_glued_placement_new,
         leftover_gs_cookie_slot,
+        leftover_overlay_ptr_qword,
         leftover_ostream_addr_insert,
         leftover_ostream_overlay_insert,
     )
@@ -141,6 +151,13 @@ def _classify_errors(
             "reason": "extra_star",
         })
         break
+    for name in leftover_extra_star_formal(tu_text):
+        rows.append({
+            "message": name,
+            "kind": "leftover",
+            "reason": "extra_star_formal",
+        })
+        break
     for name in leftover_gs_cookie_slot(tu_text):
         rows.append({
             "message": name,
@@ -148,12 +165,41 @@ def _classify_errors(
             "reason": "gs_cookie",
         })
         break
-    for hit in decision.skip_forever:
+    for tok in leftover_glued_placement_new(tu_text):
         rows.append({
-            "message": hit.message,
-            "kind": "skip_forever",
-            "reason": hit.reason,
+            "message": tok,
+            "kind": "leftover",
+            "reason": "glued_new",
         })
+        break
+    for name in leftover_overlay_ptr_qword(tu_text):
+        rows.append({
+            "message": name,
+            "kind": "leftover",
+            "reason": "overlay_ptr",
+        })
+        break
+    for hit in decision.skip_forever:
+        fb = plan_one(
+            hit.reason,
+            hit.message,
+            tu_text,
+            call_sites=call_sites,
+            iat_facts=iat_facts,
+            dat_facts=dat_facts,
+        )
+        if fb.get("action") == ACTION_LEFTOVER:
+            rows.append({
+                "message": hit.message,
+                "kind": "leftover",
+                "reason": str(fb.get("kind") or hit.reason),
+            })
+        else:
+            rows.append({
+                "message": hit.message,
+                "kind": "skip_forever",
+                "reason": hit.reason,
+            })
     for hit in decision.known:
         joined = ",".join(hit.case_ids)
         kind = "leftover" if any(m in joined for m in _LEFTOVER_CASE_MARKERS) else "known"
@@ -168,8 +214,14 @@ def _classify_errors(
             reason = "concat71_low"
         if kind == "leftover" and "extra-star-stack-array" in joined:
             reason = "extra_star"
+        if kind == "leftover" and "extra-star-formal" in joined:
+            reason = "extra_star_formal"
         if kind == "leftover" and "gs-cookie-slot" in joined:
             reason = "gs_cookie"
+        if kind == "leftover" and "glued-placement-new" in joined:
+            reason = "glued_new"
+        if kind == "leftover" and "overlay-ptr-qword" in joined:
+            reason = "overlay_ptr"
         rows.append({
             "message": hit.message,
             "kind": kind,
@@ -178,11 +230,15 @@ def _classify_errors(
     for msg in decision.unknown:
         rows.append({"message": msg, "kind": "unknown", "reason": ""})
     leftover_n = sum(1 for r in rows if r["kind"] == "leftover")
+    skip_forever: List[str] = []
+    for r in rows:
+        if r["kind"] == "skip_forever" and r["reason"] and r["reason"] not in skip_forever:
+            skip_forever.append(r["reason"])
     return {
         "rows": rows,
         "n_unknown": len(decision.unknown),
         "n_leftover": leftover_n,
-        "skip_forever": decision.skip_forever_reasons,
+        "skip_forever": skip_forever,
         "known_ids": decision.known_ids,
     }
 
@@ -193,9 +249,18 @@ def build_analysis_stack(
     tu_text: str = "",
     disasm_facts: Sequence[Any] | None = None,
     restored: Sequence[Dict[str, Any]] | None = None,
+    call_sites: object | None = None,
+    iat_facts: object | None = None,
+    dat_facts: object | None = None,
 ) -> Dict[str, Any]:
     """Classified gcc / leftover bag for planning. Not a recipe catalog."""
-    classified = _classify_errors(errors, tu_text=tu_text)
+    classified = _classify_errors(
+        errors,
+        tu_text=tu_text,
+        call_sites=call_sites,
+        iat_facts=iat_facts,
+        dat_facts=dat_facts,
+    )
     rows: List[Dict[str, str]] = list(classified["rows"])
     if restored:
         from src.analysis.ghidra_cpp import leftover_facts_disagree

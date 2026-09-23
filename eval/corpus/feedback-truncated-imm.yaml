@@ -1,0 +1,38 @@
+id: feedback-truncated-imm
+profile: gcc_pe_x64
+recipe: feedback
+guessed_name: wrap
+gcc_probe:
+  - "too few arguments to function 'int __gmpz_cmp_ui(mpz_srcptr, long unsigned int)'"
+call_sites:
+  sites:
+    - off: 20
+      kind: rip_mem
+      callee_va: "0x1400385b0"
+      iat_name: __gmpz_cmp_ui
+      arg_regs: ["rcx", "rdx"]
+      imm_slots:
+        - ["rdx", 1]
+      lea_slots: []
+iat_facts:
+  protos:
+    - name: __gmpz_cmp_ui
+      arity: 2
+      variadic: false
+      slots:
+        - ["rcx", "mpz_srcptr"]
+        - ["rdx", "unsigned long"]
+ghidra_cpp: |
+  void wrap(void)
+  {
+    __gmpz_cmp_ui(param_1);
+  }
+contains:
+  - "==feedback:leftover:call_arity=="
+  - "==feedback:filled=="
+  - "__gmpz_cmp_ui(param_1, 1)"
+not_contains:
+  - "==feedback:skip_forever:"
+  - "mpz_srcptr"
+compile: false
+notes: "gcc truncated mpz; bytes uniquely put 1 in RDX. Planner leftover plus Q4 fill. Do not rewrite param_1. Empty bag must not. Mix wrap. Not LLM."

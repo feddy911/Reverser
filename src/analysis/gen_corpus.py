@@ -200,6 +200,9 @@ def vary_case(case: CorpusCase, *, prefix: str = "v") -> Tuple[CorpusCase, Dict[
         guessed_name=apply_ident_map(case.guessed_name, mapping) or "f",
         extra_functions=extras,
         fn_facts=dict(case.fn_facts),
+        dat_facts=dict(case.dat_facts),
+        call_sites=dict(case.call_sites),
+        iat_facts=dict(case.iat_facts),
         notes="identifier variation of " + case.id,
     )
     return varied, mapping
@@ -211,7 +214,7 @@ def eval_variations(
     loaded = list(cases) if cases is not None else load_corpus()
     results = []
     for case in loaded:
-        if case.recipe == "critic":
+        if case.recipe in ("critic", "feedback"):
             # Report tags are dialect taxonomy, not user identifiers.
             varied, mapping = case, {}
         else:

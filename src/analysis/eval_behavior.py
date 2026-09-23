@@ -1,11 +1,12 @@
-"""I5: golden run of original CLI samples. Not a compile-gate and not recipes.
+"""I5: golden run of original CLI samples, plus self-golden for console PE.
 
   py -m src.analysis.eval_behavior
   py -m src.analysis.eval_behavior --restored path/to/restored_final.cpp
   py -m src.analysis.eval_behavior --restored path/to/restored_final.cpp --case pointcloud_default
 
-Compares stable stdout of PointCloud / FibTimer / XorCipher originals.
-Timing lines (elapsed_us) are masked. Do not add ghidra_cpp recipes from this.
+Named CASES: PointCloud / FibTimer / XorCipher. Unknown console PE: observe
+THIS exe (empty argv, stdin closed). Empty stdout is not a pass. Timing
+lines (elapsed_us) are masked. Do not add ghidra_cpp recipes from this.
 ``--restored`` compiles+links that TU and compares masked stdout to the
 original exe for ``--case`` (default: pointcloud_default).
 Stdlib/fs candidates live in eval/i5_probe_index.yaml; they are not CASES.
@@ -63,6 +64,10 @@ def mask_paths(text: str, *, root: Path = ROOT) -> str:
     body = _UNQUOTED_WINABS.sub("<path>", body)
     body = _ABS_UNIX.sub("<path>", body)
     return body
+
+
+SELF_CLI = "self_cli"
+SELF_CLI_TIMEOUT_SEC = 8.0
 
 
 CASES: List[Dict[str, Any]] = [
@@ -164,6 +169,8 @@ def i5_summary(rec: Dict[str, Any]) -> Dict[str, Any]:
         "link_ok": bool((rec.get("link") or {}).get("ok")),
         "not_compile_gate": True,
         "not_recipe_source": True,
+        "source": rec.get("source") or rec.get("id") or "",
+        "need_pin": False,
     }
 
 
@@ -174,12 +181,40 @@ def case_by_id(case_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def cli_case_for_binary(path: Path | str) -> Optional[Dict[str, Any]]:
+    """Named I5 golden, or a console PE self-golden. GUI/unknown is not a case."""
+    named = case_for_binary(path)
+    if named is not None:
+        return dict(named)
+    p = Path(path)
+    if not p.is_file():
+        return None
+    try:
+        blob = p.read_bytes()
+    except OSError:
+        return None
+    from src.analysis.pe_image import pe_is_console
+
+    if not pe_is_console(blob):
+        return None
+    return {
+        "id": SELF_CLI,
+        "exe": str(p),
+        "argv": [],
+        "expect_contains": [],
+        "expect_exit": None,
+        "source": SELF_CLI,
+        "not_recipe_source": True,
+    }
+
+
 def run_exe(
     exe: Path,
     argv: Sequence[str],
     *,
     timeout_sec: float = 15.0,
     cwd: Optional[Path] = None,
+    stdin_devnull: bool = False,
 ) -> Dict[str, Any]:
     if not exe.exists():
         return {
@@ -189,19 +224,36 @@ def run_exe(
             "stdout": "",
             "exit": None,
         }
+    kwargs: Dict[str, Any] = {
+        "capture_output": True,
+        "text": True,
+        "timeout": timeout_sec,
+        "cwd": str(cwd or ROOT),
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+    if stdin_devnull:
+        kwargs["stdin"] = subprocess.DEVNULL
+    if sys.platform == "win32" and stdin_devnull:
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         proc = subprocess.run(
             [str(exe), *argv],
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-            cwd=str(cwd or ROOT),
+            **kwargs,
         )
     except subprocess.TimeoutExpired:
         return {
             "ok": False,
             "skipped": False,
             "reason": "timeout",
+            "stdout": "",
+            "exit": None,
+        }
+    except OSError as exc:
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": str(exc),
             "stdout": "",
             "exit": None,
         }
@@ -216,11 +268,84 @@ def run_exe(
     }
 
 
+def observe_cli(
+    path: Path | str,
+    *,
+    timeout_sec: float = SELF_CLI_TIMEOUT_SEC,
+) -> Dict[str, Any]:
+    """Black-box golden from THIS exe. Empty I/O is not a pass token.
+
+    Named CASES keep their argv. Unknown console PE uses empty argv and
+    closed stdin. Timeout, crash, and empty stdout are skip, not a recipe.
+    """
+    rec: Dict[str, Any] = {
+        "id": "",
+        "skipped": True,
+        "ok": False,
+        "kind": "no_cli",
+        "reason": "",
+        "stdout": "",
+        "stdout_n": 0,
+        "exit": None,
+        "case": None,
+        "not_compile_gate": True,
+        "not_recipe_source": True,
+        "need_pin": False,
+        "source": "",
+    }
+    case = cli_case_for_binary(path)
+    if case is None:
+        rec["reason"] = "no named I5 case and not a console PE"
+        return rec
+    rec["id"] = str(case.get("id") or "")
+    rec["source"] = str(case.get("source") or case.get("id") or "")
+    self_cli = rec["id"] == SELF_CLI
+    exe = Path(case["exe"])
+    if not exe.is_file():
+        exe = ROOT / str(case["exe"])
+    run = run_exe(
+        exe,
+        list(case.get("argv") or []),
+        timeout_sec=float(timeout_sec if self_cli else 15.0),
+        cwd=ROOT,
+        stdin_devnull=self_cli,
+    )
+    rec["exit"] = run.get("exit")
+    rec["stdout"] = run.get("stdout") or ""
+    rec["stdout_n"] = len(rec["stdout"])
+    if run.get("skipped"):
+        rec["kind"] = "skipped"
+        rec["reason"] = str(run.get("reason") or "skipped")
+        return rec
+    if run.get("reason") == "timeout":
+        rec["kind"] = "no_cli_contract"
+        rec["reason"] = "timeout"
+        return rec
+    crash = _crash_reason(run.get("exit"))
+    if crash:
+        rec["kind"] = "no_cli_contract"
+        rec["reason"] = crash
+        return rec
+    if self_cli and not rec["stdout"].strip():
+        rec["kind"] = "no_cli_contract"
+        rec["reason"] = "empty stdout is not a CLI contract"
+        return rec
+    rec["skipped"] = False
+    rec["ok"] = True
+    rec["kind"] = "observed"
+    rec["reason"] = ""
+    bag = dict(case)
+    if self_cli:
+        bag["expect_exit"] = run.get("exit")
+    rec["case"] = bag
+    return rec
+
+
 def check_case(case: Dict[str, Any], run: Dict[str, Any]) -> Dict[str, Any]:
     if run.get("skipped"):
-        return {**run, "id": case["id"], "missing": list(case["expect_contains"])}
+        return {**run, "id": case["id"], "missing": list(case.get("expect_contains") or [])}
     body = run.get("stdout") or ""
-    missing = [s for s in case["expect_contains"] if s not in body]
+    missing = [s for s in (case.get("expect_contains") or []) if s not in body]
     want_exit = case.get("expect_exit")
     exit_ok = want_exit is None or run.get("exit") == want_exit
     return {
@@ -307,10 +432,12 @@ def eval_restored(
         "stdout_match": False,
         "contains_ok": False,
         "exit_ok": False,
-        "missing": list(case["expect_contains"]),
+        "missing": list(case.get("expect_contains") or []),
         "stdout": "",
         "exit": None,
         "link": {},
+        "not_recipe_source": True,
+        "need_pin": False,
     }
     with tempfile.TemporaryDirectory(prefix="i5_restored_") as td:
         exe = Path(td) / ("restored.exe" if sys.platform == "win32" else "restored")
@@ -332,7 +459,14 @@ def eval_restored(
             rec["stderr"] = (link.get("stderr") or "")[-800:]
             return rec
         env = os.environ.copy()
-        run = run_exe(exe, list(case.get("argv") or []), cwd=root)
+        self_cli = str(case.get("id") or "") == SELF_CLI
+        run = run_exe(
+            exe,
+            list(case.get("argv") or []),
+            cwd=root,
+            stdin_devnull=self_cli,
+            timeout_sec=SELF_CLI_TIMEOUT_SEC if self_cli else 15.0,
+        )
         rec["stdout"] = run.get("stdout") or ""
         rec["exit"] = run.get("exit")
         rec["reason"] = run.get("reason") or ""

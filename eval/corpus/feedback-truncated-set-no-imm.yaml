@@ -1,0 +1,37 @@
+id: feedback-truncated-set-no-imm
+profile: gcc_pe_x64
+recipe: feedback
+guessed_name: wrap
+gcc_probe:
+  - "too few arguments to function 'void __gmpz_set(mpz_ptr, mpz_srcptr)'"
+call_sites:
+  sites:
+    - off: 40
+      kind: rip_mem
+      callee_va: "0x140038560"
+      iat_name: __gmpz_set
+      arg_regs: ["rcx", "rdx"]
+      imm_slots: []
+      lea_slots: []
+iat_facts:
+  protos:
+    - name: __gmpz_set
+      arity: 2
+      variadic: false
+      slots:
+        - ["rcx", "mpz_ptr"]
+        - ["rdx", "mpz_srcptr"]
+ghidra_cpp: |
+  void wrap(void)
+  {
+    __gmpz_set(zs);
+  }
+contains:
+  - "==feedback:skip_forever:ghidra truncated mpz call=="
+  - "__gmpz_set(zs);"
+not_contains:
+  - "==feedback:leftover:"
+  - "==feedback:filled=="
+  - "__gmpz_set(zs,"
+compile: false
+notes: "IAT says arity 2; bytes have no unique immediate. Ask Q0-Q1, miss, stay skip-forever. Do not invent mpz_srcptr. Mix wrap."

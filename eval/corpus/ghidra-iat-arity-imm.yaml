@@ -1,0 +1,52 @@
+id: ghidra-iat-arity-imm
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+call_sites:
+  sites:
+    - off: 20
+      kind: rip_mem
+      callee_va: "0x1400385b0"
+      iat_name: __gmpz_cmp_ui
+      arg_regs: ["rcx", "rdx"]
+      imm_slots:
+        - ["rdx", 1]
+      lea_slots: []
+    - off: 40
+      kind: rip_mem
+      callee_va: "0x140038560"
+      iat_name: __gmpz_set
+      arg_regs: ["rcx", "rdx"]
+      imm_slots: []
+      lea_slots: []
+iat_facts:
+  protos:
+    - name: __gmpz_cmp_ui
+      arity: 2
+      variadic: false
+      slots:
+        - ["rcx", "mpz_srcptr"]
+        - ["rdx", "unsigned long"]
+    - name: __gmpz_set
+      arity: 2
+      variadic: false
+      slots:
+        - ["rcx", "mpz_ptr"]
+        - ["rdx", "mpz_srcptr"]
+ghidra_cpp: |
+  undefined8 __gmpz_cmp_ui(undefined8 param_1);
+  void wrap(void)
+  {
+    __gmpz_cmp_ui(param_1);
+    __gmpz_set(zs);
+  }
+contains:
+  - "__gmpz_cmp_ui(param_1, 1)"
+  - "__gmpz_cmp_ui(undefined8 param_1, unsigned long)"
+  - "__gmpz_set(zs);"
+not_contains:
+  - "mpz_srcptr"
+  - "mpz_ptr"
+  - "__gmpz_set(zs,"
+compile: false
+notes: "IAT-bound cmp_ui missing RDX; bytes uniquely have 1. Fill the immediate. New formal unsigned long from IAT sink. Do not rewrite param_1 or invent mpz_ptr. set has no imm — leave truncated. Mix wrap. Not a sample .cpp."

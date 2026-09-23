@@ -1,0 +1,20 @@
+id: feedback-truncated-empty
+profile: gcc_pe_x64
+recipe: feedback
+guessed_name: wrap
+gcc_probe:
+  - "too few arguments to function 'int __gmpz_cmp_ui(mpz_srcptr, long unsigned int)'"
+ghidra_cpp: |
+  void wrap(void)
+  {
+    __gmpz_cmp_ui(param_1);
+  }
+contains:
+  - "==feedback:skip_forever:ghidra truncated mpz call=="
+  - "__gmpz_cmp_ui(param_1);"
+not_contains:
+  - "==feedback:leftover:"
+  - "==feedback:filled=="
+  - "__gmpz_cmp_ui(param_1, 1)"
+compile: false
+notes: "Same gcc as feedback-truncated-imm without call-site/IAT bag. Stay skip-forever. Do not invent immediate 1. Mix wrap."

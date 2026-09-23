@@ -1,0 +1,19 @@
+id: ghidra-extra-star-formal-keep
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  struct Rec { int n; };
+  void keep(longlong ***slot, Rec ***node)
+  {
+    (void)slot;
+    (void)node;
+  }
+contains:
+  - "longlong ***slot"
+  - "Rec ***node"
+not_contains:
+  - "longlong *slot"
+  - "mpz"
+compile: true
+notes: "A word triple-pointer formal with no extra-star array stays. Rec *** is not a word overlay. Do not strip stars. Mix wrap. Not mpz_ptr."

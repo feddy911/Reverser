@@ -83,13 +83,17 @@ def build_restore_prompt(
     *,
     profile: str = "generic",
     pcode: str = "",
+    call_sites: object | None = None,
+    iat_facts: object | None = None,
 ) -> str:
     """p4 user prompt. Optional pcode is mini/p5 only — live restore omits it.
 
-    Do not insert FnFacts here. That is gated P7; P5 keeps facts off the prompt.
+    Optional call_sites/iat_facts are gated Q7 — live restore omits them.
+    Do not read those bags from entry. Do not insert FnFacts (gated P7).
     P8: do not insert a second decompiler C (IDA / Hex-Rays / BN).
     """
     from src.analysis.pcode import clip_pcode, op_lines
+    from src.analysis.restore_facts import format_restore_facts, insert_restore_facts
 
     func_strings = entry.get("string_matches") or entry.get("literals") or []
     called = entry.get("called_imports") or sorted(set(entry.get("ext_calls") or []))
@@ -104,21 +108,22 @@ def build_restore_prompt(
         ghidra_code=(ghidra_code or "")[:6000],
         toolchain_rules=toolchain_rules_for(profile),
     )
+    extras: List[str] = []
     ops = op_lines(clip_pcode(pcode))
-    if not ops:
+    if ops:
+        extras.append(
+            f"=== {PCODE_SECTION_TITLE} ===\n"
+            "Используй эти ops только как порядок вычисления. "
+            "Не печатай синтаксис p-code как C++. "
+            "Имена, типы и строковые литералы бери из блока Ghidra C выше, не из IR.\n"
+            + "\n".join(ops[:80])
+        )
+    facts = format_restore_facts(ghidra_code, call_sites, iat_facts)
+    if facts:
+        extras.append(facts)
+    if not extras:
         return prompt
-    block = (
-        f"\n=== {PCODE_SECTION_TITLE} ===\n"
-        "Используй эти ops только как порядок вычисления. "
-        "Не печатай синтаксис p-code как C++. "
-        "Имена, типы и строковые литералы бери из блока Ghidra C выше, не из IR.\n"
-        + "\n".join(ops[:80])
-        + "\n\n"
-    )
-    marker = "=== СТРОГИЕ ПРАВИЛА ==="
-    if marker in prompt:
-        return prompt.replace(marker, block + marker, 1)
-    return prompt + block
+    return insert_restore_facts(prompt, "\n\n".join(extras))
 
 
 def keep_dump_literals(code: str, literals: Sequence[str]) -> str:
@@ -832,9 +837,16 @@ class CodeRestorerLLM:
         ghidra_code: str,
         *,
         pcode: str = "",
+        call_sites: object | None = None,
+        iat_facts: object | None = None,
     ) -> Optional[Dict[str, Any]]:
         prompt = build_restore_prompt(
-            entry, ghidra_code, profile=self.profile, pcode=pcode
+            entry,
+            ghidra_code,
+            profile=self.profile,
+            pcode=pcode,
+            call_sites=call_sites,
+            iat_facts=iat_facts,
         )
         raw = self.client.generate(prompt, system=self.system_prompt, json_mode=True)
         self._dump(entry.get("address", ""), prompt, raw)

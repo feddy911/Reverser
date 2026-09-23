@@ -1,0 +1,29 @@
+id: feedback-uchar-format
+profile: gcc_pe_x64
+recipe: feedback
+guessed_name: wrap
+gcc_probe:
+  - "invalid conversion from 'undefined*' {aka 'unsigned char*'} to 'const char*' [-fpermissive]"
+dat_facts:
+  blobs:
+    - va: "0x140001000"
+      kind: format
+      n: 4
+      text: "n=%d"
+ghidra_cpp: |
+  void wrap(void)
+  {
+    unsigned char *pcVar1;
+    pcVar1 = &DAT_140001000;
+    printf(pcVar1);
+  }
+contains:
+  - "==feedback:leftover:format_dat=="
+  - "DAT_140001000"
+  - "printf(pcVar1)"
+not_contains:
+  - "==feedback:skip_forever:"
+  - "==feedback:filled=="
+  - "n=%d"
+compile: false
+notes: "gcc uchar* vs char*; PE format blob is identity leftover. Do not invent the literal. Empty bag is not this class. Mix wrap."

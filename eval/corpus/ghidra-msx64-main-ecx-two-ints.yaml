@@ -1,0 +1,19 @@
+id: ghidra-msx64-main-ecx-two-ints
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: main
+ghidra_cpp: |
+  int main(int n, int m)
+  {
+    int in_ECX;
+    return in_ECX + m;
+  }
+contains:
+  - "return in_ECX + m"
+  - "int in_ECX"
+not_contains:
+  - "return n"
+  - "argc"
+  - "mpz"
+compile: true
+notes: "Two integer formals: in_ECX is not a unique slot-0 bind. Stay leftover. Do not invent argc. Do not pick n. Mix n/m. Not a sample name."

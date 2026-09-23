@@ -1544,6 +1544,54 @@ class TestCritic(unittest.TestCase):
         self.assertTrue(any("concat71_low" in r for r in run.reasons))
         self.assertTrue(director_contract(run))
 
+    def test_leftover_extra_star_formal_is_identity_fail(self):
+        leftover = (
+            "void wrap(longlong ***slot)\n"
+            "{\n"
+            "  longlong ****xs[8];\n"
+            "  slot = (longlong ***)xs;\n"
+            "  (void)xs[0];\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any(
+                "restore leftover extra_star_formal slot" in r
+                for r in verdict.reasons
+            )
+        )
+        self.assertTrue(
+            any(
+                h.source == "ghidra"
+                and h.kind == "extra_star_formal"
+                and h.token == "slot"
+                for h in dialect_hits(leftover)
+            )
+        )
+        human = (
+            "void wrap(longlong *slot)\n"
+            "{\n"
+            "  longlong xs[8];\n"
+            "  (void)xs[0];\n"
+            "  (void)slot;\n"
+            "}\n"
+        )
+        ok = review_function(entry, human, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(
+            any(h.kind == "extra_star_formal" for h in dialect_hits(human))
+        )
+
     def test_leftover_extra_star_stack_array_is_identity_fail(self):
         leftover = (
             "void helper(longlong *out);\n"
@@ -1674,6 +1722,98 @@ class TestCritic(unittest.TestCase):
         self.assertFalse(run.accept)
         self.assertTrue(any("gs_cookie" in r for r in run.reasons))
         self.assertTrue(director_contract(run))
+
+    def test_leftover_glued_placement_new_is_identity_fail(self):
+        leftover = (
+            "void wrap(void)\n"
+            "{\n"
+            "  std::string *home;\n"
+            "  (void)home;new (home) std::string();\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any("restore leftover glued_new new" in r for r in verdict.reasons)
+        )
+        self.assertTrue(
+            any(
+                h.source == "ghidra" and h.kind == "glued_new" and h.token == "new"
+                for h in dialect_hits(leftover)
+            )
+        )
+        human = (
+            "void wrap(void)\n"
+            "{\n"
+            "  std::string *home;\n"
+            "  (void)home;\n"
+            "  new (home) std::string();\n"
+            "}\n"
+        )
+        ok = review_function(entry, human, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(any(h.kind == "glued_new" for h in dialect_hits(human)))
+
+    def test_leftover_overlay_ptr_qword_is_identity_fail(self):
+        leftover = (
+            "void wrap(void)\n"
+            "{\n"
+            "  undefined1 local_9;\n"
+            "  undefined1 auStack_20[16];\n"
+            "  (*(undefined8 *)((char *)(auStack_20) + 8)) = &local_9;\n"
+            "  (void)auStack_20[0];\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any(
+                "restore leftover overlay_ptr auStack_20" in r
+                for r in verdict.reasons
+            )
+        )
+        self.assertTrue(
+            any(
+                h.source == "ghidra"
+                and h.kind == "overlay_ptr"
+                and h.token == "auStack_20"
+                for h in dialect_hits(leftover)
+            )
+        )
+
+    def test_overlay_ptr_qword_gcc_is_leftover_not_llm(self):
+        from src.agents.compiler import match_errors
+        from src.analysis.corpus import load_corpus
+
+        msg = (
+            "invalid conversion from 'undefined1*' {aka 'unsigned char*'} "
+            "to 'undefined8' {aka 'long long unsigned int'} [-fpermissive]"
+        )
+        skip = match_errors([{"message": msg}], cases=[])
+        self.assertTrue(skip.need_llm)
+        self.assertEqual(skip.skip_forever_reasons, [])
+        decision = match_errors([{"message": msg}], load_corpus())
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ghidra-overlay-ptr-qword", decision.known_ids)
+        self.assertEqual(decision.skip_forever_reasons, [])
 
     def test_leftover_facts_disagree_is_identity_fail(self):
         leftover = (

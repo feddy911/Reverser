@@ -1,0 +1,18 @@
+id: ghidra-call-arity-imm-empty
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  void helper(longlong *xs);
+  void wrap(void)
+  {
+    longlong *xs;
+    helper(xs);
+  }
+contains:
+  - "helper(xs);"
+not_contains:
+  - "helper(xs, 2)"
+  - "mpz"
+compile: false
+notes: "Empty call-site bag is not permission to invent the missing immediate. Mix wrap. Same snippet as ghidra-call-arity-imm without sites."

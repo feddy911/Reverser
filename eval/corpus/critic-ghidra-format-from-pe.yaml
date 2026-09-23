@@ -1,0 +1,24 @@
+id: critic-ghidra-format-from-pe
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+dat_facts:
+  blobs:
+    - va: "0x140001000"
+      kind: format
+      n: 4
+      text: "n=%d"
+ghidra_cpp: |
+  void wrap(void)
+  {
+    unsigned char *pcVar1;
+    pcVar1 = &DAT_140001000;
+    printf(pcVar1);
+  }
+contains:
+  - "==ghidra:format_dat:DAT_140001000=="
+not_contains:
+  - "==0=="
+  - "mpz"
+compile: false
+notes: "PE bytes at DAT_ are ASCII+%+NUL. Identity leftover unsigned char* vs char* for printf. Empty bag is not this class. Mix wrap. Not a sample literal. Not mpz_ptr."

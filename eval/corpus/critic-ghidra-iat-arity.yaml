@@ -1,0 +1,23 @@
+id: critic-ghidra-iat-arity
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+iat_facts:
+  protos:
+    - name: __gmpz_cmp_ui
+      arity: 2
+      variadic: false
+      slots:
+        - ["rcx", "mpz_srcptr"]
+        - ["rdx", "unsigned long"]
+ghidra_cpp: |
+  void wrap(void)
+  {
+    __gmpz_cmp_ui(param_1);
+  }
+contains:
+  - "==ghidra:call_arity:__gmpz_cmp_ui=="
+not_contains:
+  - "==0=="
+compile: false
+notes: "IAT proto arity 2, C passes one arg. Bound proto of this PE only. Mix wrap. Do not invent the missing immediate. Not a sample .cpp."

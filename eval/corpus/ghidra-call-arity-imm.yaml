@@ -1,0 +1,28 @@
+id: ghidra-call-arity-imm
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+call_sites:
+  sites:
+    - off: 12
+      kind: rel
+      callee_va: "0x140002000"
+      iat_name: ""
+      arg_regs: ["rcx", "rdx"]
+      imm_slots:
+        - ["rdx", 2]
+      lea_slots: []
+ghidra_cpp: |
+  void helper(longlong *xs);
+  void wrap(void)
+  {
+    longlong *xs;
+    helper(xs);
+  }
+contains:
+  - "helper(xs, 2)"
+not_contains:
+  - "helper(xs);"
+  - "mpz"
+compile: false
+notes: "C helper(xs) has one arg; bytes uniquely put 2 in RDX. Sanitize inserts that immediate. Empty bag must not invent 2. Mix wrap. Not T* vs U*."

@@ -1065,6 +1065,60 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
 
         self.assertEqual(leftover_msx64_in_regs(sret), [])
         self.assertIn("in_RCX", leftover_msx64_in_regs(pair))
+        main_ecx = sanitize_ghidra_cpp(
+            "int main(int n, char **args)\n"
+            "{\n"
+            "  int in_ECX;\n"
+            "  char *in_RDX;\n"
+            "  if (1 < in_ECX) {\n"
+            "    (void)in_RDX;\n"
+            "  }\n"
+            "  return in_ECX;\n"
+            "}\n"
+        )
+        self.assertIn("1 < n", main_ecx)
+        self.assertIn("return n", main_ecx)
+        self.assertIn("in_RDX", main_ecx)
+        self.assertNotIn("in_ECX", main_ecx)
+        self.assertNotIn("argc", main_ecx)
+        self.assertEqual(leftover_msx64_in_regs(main_ecx), ["in_RDX"])
+        two = sanitize_ghidra_cpp(
+            "int main(int n, int m)\n"
+            "{\n"
+            "  int in_ECX;\n"
+            "  return in_ECX + m;\n"
+            "}\n"
+        )
+        self.assertIn("return in_ECX + m", two)
+        self.assertNotIn("return n", two)
+        self.assertEqual(leftover_msx64_in_regs(two), ["in_ECX"])
+        void_main = sanitize_ghidra_cpp(
+            "int main(void)\n"
+            "{\n"
+            "  int in_ECX;\n"
+            "  return in_ECX;\n"
+            "}\n"
+        )
+        self.assertIn("return in_ECX", void_main)
+        shifted = sanitize_ghidra_cpp(
+            "int main(char **args, int n)\n"
+            "{\n"
+            "  int in_ECX;\n"
+            "  (void)args;\n"
+            "  return in_ECX;\n"
+            "}\n"
+        )
+        self.assertIn("return in_ECX", shifted)
+        self.assertNotIn("return n", shifted)
+        still = sanitize_ghidra_cpp(
+            "int add(int n, int m)\n"
+            "{\n"
+            "  int in_ECX;\n"
+            "  return in_ECX + m;\n"
+            "}\n"
+        )
+        self.assertIn("return n + m", still)
+        self.assertNotIn("in_ECX", still)
         trap = sanitize_ghidra_cpp(
             "int add(int x, int y)\n"
             "{\n"
@@ -2033,6 +2087,42 @@ int main(int argc, char **argv) { return 0; }
         )
         self.assertEqual(leftover_extra_star_stack_array(dump_crlf), ["local_740"])
 
+    def test_extra_star_formal_collapses_to_one_star(self):
+        from src.analysis.ghidra_cpp import (
+            leftover_extra_star_formal,
+            sanitize_ghidra_cpp,
+        )
+
+        raw = (
+            "void helper(longlong *a);\n"
+            "void wrap(longlong ***slot)\n"
+            "{\n"
+            "  longlong ****xs[8];\n"
+            "  slot = (longlong ***)xs;\n"
+            "  helper((longlong *)slot);\n"
+            "  (void)xs[0];\n"
+            "}\n"
+        )
+        self.assertEqual(leftover_extra_star_formal(raw), ["slot"])
+        got = sanitize_ghidra_cpp(raw)
+        self.assertIn("void wrap(longlong *slot)", got)
+        self.assertIn("longlong xs[8]", got)
+        self.assertIn("helper(xs)", got)
+        self.assertNotIn("***", got)
+        self.assertFalse(leftover_extra_star_formal(got))
+        keep = (
+            "struct Rec { int n; };\n"
+            "void keep(longlong ***slot, Rec ***node)\n"
+            "{\n"
+            "  (void)slot;\n"
+            "  (void)node;\n"
+            "}\n"
+        )
+        self.assertEqual(leftover_extra_star_formal(keep), [])
+        kept = sanitize_ghidra_cpp(keep)
+        self.assertIn("longlong ***slot", kept)
+        self.assertIn("Rec ***node", kept)
+
     def test_extra_star_facts_permit_and_veto(self):
         from src.analysis.ghidra_cpp import (
             extra_star_rewrite_permitted,
@@ -2102,6 +2192,77 @@ int main(int argc, char **argv) { return 0; }
         self.assertFalse(leftover_gs_cookie_slot(used))
         kept = sanitize_ghidra_cpp(used)
         self.assertIn("padding", kept)
+
+    def test_glued_placement_new_is_split(self):
+        from src.analysis.ghidra_cpp import (
+            leftover_glued_placement_new,
+            sanitize_ghidra_cpp,
+        )
+
+        raw = (
+            "void wrap(void)\n"
+            "{\n"
+            "  std::string *home;\n"
+            "  (void)home;std::string::string(home);\n"
+            "  if (home) {\n"
+            "    (void)home;\n"
+            "  }std::vector<std::string>::vector("
+            "(std::vector<std::string> *)home);\n"
+            "}\n"
+        )
+        smashed = (
+            "(void)home;new (home) std::string();\n"
+            "}new ((std::vector<std::string> *)home) "
+            "std::vector<std::string>();\n"
+        )
+        self.assertEqual(leftover_glued_placement_new(smashed), ["new"])
+        got = sanitize_ghidra_cpp(raw)
+        self.assertIn("(void)home;\n", got)
+        self.assertIn("new (home) std::string()", got)
+        self.assertIn(
+            "new ((std::vector<std::string> *)home) std::vector<std::string>()",
+            got,
+        )
+        self.assertNotIn(";new (", got)
+        self.assertNotIn("}new (", got)
+        self.assertFalse(leftover_glued_placement_new(got))
+        already = sanitize_ghidra_cpp(smashed)
+        self.assertNotIn(";new (", already)
+        self.assertNotIn("}new (", already)
+        self.assertFalse(leftover_glued_placement_new(already))
+
+    def test_overlay_ptr_qword_store_stays_leftover(self):
+        from src.analysis.ghidra_cpp import (
+            leftover_overlay_ptr_qword,
+            sanitize_ghidra_cpp,
+        )
+
+        raw = (
+            "void wrap(void)\n"
+            "{\n"
+            "  undefined1 local_9;\n"
+            "  undefined1 auStack_20[16];\n"
+            "  auStack_20._8_8_ = &local_9;\n"
+            "  (void)auStack_20[0];\n"
+            "}\n"
+        )
+        self.assertEqual(leftover_overlay_ptr_qword(raw), ["auStack_20"])
+        got = sanitize_ghidra_cpp(raw)
+        self.assertIn(
+            "(*(undefined8 *)((char *)(auStack_20) + 8)) = &local_9",
+            got,
+        )
+        self.assertNotIn("._8_8_", got)
+        self.assertNotIn("reinterpret_cast", got)
+        self.assertEqual(leftover_overlay_ptr_qword(got), ["auStack_20"])
+        word = (
+            "void wrap(void)\n"
+            "{\n"
+            "  undefined1 auStack_20[16];\n"
+            "  auStack_20._8_8_ = 1;\n"
+            "}\n"
+        )
+        self.assertFalse(leftover_overlay_ptr_qword(word))
 
     def test_facts_disagree_needs_byte_slots(self):
         from src.analysis.ghidra_cpp import leftover_facts_disagree

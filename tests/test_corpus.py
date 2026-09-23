@@ -140,8 +140,17 @@ class TestCorpusEval(unittest.TestCase):
             "critic-ghidra-extra-star-facts-disagree",
             "ghidra-extra-star-facts-permit",
             "ghidra-extra-star-facts-veto",
+            "ghidra-extra-star-formal",
+            "ghidra-extra-star-formal-keep",
+            "critic-ghidra-extra-star-formal",
             "ghidra-gs-cookie-slot",
             "critic-ghidra-gs-cookie-slot",
+            "ghidra-glued-placement-new",
+            "critic-ghidra-glued-placement-new",
+            "ghidra-overlay-ptr-qword",
+            "critic-ghidra-overlay-ptr-qword",
+            "ghidra-msx64-main-ecx-unique",
+            "ghidra-msx64-main-ecx-two-ints",
             "ghidra-size-type-as-vector-star",
             "ghidra-value-type-not-member-of-user",
             "msvc-jmc-helper-undeclared",
@@ -423,6 +432,18 @@ class TestCorpusEval(unittest.TestCase):
         self.assertIn("longlong ****xs[8]", star_c.ghidra_cpp)
         self.assertNotIn("NestWalk", star_c.ghidra_cpp)
         self.assertNotIn("MyCollatz", star_c.ghidra_cpp)
+        formal = cases["ghidra-extra-star-formal"]
+        self.assertEqual(formal.recipe, "sanitize")
+        self.assertTrue(formal.compile)
+        self.assertIn("longlong ***slot", formal.ghidra_cpp)
+        self.assertNotIn("NestWalk", formal.ghidra_cpp)
+        self.assertNotIn("MyCollatz", formal.ghidra_cpp)
+        keep = cases["ghidra-extra-star-formal-keep"]
+        self.assertIn("Rec ***node", keep.ghidra_cpp)
+        self.assertNotIn("mpz", keep.ghidra_cpp)
+        formal_c = cases["critic-ghidra-extra-star-formal"]
+        self.assertEqual(formal_c.recipe, "critic")
+        self.assertIn("longlong ***slot", formal_c.ghidra_cpp)
         star_f = cases["critic-ghidra-extra-star-facts-disagree"]
         self.assertEqual(star_f.recipe, "critic")
         self.assertIn("longlong ****xs[8]", star_f.ghidra_cpp)
@@ -457,6 +478,34 @@ class TestCorpusEval(unittest.TestCase):
         self.assertIn("undefined1 local_40[32]", gs_c.ghidra_cpp)
         self.assertNotIn("NestWalk", gs_c.ghidra_cpp)
         self.assertNotIn("MyCollatz", gs_c.ghidra_cpp)
+        glued = cases["ghidra-glued-placement-new"]
+        self.assertEqual(glued.recipe, "sanitize")
+        self.assertTrue(glued.compile)
+        self.assertIn(";std::string::string(home)", glued.ghidra_cpp)
+        self.assertNotIn("NestWalk", glued.ghidra_cpp)
+        self.assertNotIn("MyCollatz", glued.ghidra_cpp)
+        glued_c = cases["critic-ghidra-glued-placement-new"]
+        self.assertEqual(glued_c.recipe, "critic")
+        self.assertIn(";new (home)", glued_c.ghidra_cpp)
+        overlay = cases["ghidra-overlay-ptr-qword"]
+        self.assertEqual(overlay.recipe, "sanitize")
+        self.assertFalse(overlay.compile)
+        self.assertIn("auStack_20._8_8_ = &local_9", overlay.ghidra_cpp)
+        self.assertNotIn("NestWalk", overlay.ghidra_cpp)
+        overlay_c = cases["critic-ghidra-overlay-ptr-qword"]
+        self.assertEqual(overlay_c.recipe, "critic")
+        self.assertIn("auStack_20", overlay_c.ghidra_cpp)
+        ecx = cases["ghidra-msx64-main-ecx-unique"]
+        self.assertEqual(ecx.recipe, "sanitize")
+        self.assertTrue(ecx.compile)
+        self.assertIn("int in_ECX", ecx.ghidra_cpp)
+        self.assertNotIn("argc", ecx.ghidra_cpp)
+        self.assertNotIn("NestWalk", ecx.ghidra_cpp)
+        self.assertNotIn("MyCollatz", ecx.ghidra_cpp)
+        two = cases["ghidra-msx64-main-ecx-two-ints"]
+        self.assertEqual(two.recipe, "sanitize")
+        self.assertIn("int n, int m", two.ghidra_cpp)
+        self.assertNotIn("argc", two.ghidra_cpp)
 
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):

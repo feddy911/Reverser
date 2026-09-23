@@ -708,7 +708,15 @@ def rewrite_ghidra_member_calls(code: str) -> str:
         if rewritten is None:
             i += 1
             continue
-        out.append(s[copied:t0])
+        prefix = s[copied:t0]
+        if rewritten.startswith("new ("):
+            tail = prefix.rstrip(" \t")
+            if tail.endswith(";") or tail.endswith("}"):
+                line_start = prefix.rfind("\n") + 1
+                indent_m = re.match(r"[ \t]*", prefix[line_start:])
+                pad = indent_m.group(0) if indent_m and indent_m.group(0) else "  "
+                prefix = tail + "\n" + pad
+        out.append(prefix)
         out.append(rewritten)
         copied = close_p + 1
         i = copied
@@ -2508,11 +2516,35 @@ def leftover_msx64_extraout(code: str, *, dump: str = "") -> list[str]:
     return out
 
 
+def _call_sites_for_emit(data: dict) -> object | None:
+    """Sites already on the record, else a scan of func_bytes.
+
+    Empty bytes stay None so fill does not invent an immediate.
+    Does not write the bag back onto the record and does not touch p4.
+    """
+    if data.get("call_sites") is not None:
+        return data.get("call_sites")
+    blob = data.get("func_bytes") or b""
+    if not blob:
+        return None
+    from src.analysis.call_sites import call_sites_from_bytes
+
+    facts = call_sites_from_bytes(
+        blob,
+        addr=str(data.get("address") or ""),
+    )
+    if not facts.sites:
+        return None
+    return facts
+
+
 def emit_sanitized_restore(data: dict) -> None:
     """Sanitize the run body. Does not write the restore cache key.
 
     Keeps cpp_code_raw once so the cached LLM text stays comparable.
     Optional func_bytes recover dword array fills Ghidra dead-stored.
+    The same bytes supply unique call immediates. Runner does not import
+    call sites into the restore prompt.
     """
     raw = data.get("cpp_code") or ""
     if not str(raw).strip():
@@ -2521,6 +2553,8 @@ def emit_sanitized_restore(data: dict) -> None:
         raw,
         func_bytes=data.get("func_bytes") or b"",
         fn_facts=data.get("fn_facts"),
+        call_sites=_call_sites_for_emit(data),
+        iat_facts=data.get("iat_facts"),
     )
     if emitted == raw:
         return
@@ -2650,9 +2684,59 @@ def _strip_dup_formal_decl(body: str, pname: str) -> str:
     )
 
 
-def _rewrite_one_msx64_fn(blob: str, ident: str, t0: int, close: int, end: int) -> str:
-    if ident == "main":
+def _unique_slot0_int_formal(
+    formals: list[tuple[str, str]], decl_ty: str
+) -> str | None:
+    """ECX bind on main: one integer formal, and it is slot 0.
+
+    Two ints stay leftover. A pointer formal is not this slot.
+    The name is the formal already in the signature. Do not invent argc.
+    """
+    matches: list[tuple[int, str]] = []
+    for i, (pty, pname) in enumerate(formals):
+        if "*" in _norm_abi_type(pty):
+            continue
+        if not _abi_types_compatible(decl_ty, pty):
+            continue
+        matches.append((i, pname))
+    if len(matches) != 1 or matches[0][0] != 0:
+        return None
+    return matches[0][1]
+
+
+def _main_unique_ecx_repl(
+    body: str, formals: list[tuple[str, str]]
+) -> dict[str, str]:
+    repl: dict[str, str] = {}
+    for alias in _MS64_INT_REGS[0]:
+        if not re.search(rf"\b{re.escape(alias)}\b", body):
+            continue
+        decl_ty = _in_reg_decl_type(body, alias)
+        if decl_ty is None or "*" in _norm_abi_type(decl_ty):
+            continue
+        pname = _unique_slot0_int_formal(formals, decl_ty)
+        if pname is None:
+            continue
+        repl[alias] = pname
+    return repl
+
+
+def _apply_in_reg_repl(
+    blob: str, brace: int, end: int, body: str, repl: dict[str, str]
+) -> str:
+    if not repl:
         return blob
+    new_body = body
+    for alias, pname in sorted(repl.items(), key=lambda kv: -len(kv[0])):
+        new_body = _drop_in_reg_decl(new_body, alias)
+        new_body = re.sub(rf"\b{re.escape(alias)}\b", pname, new_body)
+        if pname == "this":
+            continue
+        new_body = _strip_dup_formal_decl(new_body, pname)
+    return blob[:brace] + new_body + blob[end + 1 :]
+
+
+def _rewrite_one_msx64_fn(blob: str, ident: str, t0: int, close: int, end: int) -> str:
     mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
     if not mname:
         return blob
@@ -2666,6 +2750,10 @@ def _rewrite_one_msx64_fn(blob: str, ident: str, t0: int, close: int, end: int) 
     body = blob[brace : end + 1]
     if "in_" not in body:
         return blob
+    if ident == "main":
+        return _apply_in_reg_repl(
+            blob, brace, end, body, _main_unique_ecx_repl(body, formals)
+        )
     start_slot = 1 if _is_msx64_sret(ret, formals, body) else 0
     this_local = _in_reg_decl_type(body, "this") is not None
     if not formals and not (start_slot and this_local):
@@ -2694,20 +2782,16 @@ def _rewrite_one_msx64_fn(blob: str, ident: str, t0: int, close: int, end: int) 
             if not re.search(rf"\b{re.escape(alias)}\b", body):
                 continue
             repl[alias] = "this"
-    if not repl:
-        return blob
-    new_body = body
-    for alias, pname in sorted(repl.items(), key=lambda kv: -len(kv[0])):
-        new_body = _drop_in_reg_decl(new_body, alias)
-        new_body = re.sub(rf"\b{re.escape(alias)}\b", pname, new_body)
-        if pname == "this":
-            continue
-        new_body = _strip_dup_formal_decl(new_body, pname)
-    return blob[:brace] + new_body + blob[end + 1 :]
+    return _apply_in_reg_repl(blob, brace, end, body, repl)
 
 
 def _rewrite_msx64_incoming(code: str) -> str:
-    """Bind Ghidra in_RCX/in_RDX to formals (Microsoft x64 / MinGW PE)."""
+    """Bind Ghidra in_RCX/in_RDX to formals (Microsoft x64 / MinGW PE).
+
+    ``main`` stays unbound except a unique integer formal in slot 0
+    (in_ECX / in_CX / integer in_RCX). Two ints stay leftover.
+    Do not invent argc. Do not bind in_RDX on main.
+    """
     blob = code or ""
     spans = list(_iter_function_defs(blob, skip_qualified=True))
     for ident, t0, close, end in reversed(spans):
@@ -3588,6 +3672,404 @@ def leftover_facts_disagree(code: str, facts: object | None = None) -> list[str]
     return []
 
 
+_RE_PRINTF_FAM = re.compile(
+    r"\b(?:printf|sprintf|snprintf|fprintf|vprintf|vsprintf|"
+    r"__stdio_common_vsprintf_s)\s*\("
+)
+_RE_DAT_ID = re.compile(r"\b(DAT_[0-9A-Fa-f]+)\b")
+
+
+def leftover_format_from_pe(code: str, dat_facts: object | None = None) -> list[str]:
+    """printf-family uses &DAT_ whose PE bytes are a format blob.
+
+    Empty bag is not this class and not a pass. Missing string is not a
+    literal to invent. Do not bind T* vs U*.
+    """
+    from src.analysis.dat_facts import format_va_set
+
+    vas = format_va_set(dat_facts)
+    if not vas:
+        return []
+    blob = code or ""
+    if not _RE_PRINTF_FAM.search(blob):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _RE_DAT_ID.finditer(blob):
+        tok = m.group(1)
+        try:
+            va = int(tok.split("_", 1)[1], 16)
+        except (IndexError, ValueError):
+            continue
+        if va in vas and tok not in seen:
+            seen.add(tok)
+            out.append(tok)
+    return out
+
+
+_RE_C_CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+_NOT_C_CALL = frozenset(
+    {
+        "if", "while", "for", "switch", "catch", "return", "sizeof", "alignof",
+        "typeof", "decltype", "static_assert", "offsetof", "typeid",
+        "new", "delete", "case", "else", "do", "goto", "throw", "this",
+    }
+)
+_RE_IMM_FORMAL_TY = re.compile(
+    r"^(?:unsigned\s+)?(?:long\s+long|long|int|short|char|size_t|"
+    r"uint(?:8|16|32|64)_t|int(?:8|16|32|64)_t|bool)$",
+    re.I,
+)
+
+
+def _iter_c_name_parens(code: str):
+    """Yield (name, arity, inner_start, close, inner, is_decl, is_def)."""
+    s = code or ""
+    for m in _RE_C_CALL.finditer(s):
+        name = m.group(1)
+        if name in _NOT_C_CALL:
+            continue
+        pre = s[: m.start()].rstrip()
+        last = re.search(r"([A-Za-z_][A-Za-z0-9_]*|\*|&)\s*$", pre)
+        is_decl = bool(last and last.group(1) not in _NOT_C_CALL)
+        open_p = m.end() - 1
+        close = _match_forward(s, open_p, "(", ")")
+        if close < 0:
+            continue
+        after = s[close + 1 :].lstrip()
+        is_def = after.startswith("{")
+        inner = s[open_p + 1 : close].strip()
+        n = 0 if not inner or inner == "void" else len(_split_top_args(inner))
+        yield name, n, open_p + 1, close, inner, is_decl, is_def
+
+
+def _c_call_arities(code: str) -> list[tuple[str, int]]:
+    """Call expressions in C. Definitions and prototypes are skipped."""
+    return [
+        (name, n)
+        for name, n, _a, _b, _inner, is_decl, is_def in _iter_c_name_parens(code)
+        if not is_decl and not is_def
+    ]
+
+
+def _c_call_spans(code: str) -> list[tuple[str, int, int, int, str]]:
+    """Call expressions with inner spans. Definitions and prototypes skipped."""
+    return [
+        (name, n, start, close, inner)
+        for name, n, start, close, inner, is_decl, is_def in _iter_c_name_parens(
+            code
+        )
+        if not is_decl and not is_def
+    ]
+
+
+def _c_proto_spans(code: str) -> list[tuple[str, int, int, int, str]]:
+    """Prototypes (declarator then ';'), not definitions or calls."""
+    return [
+        (name, n, start, close, inner)
+        for name, n, start, close, inner, is_decl, is_def in _iter_c_name_parens(
+            code
+        )
+        if is_decl and not is_def
+    ]
+
+
+def _site_want_arity(site: object) -> int:
+    if hasattr(site, "arg_regs"):
+        regs = tuple(getattr(site, "arg_regs") or ())
+    elif isinstance(site, dict):
+        regs = tuple(site.get("arg_regs") or ())
+    else:
+        return 0
+    return len(regs)
+
+
+def _site_iat_name(site: object) -> str:
+    if hasattr(site, "iat_name"):
+        return str(getattr(site, "iat_name") or "")
+    if isinstance(site, dict):
+        return str(site.get("iat_name") or "")
+    return ""
+
+
+def _site_arg_regs(site: object) -> tuple[str, ...]:
+    if hasattr(site, "arg_regs"):
+        regs = tuple(getattr(site, "arg_regs") or ())
+    elif isinstance(site, dict):
+        regs = tuple(site.get("arg_regs") or ())
+    else:
+        return ()
+    return tuple(str(r or "").lower() for r in regs if r)
+
+
+def _site_imm_map(site: object) -> dict[str, int]:
+    """Unique imm per arg reg. Conflicting values drop that reg."""
+    if hasattr(site, "imm_slots"):
+        raw = list(getattr(site, "imm_slots") or ())
+    elif isinstance(site, dict):
+        raw = list(site.get("imm_slots") or [])
+    else:
+        raw = []
+    out: dict[str, int] = {}
+    conflict: set[str] = set()
+    for item in raw:
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            continue
+        reg = str(item[0] or "").lower()
+        if not reg or reg in conflict:
+            continue
+        try:
+            val = int(item[1])
+        except (TypeError, ValueError):
+            continue
+        if reg in out and out[reg] != val:
+            conflict.add(reg)
+            out.pop(reg, None)
+            continue
+        out[reg] = val
+    return out
+
+
+def _format_call_imm(val: int) -> str:
+    return str(int(val))
+
+
+def _imm_extras_for_site(got: int, site: object) -> list[str]:
+    """Consecutive missing arg_regs that have a unique immediate. Else empty.
+
+    Does not invent a value. Does not use lea_slots. A gap stops the fill.
+    """
+    regs = _site_arg_regs(site)
+    if got >= len(regs):
+        return []
+    imm = _site_imm_map(site)
+    if not imm:
+        return []
+    extras: list[str] = []
+    for reg in regs[got:]:
+        if reg not in imm:
+            break
+        extras.append(_format_call_imm(imm[reg]))
+    return extras
+
+
+def _bound_proto_slots(iat_facts: object | None, cname: str) -> list[str]:
+    """Slot types for a bound IAT name. Empty if this PE did not import it."""
+    if not cname or iat_facts is None:
+        return []
+    protos: list[object] = []
+    if hasattr(iat_facts, "protos"):
+        protos = list(getattr(iat_facts, "protos") or ())
+    elif isinstance(iat_facts, dict):
+        protos = list(iat_facts.get("protos") or [])
+    rows: dict[str, list[str]] = {}
+    for p in protos:
+        if hasattr(p, "name"):
+            name = str(getattr(p, "name") or "")
+            raw_slots = list(getattr(p, "slots") or ())
+        elif isinstance(p, dict):
+            name = str(p.get("name") or "")
+            raw_slots = list(p.get("slots") or [])
+        else:
+            continue
+        if not name:
+            continue
+        types: list[str] = []
+        for item in raw_slots:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                types.append(str(item[1] or "").strip())
+        if types:
+            rows[name] = types
+    if cname in rows:
+        return rows[cname]
+    from src.analysis.iat_proto import proto_for_name
+
+    proto = proto_for_name(cname)
+    if proto and proto.name in rows:
+        return rows[proto.name]
+    return []
+
+
+def _join_call_inner(inner: str, extras: list[str]) -> str:
+    added = ", ".join(extras)
+    blob = (inner or "").strip()
+    if not blob or blob == "void":
+        return added
+    return blob + ", " + added
+
+
+def _sites_list(call_sites: object | None) -> list[object]:
+    if call_sites is None:
+        return []
+    if hasattr(call_sites, "sites"):
+        return list(getattr(call_sites, "sites") or ())
+    if isinstance(call_sites, dict):
+        return list(call_sites.get("sites") or [])
+    if isinstance(call_sites, (list, tuple)):
+        return list(call_sites)
+    return []
+
+
+def _proto_wants(iat_facts: object | None) -> list[tuple[str, int, bool]]:
+    """Bound IAT protos only: (name, arity, variadic)."""
+    if iat_facts is None:
+        return []
+    protos: list[object] = []
+    if hasattr(iat_facts, "protos"):
+        protos = list(getattr(iat_facts, "protos") or ())
+    elif isinstance(iat_facts, dict):
+        protos = list(iat_facts.get("protos") or [])
+    out: list[tuple[str, int, bool]] = []
+    for p in protos:
+        if hasattr(p, "name"):
+            name = str(getattr(p, "name") or "")
+            arity = int(getattr(p, "arity") or 0)
+            variadic = bool(getattr(p, "variadic"))
+        elif isinstance(p, dict):
+            name = str(p.get("name") or "")
+            try:
+                arity = int(p.get("arity") or 0)
+            except (TypeError, ValueError):
+                continue
+            variadic = bool(p.get("variadic"))
+        else:
+            continue
+        if name and arity > 0:
+            out.append((name, arity, variadic))
+    return out
+
+
+def leftover_call_arity(
+    code: str,
+    call_sites: object | None = None,
+    iat_facts: object | None = None,
+) -> list[str]:
+    """C call has fewer args than MS x64 arg_regs or bound IAT proto.
+
+    Empty bag is not this class. Does not invent the missing immediate.
+    Does not bind T* vs U*. Token is the callee ident in C.
+    """
+    calls = _c_call_arities(code)
+    if not calls:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(name: str) -> None:
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+
+    bound = _proto_wants(iat_facts)
+    if bound:
+        from src.analysis.iat_proto import proto_for_name
+
+        by_name = {n: (a, v) for n, a, v in bound}
+        for cname, got in calls:
+            key = cname if cname in by_name else ""
+            if not key:
+                proto = proto_for_name(cname)
+                key = proto.name if proto and proto.name in by_name else ""
+            if not key:
+                continue
+            want, variadic = by_name[key]
+            if got < want:
+                add(cname)
+
+    sites = [s for s in _sites_list(call_sites) if _site_want_arity(s) > 0]
+    if not sites:
+        return out
+    named: dict[str, list[int]] = {}
+    unnamed: list[int] = []
+    for s in sites:
+        want = _site_want_arity(s)
+        nm = _site_iat_name(s)
+        if nm:
+            named.setdefault(nm, []).append(want)
+        else:
+            unnamed.append(want)
+    for nm, wants in named.items():
+        gots = [n for cname, n in calls if cname == nm]
+        for got, want in zip(gots, wants):
+            if got < want:
+                add(nm)
+    if len(unnamed) == 1 and len(calls) == 1:
+        cname, got = calls[0]
+        if got < unnamed[0]:
+            add(cname)
+    return out
+
+
+def fill_truncated_call_imms(
+    code: str,
+    call_sites: object | None = None,
+    iat_facts: object | None = None,
+) -> str:
+    """Insert unique immediates into truncated C calls. Empty bag is a no-op.
+
+    Missing args come from CallSiteFacts imm_slots only. lea is not a value.
+    IAT proto types attach only to *new* formals of a bound prototype when
+    that type is an integer matching the filled immediate. Does not rewrite
+    existing formals (T* vs U* stays). Does not invent mpz_ptr or a missing
+    immediate. Does not bind a register to a dump ident.
+    """
+    s = code or ""
+    sites = [x for x in _sites_list(call_sites) if _site_want_arity(x) > 0]
+    if not s or not sites:
+        return s
+    calls = _c_call_spans(s)
+    if not calls:
+        return s
+    named: dict[str, list[object]] = {}
+    unnamed: list[object] = []
+    for site in sites:
+        nm = _site_iat_name(site)
+        if nm:
+            named.setdefault(nm, []).append(site)
+        else:
+            unnamed.append(site)
+    splices: list[tuple[int, int, str]] = []
+    filled_n: dict[str, int] = {}
+
+    def plan(idx: int, site: object) -> None:
+        name, got, start, close, inner = calls[idx]
+        extras = _imm_extras_for_site(got, site)
+        if not extras:
+            return
+        splices.append((start, close, _join_call_inner(inner, extras)))
+        filled_n[name] = max(filled_n.get(name, 0), len(extras))
+
+    for nm, bag in named.items():
+        idxs = [i for i, row in enumerate(calls) if row[0] == nm]
+        for idx, site in zip(idxs, bag):
+            plan(idx, site)
+    if len(unnamed) == 1 and len(calls) == 1:
+        plan(0, unnamed[0])
+    if filled_n:
+        for name, n, start, close, inner in _c_proto_spans(s):
+            extra_n = filled_n.get(name, 0)
+            if extra_n <= 0:
+                continue
+            slots = _bound_proto_slots(iat_facts, name)
+            if n >= len(slots):
+                continue
+            types: list[str] = []
+            for ty in slots[n : n + extra_n]:
+                if not _RE_IMM_FORMAL_TY.match((ty or "").strip()):
+                    types = []
+                    break
+                types.append(ty.strip())
+            if not types:
+                continue
+            splices.append((start, close, _join_call_inner(inner, types)))
+    if not splices:
+        return s
+    out = s
+    for start, close, new_inner in sorted(splices, key=lambda r: r[0], reverse=True):
+        out = out[:start] + new_inner + out[close:]
+    return out
+
+
 def _facts_bag_empty(facts: object | None) -> bool:
     """True if facts are missing or have no byte slots. Not a pass token."""
     if facts is None:
@@ -3693,7 +4175,108 @@ def _rewrite_extra_star_word_arrays(
         return f"{m.group(1)}{m.group(2)} {m.group(4)}[{m.group(5)}];"
 
     blob = _RE_EXTRASTAR_WORD_ARRAY.sub(repl_decl, code or "")
-    return _fold_extra_star_array_temps(blob, names)
+    blob = _fold_extra_star_array_temps(blob, names)
+    return _rewrite_extra_star_formals(blob, _bound_extra_star_formals(code or "", names))
+
+
+def _word_star_count(pty: str) -> int:
+    s = (pty or "").strip()
+    m = re.match(rf"^(?:{_RE_WORD_TY})\b", s)
+    if not m:
+        return 0
+    return _star_count(s[m.end() :])
+
+
+def _bound_extra_star_formals(
+    code: str, arrays: dict[str, str]
+) -> dict[str, list[str]]:
+    """Word formals with 3+ stars assigned from an extra-star array.
+
+    A lone ``T ***`` formal is not this class. ``Rec ***`` is not a word.
+    Do not invent mpz_ptr. Do not bind T* vs U*.
+    """
+    if not arrays:
+        return {}
+    alt = "|".join(re.escape(n) for n in arrays)
+    assign = re.compile(
+        rf"\b([A-Za-z_]\w*)\s*=\s*"
+        rf"\(\s*{_RE_WORD_TY}(?:\s*\*){{2,}}\s*\)\s*(?:{alt})\b"
+    )
+    out: dict[str, list[str]] = {}
+    blob = code or ""
+    for ident, t0, close, _end in _iter_function_defs(blob, skip_qualified=True):
+        mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
+        if not mname:
+            continue
+        open_p = t0 + mname.end() - 1
+        formals = _parse_param_decls(blob[open_p + 1 : close])
+        brace = _brace_after_params(blob, close)
+        if brace < 0:
+            continue
+        body = blob[brace : _end + 1]
+        lhs = {m.group(1) for m in assign.finditer(body)}
+        names: list[str] = []
+        for pty, pname in formals:
+            if pname not in lhs or pname in names:
+                continue
+            if _word_star_count(pty) < 3:
+                continue
+            names.append(pname)
+        if names:
+            out[ident] = names
+    return out
+
+
+def leftover_extra_star_formal(code: str) -> list[str]:
+    """``longlong ***slot = (longlong ***)xs`` next to ``longlong ****xs[N]``.
+
+    The formal compiles. It is the same overlay as the array, not a human
+    triple pointer. No array in the function — not this class.
+    """
+    arrays = _extra_star_word_array_names(code or "")
+    seen: set[str] = set()
+    out: list[str] = []
+    for names in _bound_extra_star_formals(code or "", arrays).values():
+        for name in names:
+            if name in seen:
+                continue
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+_RE_WORD_MULTI_STAR_NAME = re.compile(
+    rf"\b({_RE_WORD_TY})\s+((?:\*\s*){{3,}})([A-Za-z_]\w*)\b"
+)
+
+
+def _rewrite_extra_star_formals(code: str, bound: dict[str, list[str]]) -> str:
+    """Collapse a bound word formal to one star. Do not drop the parameter."""
+    if not bound:
+        return code or ""
+    blob = code or ""
+    spans = list(_iter_function_defs(blob, skip_qualified=True))
+    for ident, t0, close, _end in reversed(spans):
+        names = bound.get(ident)
+        if not names:
+            continue
+        mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
+        if not mname:
+            continue
+        open_p = t0 + mname.end() - 1
+        inner = blob[open_p + 1 : close]
+        want = set(names)
+
+        def repl(m: re.Match[str], _want: set[str] = want) -> str:
+            if m.group(3) not in _want:
+                return m.group(0)
+            return f"{m.group(1)} *{m.group(3)}"
+
+        new_inner = _RE_WORD_MULTI_STAR_NAME.sub(repl, inner)
+        if new_inner == inner:
+            continue
+        blob = blob[: open_p + 1] + new_inner + blob[close:]
+    return blob
 
 
 _RE_INT_ARRAY_DECL = re.compile(
@@ -3831,6 +4414,54 @@ _RE_UNDEF1_32_DECL = re.compile(
 )
 
 
+_RE_GLUED_PLACEMENT_NEW = re.compile(r"([;}])[ \t]*new\s*\(")
+_RE_OVERLAY_PTR_QWORD = re.compile(
+    r"(?:"
+    r"\(\s*\*\s*\(\s*undefined8\s*\*\s*\)\s*\(\s*\(\s*char\s*\*\s*\)\s*\(\s*"
+    r"([A-Za-z_]\w*)\s*\)\s*\+\s*\d+\s*\)\s*\)"
+    r"|"
+    r"((?:auStack\w*|padding|local_[0-9A-Fa-f]+))\._\d+_8_"
+    r")\s*=\s*(?:&|[A-Za-z_]\w*\s*\+)"
+)
+
+
+def leftover_glued_placement_new(code: str) -> list[str]:
+    """Ctor rewrite glued onto the previous stmt as ``;new (`` / ``}new (``.
+
+    Split to a new line. Do not invent begin/end. Do not drop the placement new.
+    """
+    return ["new"] if _RE_GLUED_PLACEMENT_NEW.search(code or "") else []
+
+
+def _split_glued_placement_new(code: str) -> str:
+    blob = code or ""
+
+    def repl(m: re.Match[str]) -> str:
+        line_start = blob.rfind("\n", 0, m.start()) + 1
+        indent_m = re.match(r"[ \t]*", blob[line_start : m.start()])
+        pad = indent_m.group(0) if indent_m and indent_m.group(0) else "  "
+        return f"{m.group(1)}\n{pad}new ("
+
+    return _RE_GLUED_PLACEMENT_NEW.sub(repl, blob)
+
+
+def leftover_overlay_ptr_qword(code: str) -> list[str]:
+    """Pointer stored into an 8-byte overlay slot (undefined1* → undefined8).
+
+    Cookie/GS-adjacent leftover. Do not invent a cast. Do not drop the store.
+    Do not bind T* vs U*.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _RE_OVERLAY_PTR_QWORD.finditer(code or ""):
+        name = m.group(1) or m.group(2)
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
 def leftover_gs_cookie_slot(code: str) -> list[str]:
     """Unused ``undefined1 name[32]`` is GS/RTC cookie pad, not a human buffer.
 
@@ -3945,6 +4576,8 @@ def sanitize_ghidra_cpp(
     *,
     func_bytes: bytes | bytearray | None = None,
     fn_facts: object | None = None,
+    call_sites: object | None = None,
+    iat_facts: object | None = None,
 ) -> str:
     """Rewrite Ghidra type spellings and member-call syntax into parseable C++."""
     t = (code or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -4016,6 +4649,7 @@ def sanitize_ghidra_cpp(
     t = _USING_STD.sub("", t)
     t = _strip_invalid_using(t)
     t = rewrite_ghidra_member_calls(t)
+    t = _split_glued_placement_new(t)
     t = _outside_strings(t, _strip_empty_allocator_dtors)
     t = _rewrite_msx64_incoming(t)
     t = _rewrite_msx64_concat_stack_ptr(t)
@@ -4056,5 +4690,6 @@ def sanitize_ghidra_cpp(
 
         facts = fn_facts_from_dump_entry({}, func_bytes=blob)
     t = _rewrite_extra_star_word_arrays(t, facts=facts)
+    t = fill_truncated_call_imms(t, call_sites, iat_facts)
     t = _outside_strings(t, lambda chunk: re.sub(r"\n[ \t]*\n+", "\n", chunk))
     return t

@@ -1,0 +1,18 @@
+id: critic-ghidra-extra-star-formal
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(longlong ***slot)
+  {
+    longlong ****xs[8];
+    slot = (longlong ***)xs;
+    (void)xs[0];
+  }
+contains:
+  - "==ghidra:extra_star_formal:slot=="
+not_contains:
+  - "==0=="
+  - "mpz"
+compile: false
+notes: "longlong *** formal assigned from longlong ****xs[N] is identity leftover. It compiles. Mix wrap. Sanitizer emits longlong *slot. No array means not this class. Not Rec ***. Not mpz_ptr."

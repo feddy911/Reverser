@@ -158,6 +158,19 @@ class TestRunStore(unittest.TestCase):
             any(i["reason"] == "extra_star" for i in stack["items"])
         )
         self.assertNotIn("disasm_facts", stack)
+        formal = build_analysis_stack(
+            [],
+            tu_text=(
+                "void wrap(longlong ***slot)\n"
+                "{\n"
+                "  longlong ****xs[8];\n"
+                "  slot = (longlong ***)xs;\n"
+                "}\n"
+            ),
+        )
+        self.assertTrue(
+            any(i["reason"] == "extra_star_formal" for i in formal["items"])
+        )
 
     def test_gs_cookie_slot_is_leftover_stack(self):
         from src.analysis.run_store import build_analysis_stack
@@ -175,6 +188,39 @@ class TestRunStore(unittest.TestCase):
         self.assertTrue(
             any(i["reason"] == "gs_cookie" for i in stack["items"])
         )
+
+    def test_glued_placement_new_is_leftover_stack(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        stack = build_analysis_stack(
+            [],
+            tu_text="(void)home;new (home) std::string();\n",
+        )
+        self.assertGreaterEqual(stack["n_leftover"], 1)
+        self.assertEqual(stack["n_unknown"], 0)
+        self.assertTrue(
+            any(i["reason"] == "glued_new" for i in stack["items"])
+        )
+
+    def test_overlay_ptr_qword_is_leftover_stack(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        msg = (
+            "invalid conversion from 'undefined1*' {aka 'unsigned char*'} "
+            "to 'undefined8' {aka 'long long unsigned int'} [-fpermissive]"
+        )
+        stack = build_analysis_stack(
+            [{"message": msg}],
+            tu_text=(
+                "(*(undefined8 *)((char *)(auStack_20) + 8)) = &local_9;\n"
+            ),
+        )
+        self.assertGreaterEqual(stack["n_leftover"], 1)
+        self.assertEqual(stack["n_unknown"], 0)
+        self.assertTrue(
+            any(i["reason"] == "overlay_ptr" for i in stack["items"])
+        )
+        self.assertIn("ghidra-overlay-ptr-qword", stack["known_ids"])
 
     def test_opt_in_facts_go_to_stack_not_as_c(self):
         from src.analysis.run_store import build_analysis_stack
@@ -211,6 +257,45 @@ class TestRunStore(unittest.TestCase):
         self.assertTrue(
             any(i["reason"] == "facts_disagree" for i in stack["items"])
         )
+
+    def test_truncated_imm_overlay_promotes_leftover(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        cmp_msg = (
+            "too few arguments to function "
+            "'int __gmpz_cmp_ui(mpz_srcptr, long unsigned int)'"
+        )
+        stack = build_analysis_stack(
+            [{"message": cmp_msg}],
+            tu_text="void wrap(void) { __gmpz_cmp_ui(param_1); }\n",
+            call_sites={
+                "sites": [{
+                    "iat_name": "__gmpz_cmp_ui",
+                    "arg_regs": ["rcx", "rdx"],
+                    "imm_slots": [["rdx", 1]],
+                }]
+            },
+            iat_facts={"protos": [{"name": "__gmpz_cmp_ui", "arity": 2}]},
+        )
+        self.assertGreaterEqual(stack["n_leftover"], 1)
+        self.assertNotIn("ghidra truncated mpz call", stack["skip_forever"])
+        self.assertTrue(
+            any(i["reason"] == "call_arity" for i in stack["items"])
+        )
+
+    def test_truncated_empty_bag_stays_skip(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        cmp_msg = (
+            "too few arguments to function "
+            "'int __gmpz_cmp_ui(mpz_srcptr, long unsigned int)'"
+        )
+        stack = build_analysis_stack(
+            [{"message": cmp_msg}],
+            tu_text="void wrap(void) { __gmpz_cmp_ui(param_1); }\n",
+        )
+        self.assertEqual(stack["n_leftover"], 0)
+        self.assertIn("ghidra truncated mpz call", stack["skip_forever"])
 
     def test_it_stays_unknown(self):
         with tempfile.TemporaryDirectory() as td:

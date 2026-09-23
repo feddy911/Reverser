@@ -1,0 +1,23 @@
+id: ghidra-msx64-main-ecx-unique
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: main
+ghidra_cpp: |
+  int main(int n, char **args)
+  {
+    int in_ECX;
+    if (1 < in_ECX) {
+      (void)args;
+    }
+    return in_ECX;
+  }
+contains:
+  - "1 < n"
+  - "return n"
+  - "(void)args"
+not_contains:
+  - "in_ECX"
+  - "argc"
+  - "mpz"
+compile: true
+notes: "Microsoft x64: main's first integer arg is ECX. Bind in_ECX only when that formal is the unique integer and slot 0. The name is the formal already printed. Do not invent argc. Mix n/args. Not a sample name."

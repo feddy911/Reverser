@@ -1,0 +1,26 @@
+id: feedback-word-mpz
+profile: gcc_pe_x64
+recipe: feedback
+guessed_name: wrap
+gcc_probe:
+  - "invalid conversion from 'longlong' {aka 'long long int'} to 'mpz_ptr' {aka '__mpz_struct*'} [-fpermissive]"
+iat_facts:
+  protos:
+    - name: __gmpz_init
+      arity: 1
+      variadic: false
+      slots:
+        - ["rcx", "mpz_ptr"]
+ghidra_cpp: |
+  void wrap(void)
+  {
+    __gmpz_init(param_1);
+  }
+contains:
+  - "==feedback:skip_forever:ghidra word vs mpz_ptr=="
+  - "__gmpz_init(param_1);"
+not_contains:
+  - "==feedback:leftover:"
+  - "(mpz_ptr)"
+compile: false
+notes: "IAT sink is unique but rewriting param_1 to mpz_ptr is T* vs U*. Stay skip-forever. Do not invent a cast. Mix wrap."

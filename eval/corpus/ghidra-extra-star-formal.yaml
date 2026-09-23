@@ -1,0 +1,24 @@
+id: ghidra-extra-star-formal
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  void helper(longlong *a);
+  void wrap(longlong ***slot)
+  {
+    longlong ****xs[8];
+    slot = (longlong ***)xs;
+    helper((longlong *)slot);
+    (void)xs[0];
+  }
+contains:
+  - "void wrap(longlong *slot)"
+  - "longlong xs[8]"
+  - "helper(xs)"
+  - "(void)xs[0]"
+not_contains:
+  - "***"
+  - "****"
+  - "mpz"
+compile: true
+notes: "Word formal longlong ***slot assigned from longlong ****xs[N] is the same overlay. Sanitize emits longlong *slot and does not drop the parameter. Mix wrap. A formal with no such array stays. Not Rec ***. Not mpz_ptr."

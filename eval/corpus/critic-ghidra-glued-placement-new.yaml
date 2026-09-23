@@ -1,0 +1,20 @@
+id: critic-ghidra-glued-placement-new
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(void)
+  {
+    std::string *home;
+    (void)home;new (home) std::string();
+    if (home) {
+      (void)home;
+    }new ((std::vector<std::string> *)home) std::vector<std::string>();
+  }
+contains:
+  - "==ghidra:glued_new:new=="
+not_contains:
+  - "==0=="
+  - "mpz"
+compile: false
+notes: "Ctor rewrite glued as ;new ( / }new ( is identity leftover. Mix wrap. Sanitizer splits to a new line. Do not drop the placement new. Do not invent begin/end. Not mpz_ptr."

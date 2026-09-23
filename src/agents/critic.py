@@ -21,9 +21,18 @@ replace-low-byte of ``w``, not a 7-byte value. Sanitizer emits
 A word stack array typed ``longlong ****xs[N]`` then ``p = (longlong ***)xs``
 is identity leftover: Ghidra over-starred an out-param slot, not a human
 pointer array. Sanitizer emits ``longlong xs[N]`` and passes ``xs``.
+A word formal ``longlong ***slot`` assigned from that array is the same
+overlay: sanitizer emits ``longlong *slot``. A formal with no such array
+stays. ``Rec ***`` is not this class.
 Byte facts (lea-arg / qword-store) that disagree with that overlay are
 leftover ``facts_disagree``: the same class, not a second C. Empty fact
 bag is not this class and not a pass token.
+A printf-family call through ``&DAT_`` whose PE bytes are ASCII+``%``+NUL
+is leftover ``format_dat``: the format string is dump identity of this
+exe, not a sample .cpp. Empty bag or no C-string is not this class.
+A C call with fewer arguments than MS x64 ``arg_regs`` or a bound IAT
+proto is leftover ``call_arity``. Empty bag is not this class. Do not
+invent the missing immediate. Do not bind T* vs U*.
 An inserter written ``p = (&((*(std::cout)) << x)`` or ``*(std::cout)`` is
 identity leftover: sanitizer should emit ``std::cout << x``. Insert into a
 byte overlay ``undefined1 local[N]`` is the same leftover class: Ghidra laid
@@ -33,6 +42,10 @@ missing from the restored set is identity leftover: the entry is dump-shaped,
 not a sample name.
 Unused ``undefined1 name[32]`` with no other uses is GS/RTC cookie pad,
 identity leftover: sanitizer drops the decl. Used overlay ``padding[32]`` stays.
+Ctor rewrite glued as ``;new (`` / ``}new (`` is leftover ``glued_new``: sanitizer
+splits to a new line and does not drop the placement new. A pointer stored into
+``*(undefined8*)(auStack+k)`` is leftover ``overlay_ptr``: undefined1* into a
+qword slot, not a human store. Do not invent a cast. Do not bind T* vs U*.
 
 Higher rank → harsher sanction (see ROLE_RANK). Director's own crime
 (ACCEPT while identity/fidelity/per-fn failed) is illegal; tests assert
@@ -51,11 +64,16 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from src.analysis.fidelity import build_call_tokens, check_function, dump_facts_ok
 from src.analysis.ghidra_cpp import (
     _first_function_span,
+    leftover_call_arity,
     leftover_concat71_low_byte,
     leftover_concat_shift_ptr,
+    leftover_extra_star_formal,
     leftover_extra_star_stack_array,
     leftover_facts_disagree,
+    leftover_format_from_pe,
+    leftover_glued_placement_new,
     leftover_gs_cookie_slot,
+    leftover_overlay_ptr_qword,
     leftover_dead_array_home,
     leftover_msx64_extraout,
     leftover_msx64_in_regs,
@@ -210,7 +228,13 @@ def _default_allocator_tokens(blob: str) -> List[str]:
     return found
 
 
-def dialect_hits(code: str, facts: object | None = None) -> List[DialectHit]:
+def dialect_hits(
+    code: str,
+    facts: object | None = None,
+    dat_facts: object | None = None,
+    call_sites: object | None = None,
+    iat_facts: object | None = None,
+) -> List[DialectHit]:
     """Leftover Ghidra / compiler / assembler glue vs human C++."""
     blob = _code_body(code)
     hits: List[DialectHit] = []
@@ -254,18 +278,28 @@ def dialect_hits(code: str, facts: object | None = None) -> List[DialectHit]:
         add("compiler", "dead_array", name)
     for name in leftover_gs_cookie_slot(blob):
         add("compiler", "gs_cookie", name)
+    for tok in leftover_glued_placement_new(blob):
+        add("ghidra", "glued_new", tok)
+    for name in leftover_overlay_ptr_qword(blob):
+        add("ghidra", "overlay_ptr", name)
     for name in leftover_concat_shift_ptr(blob):
         add("ghidra", "concat_shift", name)
     for name in leftover_concat71_low_byte(blob):
         add("ghidra", "concat71_low", name)
     for name in leftover_extra_star_stack_array(blob):
         add("ghidra", "extra_star", name)
+    for name in leftover_extra_star_formal(blob):
+        add("ghidra", "extra_star_formal", name)
     for name in leftover_facts_disagree(blob, facts):
         add("ghidra", "facts_disagree", name)
     for tok in leftover_ostream_addr_insert(blob):
         add("ghidra", "ostream", tok)
     for name in leftover_ostream_overlay_insert(blob):
         add("ghidra", "overlay_insert", name)
+    for tok in leftover_format_from_pe(code, dat_facts):
+        add("ghidra", "format_dat", tok)
+    for tok in leftover_call_arity(code, call_sites, iat_facts):
+        add("ghidra", "call_arity", tok)
     return hits
 
 
@@ -377,6 +411,12 @@ def identity_issues(entry: Dict[str, Any], code: str) -> List[str]:
     gs_cookie = leftover_gs_cookie_slot(code)
     if gs_cookie:
         reasons.append("restore leftover gs_cookie " + gs_cookie[0])
+    glued = leftover_glued_placement_new(code)
+    if glued:
+        reasons.append("restore leftover glued_new " + glued[0])
+    overlay_ptr = leftover_overlay_ptr_qword(code)
+    if overlay_ptr:
+        reasons.append("restore leftover overlay_ptr " + overlay_ptr[0])
     shift = leftover_concat_shift_ptr(code)
     if shift:
         reasons.append("restore leftover concat_shift " + shift[0])
@@ -386,6 +426,9 @@ def identity_issues(entry: Dict[str, Any], code: str) -> List[str]:
     extra_star = leftover_extra_star_stack_array(code)
     if extra_star:
         reasons.append("restore leftover extra_star " + extra_star[0])
+    star_formal = leftover_extra_star_formal(code)
+    if star_formal:
+        reasons.append("restore leftover extra_star_formal " + star_formal[0])
     disagree = leftover_facts_disagree(code, entry.get("fn_facts"))
     if disagree:
         reasons.append("restore leftover facts_disagree " + disagree[0])
@@ -395,6 +438,14 @@ def identity_issues(entry: Dict[str, Any], code: str) -> List[str]:
     overlay = leftover_ostream_overlay_insert(code)
     if overlay:
         reasons.append("restore leftover ostream_overlay " + overlay[0])
+    format_dat = leftover_format_from_pe(code, entry.get("dat_facts"))
+    if format_dat:
+        reasons.append("restore leftover format_dat " + format_dat[0])
+    arity = leftover_call_arity(
+        code, entry.get("call_sites"), entry.get("iat_facts")
+    )
+    if arity:
+        reasons.append("restore leftover call_arity " + arity[0])
     return reasons
 
 
@@ -669,7 +720,13 @@ def review_function(
         reasons.append(
             f"fidelity {fid.get('fidelity')} drift={fid.get('drift')}"
         )
-    hits = dialect_hits(code, facts=entry.get("fn_facts"))
+    hits = dialect_hits(
+        code,
+        facts=entry.get("fn_facts"),
+        dat_facts=entry.get("dat_facts"),
+        call_sites=entry.get("call_sites"),
+        iat_facts=entry.get("iat_facts"),
+    )
     return FunctionVerdict(
         address=addr,
         accept=identity_ok and fidelity_ok,
@@ -746,9 +803,18 @@ def review_run(
         tu_star = leftover_extra_star_stack_array(tu_text)
         if tu_star:
             tu_reasons.append("restore leftover extra_star " + tu_star[0])
+        tu_formal = leftover_extra_star_formal(tu_text)
+        if tu_formal:
+            tu_reasons.append("restore leftover extra_star_formal " + tu_formal[0])
         tu_gs = leftover_gs_cookie_slot(tu_text)
         if tu_gs:
             tu_reasons.append("restore leftover gs_cookie " + tu_gs[0])
+        tu_glued = leftover_glued_placement_new(tu_text)
+        if tu_glued:
+            tu_reasons.append("restore leftover glued_new " + tu_glued[0])
+        tu_overlay_ptr = leftover_overlay_ptr_qword(tu_text)
+        if tu_overlay_ptr:
+            tu_reasons.append("restore leftover overlay_ptr " + tu_overlay_ptr[0])
     restored_addrs = [
         str(r.get("address") or "")
         for r in (restored or [])
