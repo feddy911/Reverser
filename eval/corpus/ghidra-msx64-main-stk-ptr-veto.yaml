@@ -1,0 +1,21 @@
+id: ghidra-msx64-main-stk-ptr-veto
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: main
+ghidra_cpp: |
+  int main(int n, char **args)
+  {
+    std::string *in_stk_n40;
+    (void)n;
+    (void)in_stk_n40;
+    return 0;
+  }
+contains:
+  - "in_stk_n40"
+  - "(void)n"
+not_contains:
+  - "(void)args"
+  - "argc"
+  - "mpz"
+compile: true
+notes: "string* home vs char** formal is not a compatible type. Stay leftover. Do not bind T* vs U*. Do not invent a field. Do not invent argc. Mix n/args. Not a sample name. Not mpz_ptr."

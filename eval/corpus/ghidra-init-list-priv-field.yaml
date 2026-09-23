@@ -1,0 +1,31 @@
+id: ghidra-init-list-priv-field
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+gcc_fingerprint: "_M_(?:array|len)' is private within this context"
+gcc_probe:
+  - "'const int* std::initializer_list<int>::_M_array' is private within this context"
+  - "'std::initializer_list<int>::size_type std::initializer_list<int>::_M_len' is private within this context"
+  - "'const std::__cxx11::basic_string<char>* std::initializer_list<std::__cxx11::basic_string<char> >::_M_array' is private within this context"
+  - "'std::initializer_list<std::__cxx11::basic_string<char> >::size_type std::initializer_list<std::__cxx11::basic_string<char> >::_M_len' is private within this context"
+ghidra_cpp: |
+  void wrap(void)
+  {
+    std::initializer_list<int> bag;
+    int xs[4];
+    std::vector<int> lines;
+    bag._M_array = xs;
+    bag._M_len = 4;
+    std::vector<int>::operator=(&lines, &bag);
+  }
+contains:
+  - "bag._M_array = xs;"
+  - "bag._M_len = 4;"
+  - "(*(&lines) = (bag))"
+not_contains:
+  - "begin"
+  - "end"
+  - ".assign"
+  - "mpz"
+compile: false
+notes: "Ghidra prints initializer_list._M_array and _M_len, then vector::operator=. Keep both stores and the assign. Do not invent begin/end. Do not drop the store. Mix wrap/bag/xs/lines. Not mpz_ptr."

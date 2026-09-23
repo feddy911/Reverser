@@ -202,6 +202,32 @@ class TestRunStore(unittest.TestCase):
             any(i["reason"] == "glued_new" for i in stack["items"])
         )
 
+    def test_glued_ctrl_brace_is_leftover_stack(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        stack = build_analysis_stack(
+            [],
+            tu_text="if (n) {(void)n;\n",
+        )
+        self.assertGreaterEqual(stack["n_leftover"], 1)
+        self.assertEqual(stack["n_unknown"], 0)
+        self.assertTrue(
+            any(i["reason"] == "glued_brace" for i in stack["items"])
+        )
+
+    def test_init_list_priv_field_is_leftover_stack(self):
+        from src.analysis.run_store import build_analysis_stack
+
+        stack = build_analysis_stack(
+            [],
+            tu_text="bag._M_array = xs;\nbag._M_len = 4;\n",
+        )
+        self.assertGreaterEqual(stack["n_leftover"], 1)
+        self.assertEqual(stack["n_unknown"], 0)
+        self.assertTrue(
+            any(i["reason"] == "init_list_field" for i in stack["items"])
+        )
+
     def test_overlay_ptr_qword_is_leftover_stack(self):
         from src.analysis.run_store import build_analysis_stack
 

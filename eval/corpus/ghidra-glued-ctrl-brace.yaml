@@ -1,0 +1,24 @@
+id: ghidra-glued-ctrl-brace
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  int wrap(int n)
+  {
+    int i;
+    if (n) {(void)n;
+    }
+    for (i = 0; i < n; i = i + 1) {(void)i;
+    }
+    return n;
+  }
+contains:
+  - "if (n) {\n"
+  - "(void)n;"
+  - "for (i = 0; i < n; i = i + 1) {\n"
+  - "(void)i;"
+not_contains:
+  - "{(void)"
+  - "mpz"
+compile: true
+notes: "Statement glued onto { right after if/for. Split to a new line. Mix wrap. Do not invent a statement. Do not drop the statement. Not mpz_ptr."

@@ -709,13 +709,12 @@ def rewrite_ghidra_member_calls(code: str) -> str:
             i += 1
             continue
         prefix = s[copied:t0]
-        if rewritten.startswith("new ("):
-            tail = prefix.rstrip(" \t")
-            if tail.endswith(";") or tail.endswith("}"):
-                line_start = prefix.rfind("\n") + 1
-                indent_m = re.match(r"[ \t]*", prefix[line_start:])
-                pad = indent_m.group(0) if indent_m and indent_m.group(0) else "  "
-                prefix = tail + "\n" + pad
+        tail = prefix.rstrip(" \t")
+        if tail.endswith(";") or tail.endswith("}"):
+            line_start = prefix.rfind("\n") + 1
+            indent_m = re.match(r"[ \t]*", prefix[line_start:])
+            pad = indent_m.group(0) if indent_m and indent_m.group(0) else "  "
+            prefix = tail + "\n" + pad
         out.append(prefix)
         out.append(rewritten)
         copied = close_p + 1
@@ -902,9 +901,8 @@ _RE_OSTREAM_OBJ_CAST = re.compile(
 )
 _RE_DAT_UNDERSCORE = re.compile(r"\b_DAT_([0-9A-Fa-f]+)\b")
 _RE_MPZ_T_PTR = re.compile(r"\bmpz_t\s*\*")
-_RE_STL_PRIV_FIELD = re.compile(
-    r"^[ \t]*[A-Za-z_]\w*\s*\.\s*_M_(?:array|len)\s*=.*$",
-    re.MULTILINE,
+_RE_INIT_LIST_PRIV_FIELD = re.compile(
+    r"\b([A-Za-z_]\w*)\s*\.\s*_M_(?:array|len)\s*="
 )
 _RE_STACK_ADDR_ASSIGN = re.compile(
     r"\b(?:padding|auStack\w*|local_[0-9A-Fa-f]+)\s*\[[^\]]+\]\s*=\s*&"
@@ -2854,18 +2852,22 @@ def _formal_used_in_body(body: str, pname: str) -> bool:
 def _rewrite_one_msx64_stack_homes(
     blob: str, ident: str, t0: int, close: int, end: int
 ) -> str:
-    """Bind dump-declared stack homes to formals. Skip main.
+    """Bind dump-declared stack homes to formals.
 
     Ghidra often types the home pointee unlike the formal (T* vs vector*).
-    Both-pointer is enough on the same slot; do not invent a source identifier.
-    No decl — no bind (undeclared in_stack transplant is a known regression).
+    Both-pointer is enough on the same slot for a non-main function; do not
+    invent a source identifier. No decl — no bind (undeclared in_stack
+    transplant is a known regression).
+
+    On main, skip slot order. Bind a home when the dump copied one formal
+    into it, or exactly one unused formal has a compatible type. ``string*``
+    vs ``char**`` stays leftover. Two ints and one home stay leftover.
+    Do not invent a field.
 
     Same-type spill: `T in_stk = formal` is that argument. A leftover home
     may also match the unique unused formal of a compatible type (not
-    T* vs U* field-0). Two ints and one home stay leftover.
+    T* vs U* field-0).
     """
-    if ident == "main":
-        return blob
     mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
     if not mname:
         return blob
@@ -2891,20 +2893,22 @@ def _rewrite_one_msx64_stack_homes(
             continue
         repl[alias] = src
         bound_formals.add(src)
-    for i, (_pty, pname) in enumerate(formals):
-        if i >= len(homes):
-            break
-        alias, decl_ty = homes[i]
-        if alias in repl or pname in bound_formals:
-            continue
-        if _formal_used_in_body(body, pname):
-            continue
-        if not (
-            _abi_types_compatible(decl_ty, _pty) or _abi_both_pointers(decl_ty, _pty)
-        ):
-            continue
-        repl[alias] = pname
-        bound_formals.add(pname)
+    if ident != "main":
+        for i, (_pty, pname) in enumerate(formals):
+            if i >= len(homes):
+                break
+            alias, decl_ty = homes[i]
+            if alias in repl or pname in bound_formals:
+                continue
+            if _formal_used_in_body(body, pname):
+                continue
+            if not (
+                _abi_types_compatible(decl_ty, _pty)
+                or _abi_both_pointers(decl_ty, _pty)
+            ):
+                continue
+            repl[alias] = pname
+            bound_formals.add(pname)
     unused = [
         (pty, pname)
         for pty, pname in formals
@@ -4445,6 +4449,88 @@ def _split_glued_placement_new(code: str) -> str:
     return _RE_GLUED_PLACEMENT_NEW.sub(repl, blob)
 
 
+_RE_GLUED_CTRL_BRACE = re.compile(r"\)[ \t]*\{(?![ \t]*[\r\n}])[ \t]*")
+_CTRL_BEFORE_PAREN = frozenset({"if", "for", "while"})
+
+
+def _ctrl_kw_before_paren(blob: str, close_idx: int) -> str:
+    """Keyword of the ``if``/``for``/``while`` whose ``)`` sits at ``close_idx``."""
+    depth = 0
+    j = close_idx
+    while j >= 0:
+        c = blob[j]
+        if c == ")":
+            depth += 1
+        elif c == "(":
+            depth -= 1
+            if depth == 0:
+                break
+        j -= 1
+    else:
+        return ""
+    k = j - 1
+    while k >= 0 and blob[k] in " \t\r\n":
+        k -= 1
+    end = k + 1
+    while k >= 0 and (blob[k].isalnum() or blob[k] == "_"):
+        k -= 1
+    word = blob[k + 1 : end]
+    return word if word in _CTRL_BEFORE_PAREN else ""
+
+
+def leftover_glued_ctrl_brace(code: str) -> list[str]:
+    """Statement glued onto ``{`` right after ``if``/``for``/``while``.
+
+    Split to a new line. Do not invent a statement. A function body on one
+    line (``void keep(int n) { (void)n; }``) is not this smash.
+    """
+    seen: list[str] = []
+
+    def scan(chunk: str) -> str:
+        for m in _RE_GLUED_CTRL_BRACE.finditer(chunk):
+            kw = _ctrl_kw_before_paren(chunk, m.start())
+            if kw and kw not in seen:
+                seen.append(kw)
+        return chunk
+
+    _outside_strings(code or "", scan)
+    return seen
+
+
+def _split_glued_ctrl_brace(code: str) -> str:
+    def split_chunk(chunk: str) -> str:
+        def repl(m: re.Match[str]) -> str:
+            if not _ctrl_kw_before_paren(chunk, m.start()):
+                return m.group(0)
+            line_start = chunk.rfind("\n", 0, m.start()) + 1
+            indent_m = re.match(r"[ \t]*", chunk[line_start : m.start()])
+            base = indent_m.group(0) if indent_m else ""
+            pad = (base + "  ") if base else "  "
+            return ") {\n" + pad
+
+        return _RE_GLUED_CTRL_BRACE.sub(repl, chunk)
+
+    return _outside_strings(code or "", split_chunk)
+
+
+def leftover_init_list_priv_field(code: str) -> list[str]:
+    """``initializer_list`` ``_M_array`` / ``_M_len`` stores printed by Ghidra.
+
+    Keep the store. Do not invent begin/end. The private member stays leftover.
+    """
+    seen: list[str] = []
+
+    def scan(chunk: str) -> str:
+        for m in _RE_INIT_LIST_PRIV_FIELD.finditer(chunk):
+            name = m.group(1)
+            if name not in seen:
+                seen.append(name)
+        return chunk
+
+    _outside_strings(code or "", scan)
+    return seen
+
+
 def leftover_overlay_ptr_qword(code: str) -> list[str]:
     """Pointer stored into an 8-byte overlay slot (undefined1* → undefined8).
 
@@ -4650,6 +4736,7 @@ def sanitize_ghidra_cpp(
     t = _strip_invalid_using(t)
     t = rewrite_ghidra_member_calls(t)
     t = _split_glued_placement_new(t)
+    t = _split_glued_ctrl_brace(t)
     t = _outside_strings(t, _strip_empty_allocator_dtors)
     t = _rewrite_msx64_incoming(t)
     t = _rewrite_msx64_concat_stack_ptr(t)
@@ -4665,7 +4752,6 @@ def sanitize_ghidra_cpp(
     t = _rewrite_std_swap(t)
     t = rewrite_ghidra_ostream(t)
     t = rewrite_gmp_amp_args(t)
-    t = _RE_STL_PRIV_FIELD.sub("", t)
     t = _RE_STACK_ADDR_ASSIGN.sub(r"(void)&", t)
     t = _RE_STACK_PTR_ASSIGN.sub(r"(void)(\2)", t)
     t = _outside_strings(t, _rewrite_stack_overlay)

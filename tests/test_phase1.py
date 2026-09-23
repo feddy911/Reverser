@@ -1110,6 +1110,55 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
         )
         self.assertIn("return in_ECX", shifted)
         self.assertNotIn("return n", shifted)
+        main_stk = sanitize_ghidra_cpp(
+            "int main(int n, char **args)\n"
+            "{\n"
+            "  int in_stk_n40;\n"
+            "  if (in_stk_n40 < 1) {\n"
+            "    (void)args;\n"
+            "  }\n"
+            "  return in_stk_n40;\n"
+            "}\n"
+        )
+        self.assertIn("n < 1", main_stk)
+        self.assertIn("return n", main_stk)
+        self.assertIn("(void)args", main_stk)
+        self.assertNotIn("in_stk_", main_stk)
+        self.assertNotIn("argc", main_stk)
+        stk_ptr = sanitize_ghidra_cpp(
+            "int main(int n, char **args)\n"
+            "{\n"
+            "  std::string *in_stk_n40;\n"
+            "  (void)n;\n"
+            "  (void)in_stk_n40;\n"
+            "  return 0;\n"
+            "}\n"
+        )
+        self.assertIn("in_stk_n40", stk_ptr)
+        self.assertIn("(void)n", stk_ptr)
+        self.assertNotIn("(void)args", stk_ptr)
+        stk_two = sanitize_ghidra_cpp(
+            "int main(int n, int m)\n"
+            "{\n"
+            "  int in_stk_n40;\n"
+            "  (void)in_stk_n40;\n"
+            "  return 0;\n"
+            "}\n"
+        )
+        self.assertIn("in_stk_n40", stk_two)
+        self.assertNotIn("(void)n", stk_two)
+        self.assertNotIn("(void)m", stk_two)
+        stk_copy = sanitize_ghidra_cpp(
+            "int main(int n, int m)\n"
+            "{\n"
+            "  int in_stk_n40 = n;\n"
+            "  (void)in_stk_n40;\n"
+            "  return m;\n"
+            "}\n"
+        )
+        self.assertIn("(void)n", stk_copy)
+        self.assertIn("return m", stk_copy)
+        self.assertNotIn("in_stk_", stk_copy)
         still = sanitize_ghidra_cpp(
             "int add(int n, int m)\n"
             "{\n"
@@ -2230,6 +2279,73 @@ int main(int argc, char **argv) { return 0; }
         self.assertNotIn(";new (", already)
         self.assertNotIn("}new (", already)
         self.assertFalse(leftover_glued_placement_new(already))
+
+    def test_glued_ctrl_brace_is_split(self):
+        from src.analysis.ghidra_cpp import (
+            leftover_glued_ctrl_brace,
+            sanitize_ghidra_cpp,
+        )
+
+        smashed = (
+            "void wrap(int n)\n"
+            "{\n"
+            "  int i;\n"
+            "  if (n) {(void)n;\n"
+            "  }\n"
+            "  for (i = 0; i < n; i = i + 1) {(void)i;\n"
+            "  }\n"
+            "  return n;\n"
+            "}\n"
+        )
+        self.assertEqual(leftover_glued_ctrl_brace(smashed), ["if", "for"])
+        got = sanitize_ghidra_cpp(smashed)
+        self.assertIn("if (n) {\n", got)
+        self.assertIn("(void)n;", got)
+        self.assertIn("for (i = 0; i < n; i = i + 1) {\n", got)
+        self.assertIn("(void)i;", got)
+        self.assertNotIn("{(void)", got)
+        self.assertFalse(leftover_glued_ctrl_brace(got))
+        keep = "void keep(int n) { (void)n; }\n"
+        self.assertFalse(leftover_glued_ctrl_brace(keep))
+        self.assertIn("void keep(int n) { (void)n; }", sanitize_ghidra_cpp(keep))
+        already = (
+            "void wrap(int n)\n"
+            "{\n"
+            "  if (n) {\n"
+            "    (void)n;\n"
+            "  }\n"
+            "  return n;\n"
+            "}\n"
+        )
+        self.assertFalse(leftover_glued_ctrl_brace(already))
+        self.assertIn("if (n) {\n", sanitize_ghidra_cpp(already))
+
+    def test_init_list_priv_field_store_stays(self):
+        from src.analysis.ghidra_cpp import (
+            leftover_init_list_priv_field,
+            sanitize_ghidra_cpp,
+        )
+
+        raw = (
+            "void wrap(void)\n"
+            "{\n"
+            "  std::initializer_list<int> bag;\n"
+            "  int xs[4];\n"
+            "  std::vector<int> lines;\n"
+            "  bag._M_array = xs;\n"
+            "  bag._M_len = 4;\n"
+            "  std::vector<int>::operator=(&lines, &bag);\n"
+            "}\n"
+        )
+        self.assertEqual(leftover_init_list_priv_field(raw), ["bag"])
+        got = sanitize_ghidra_cpp(raw)
+        self.assertIn("bag._M_array = xs;", got)
+        self.assertIn("bag._M_len = 4;", got)
+        self.assertIn("(*(&lines) = (bag))", got)
+        self.assertNotIn("begin", got)
+        self.assertNotIn("end", got)
+        self.assertNotIn(".assign", got)
+        self.assertEqual(leftover_init_list_priv_field(got), ["bag"])
 
     def test_overlay_ptr_qword_store_stays_leftover(self):
         from src.analysis.ghidra_cpp import (

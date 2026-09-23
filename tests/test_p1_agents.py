@@ -1763,6 +1763,99 @@ class TestCritic(unittest.TestCase):
         self.assertTrue(ok.identity_ok)
         self.assertFalse(any(h.kind == "glued_new" for h in dialect_hits(human)))
 
+    def test_leftover_glued_ctrl_brace_is_identity_fail(self):
+        leftover = (
+            "void wrap(int n)\n"
+            "{\n"
+            "  if (n) {(void)n;\n"
+            "  }\n"
+            "  return n;\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any("restore leftover glued_brace if" in r for r in verdict.reasons)
+        )
+        self.assertTrue(
+            any(
+                h.source == "ghidra" and h.kind == "glued_brace" and h.token == "if"
+                for h in dialect_hits(leftover)
+            )
+        )
+        human = (
+            "void wrap(int n)\n"
+            "{\n"
+            "  if (n) {\n"
+            "    (void)n;\n"
+            "  }\n"
+            "  return n;\n"
+            "}\n"
+        )
+        ok = review_function(entry, human, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(any(h.kind == "glued_brace" for h in dialect_hits(human)))
+        keep = "void keep(int n) { (void)n; }\n"
+        self.assertFalse(any(h.kind == "glued_brace" for h in dialect_hits(keep)))
+
+    def test_leftover_init_list_priv_field_is_identity_fail(self):
+        leftover = (
+            "void wrap(void)\n"
+            "{\n"
+            "  std::initializer_list<int> bag;\n"
+            "  int xs[4];\n"
+            "  bag._M_array = xs;\n"
+            "  bag._M_len = 4;\n"
+            "  (void)bag;\n"
+            "  (void)xs;\n"
+            "}\n"
+        )
+        entry = {
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "name": "wrap",
+            "literals": [],
+            "ext_calls": [],
+            "ghidra_code": leftover,
+        }
+        verdict = review_function(entry, leftover, [])
+        self.assertFalse(verdict.identity_ok)
+        self.assertTrue(
+            any("restore leftover init_list_field bag" in r for r in verdict.reasons)
+        )
+        self.assertTrue(
+            any(
+                h.source == "ghidra"
+                and h.kind == "init_list_field"
+                and h.token == "bag"
+                for h in dialect_hits(leftover)
+            )
+        )
+        human = (
+            "void wrap(void)\n"
+            "{\n"
+            "  std::vector<int> lines;\n"
+            "  int xs[4];\n"
+            "  (void)xs;\n"
+            "  (void)lines;\n"
+            "}\n"
+        )
+        ok = review_function(entry, human, [])
+        self.assertTrue(ok.identity_ok)
+        self.assertFalse(
+            any(h.kind == "init_list_field" for h in dialect_hits(human))
+        )
+
     def test_leftover_overlay_ptr_qword_is_identity_fail(self):
         leftover = (
             "void wrap(void)\n"
@@ -1813,6 +1906,24 @@ class TestCritic(unittest.TestCase):
         decision = match_errors([{"message": msg}], load_corpus())
         self.assertFalse(decision.need_llm)
         self.assertIn("ghidra-overlay-ptr-qword", decision.known_ids)
+        self.assertEqual(decision.skip_forever_reasons, [])
+
+    def test_init_list_priv_field_gcc_is_leftover_not_llm(self):
+        from src.agents.compiler import match_errors
+        from src.analysis.corpus import load_corpus
+
+        msgs = [
+            "'const int* std::initializer_list<int>::_M_array' is private within this context",
+            "'std::initializer_list<int>::size_type std::initializer_list<int>::_M_len' is private within this context",
+            "'const std::__cxx11::basic_string<char>* std::initializer_list<std::__cxx11::basic_string<char> >::_M_array' is private within this context",
+            "'std::initializer_list<std::__cxx11::basic_string<char> >::size_type std::initializer_list<std::__cxx11::basic_string<char> >::_M_len' is private within this context",
+        ]
+        skip = match_errors([{"message": msgs[0]}], cases=[])
+        self.assertTrue(skip.need_llm)
+        decision = match_errors([{"message": m} for m in msgs], load_corpus())
+        self.assertFalse(decision.need_llm)
+        self.assertIn("ghidra-init-list-priv-field", decision.known_ids)
+        self.assertEqual(decision.unknown, [])
         self.assertEqual(decision.skip_forever_reasons, [])
 
     def test_leftover_facts_disagree_is_identity_fail(self):

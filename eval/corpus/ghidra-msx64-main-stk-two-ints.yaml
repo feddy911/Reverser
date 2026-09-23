@@ -1,0 +1,21 @@
+id: ghidra-msx64-main-stk-two-ints
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: main
+ghidra_cpp: |
+  int main(int n, int m)
+  {
+    int in_stk_n40;
+    (void)in_stk_n40;
+    return 0;
+  }
+contains:
+  - "in_stk_n40"
+  - "(void)in_stk_n40"
+not_contains:
+  - "(void)n"
+  - "(void)m"
+  - "argc"
+  - "mpz"
+compile: true
+notes: "Two integer formals and one int home: not unique. Stay leftover. Do not pick n. Do not invent argc. Mix n/m. Not a sample name. Not mpz_ptr."

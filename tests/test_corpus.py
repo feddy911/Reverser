@@ -147,10 +147,18 @@ class TestCorpusEval(unittest.TestCase):
             "critic-ghidra-gs-cookie-slot",
             "ghidra-glued-placement-new",
             "critic-ghidra-glued-placement-new",
+            "ghidra-glued-ctrl-brace",
+            "ghidra-glued-ctrl-brace-keep",
+            "critic-ghidra-glued-ctrl-brace",
+            "ghidra-init-list-priv-field",
+            "critic-ghidra-init-list-priv-field",
             "ghidra-overlay-ptr-qword",
             "critic-ghidra-overlay-ptr-qword",
             "ghidra-msx64-main-ecx-unique",
             "ghidra-msx64-main-ecx-two-ints",
+            "ghidra-msx64-main-stk-unique",
+            "ghidra-msx64-main-stk-ptr-veto",
+            "ghidra-msx64-main-stk-two-ints",
             "ghidra-size-type-as-vector-star",
             "ghidra-value-type-not-member-of-user",
             "msvc-jmc-helper-undeclared",
@@ -487,6 +495,29 @@ class TestCorpusEval(unittest.TestCase):
         glued_c = cases["critic-ghidra-glued-placement-new"]
         self.assertEqual(glued_c.recipe, "critic")
         self.assertIn(";new (home)", glued_c.ghidra_cpp)
+        brace = cases["ghidra-glued-ctrl-brace"]
+        self.assertEqual(brace.recipe, "sanitize")
+        self.assertTrue(brace.compile)
+        self.assertIn("if (n) {(void)n;", brace.ghidra_cpp)
+        self.assertNotIn("NestWalk", brace.ghidra_cpp)
+        self.assertNotIn("MyCollatz", brace.ghidra_cpp)
+        brace_keep = cases["ghidra-glued-ctrl-brace-keep"]
+        self.assertEqual(brace_keep.recipe, "sanitize")
+        self.assertTrue(brace_keep.compile)
+        self.assertIn("void keep(int n) { (void)n; }", brace_keep.ghidra_cpp)
+        brace_c = cases["critic-ghidra-glued-ctrl-brace"]
+        self.assertEqual(brace_c.recipe, "critic")
+        self.assertIn("if (n) {(void)n;", brace_c.ghidra_cpp)
+        init_list = cases["ghidra-init-list-priv-field"]
+        self.assertEqual(init_list.recipe, "sanitize")
+        self.assertFalse(init_list.compile)
+        self.assertIn("bag._M_array = xs;", init_list.ghidra_cpp)
+        self.assertNotIn("begin", init_list.ghidra_cpp)
+        self.assertNotIn("NestWalk", init_list.ghidra_cpp)
+        self.assertNotIn("MyCollatz", init_list.ghidra_cpp)
+        init_c = cases["critic-ghidra-init-list-priv-field"]
+        self.assertEqual(init_c.recipe, "critic")
+        self.assertIn("bag._M_array = xs;", init_c.ghidra_cpp)
         overlay = cases["ghidra-overlay-ptr-qword"]
         self.assertEqual(overlay.recipe, "sanitize")
         self.assertFalse(overlay.compile)
@@ -506,6 +537,21 @@ class TestCorpusEval(unittest.TestCase):
         self.assertEqual(two.recipe, "sanitize")
         self.assertIn("int n, int m", two.ghidra_cpp)
         self.assertNotIn("argc", two.ghidra_cpp)
+        stk = cases["ghidra-msx64-main-stk-unique"]
+        self.assertEqual(stk.recipe, "sanitize")
+        self.assertTrue(stk.compile)
+        self.assertIn("int in_stk_n40", stk.ghidra_cpp)
+        self.assertNotIn("argc", stk.ghidra_cpp)
+        self.assertNotIn("NestWalk", stk.ghidra_cpp)
+        self.assertNotIn("MyCollatz", stk.ghidra_cpp)
+        stk_ptr = cases["ghidra-msx64-main-stk-ptr-veto"]
+        self.assertEqual(stk_ptr.recipe, "sanitize")
+        self.assertIn("std::string *in_stk_n40", stk_ptr.ghidra_cpp)
+        self.assertNotIn("argc", stk_ptr.ghidra_cpp)
+        stk_two = cases["ghidra-msx64-main-stk-two-ints"]
+        self.assertEqual(stk_two.recipe, "sanitize")
+        self.assertIn("int n, int m", stk_two.ghidra_cpp)
+        self.assertIn("in_stk_n40", stk_two.ghidra_cpp)
 
 
 class TestCompileFixDoesNotTouchRestore(unittest.TestCase):

@@ -96,6 +96,8 @@ _LEFTOVER_CASE_MARKERS = (
     "extra-star-formal",
     "gs-cookie-slot",
     "glued-placement-new",
+    "glued-ctrl-brace",
+    "init-list-priv-field",
     "overlay-ptr-qword",
 )
 
@@ -114,7 +116,9 @@ def _classify_errors(
         leftover_concat71_low_byte,
         leftover_extra_star_formal,
         leftover_extra_star_stack_array,
+        leftover_glued_ctrl_brace,
         leftover_glued_placement_new,
+        leftover_init_list_priv_field,
         leftover_gs_cookie_slot,
         leftover_overlay_ptr_qword,
         leftover_ostream_addr_insert,
@@ -172,6 +176,20 @@ def _classify_errors(
             "reason": "glued_new",
         })
         break
+    for tok in leftover_glued_ctrl_brace(tu_text):
+        rows.append({
+            "message": tok,
+            "kind": "leftover",
+            "reason": "glued_brace",
+        })
+        break
+    for name in leftover_init_list_priv_field(tu_text):
+        rows.append({
+            "message": name,
+            "kind": "leftover",
+            "reason": "init_list_field",
+        })
+        break
     for name in leftover_overlay_ptr_qword(tu_text):
         rows.append({
             "message": name,
@@ -220,6 +238,10 @@ def _classify_errors(
             reason = "gs_cookie"
         if kind == "leftover" and "glued-placement-new" in joined:
             reason = "glued_new"
+        if kind == "leftover" and "glued-ctrl-brace" in joined:
+            reason = "glued_brace"
+        if kind == "leftover" and "init-list-priv-field" in joined:
+            reason = "init_list_field"
         if kind == "leftover" and "overlay-ptr-qword" in joined:
             reason = "overlay_ptr"
         rows.append({

@@ -43,7 +43,12 @@ not a sample name.
 Unused ``undefined1 name[32]`` with no other uses is GS/RTC cookie pad,
 identity leftover: sanitizer drops the decl. Used overlay ``padding[32]`` stays.
 Ctor rewrite glued as ``;new (`` / ``}new (`` is leftover ``glued_new``: sanitizer
-splits to a new line and does not drop the placement new. A pointer stored into
+splits to a new line and does not drop the placement new. A statement glued
+onto ``{`` right after ``if``/``for``/``while`` is leftover ``glued_brace``:
+sanitizer splits to a new line and does not invent a statement. A one-line
+function body is not that smash. ``initializer_list._M_array`` / ``_M_len``
+stores stay leftover ``init_list_field``: do not drop them and do not invent
+begin/end. A pointer stored into
 ``*(undefined8*)(auStack+k)`` is leftover ``overlay_ptr``: undefined1* into a
 qword slot, not a human store. Do not invent a cast. Do not bind T* vs U*.
 
@@ -71,7 +76,9 @@ from src.analysis.ghidra_cpp import (
     leftover_extra_star_stack_array,
     leftover_facts_disagree,
     leftover_format_from_pe,
+    leftover_glued_ctrl_brace,
     leftover_glued_placement_new,
+    leftover_init_list_priv_field,
     leftover_gs_cookie_slot,
     leftover_overlay_ptr_qword,
     leftover_dead_array_home,
@@ -280,6 +287,10 @@ def dialect_hits(
         add("compiler", "gs_cookie", name)
     for tok in leftover_glued_placement_new(blob):
         add("ghidra", "glued_new", tok)
+    for tok in leftover_glued_ctrl_brace(blob):
+        add("ghidra", "glued_brace", tok)
+    for name in leftover_init_list_priv_field(blob):
+        add("ghidra", "init_list_field", name)
     for name in leftover_overlay_ptr_qword(blob):
         add("ghidra", "overlay_ptr", name)
     for name in leftover_concat_shift_ptr(blob):
@@ -414,6 +425,12 @@ def identity_issues(entry: Dict[str, Any], code: str) -> List[str]:
     glued = leftover_glued_placement_new(code)
     if glued:
         reasons.append("restore leftover glued_new " + glued[0])
+    glued_brace = leftover_glued_ctrl_brace(code)
+    if glued_brace:
+        reasons.append("restore leftover glued_brace " + glued_brace[0])
+    init_list = leftover_init_list_priv_field(code)
+    if init_list:
+        reasons.append("restore leftover init_list_field " + init_list[0])
     overlay_ptr = leftover_overlay_ptr_qword(code)
     if overlay_ptr:
         reasons.append("restore leftover overlay_ptr " + overlay_ptr[0])
@@ -812,6 +829,12 @@ def review_run(
         tu_glued = leftover_glued_placement_new(tu_text)
         if tu_glued:
             tu_reasons.append("restore leftover glued_new " + tu_glued[0])
+        tu_brace = leftover_glued_ctrl_brace(tu_text)
+        if tu_brace:
+            tu_reasons.append("restore leftover glued_brace " + tu_brace[0])
+        tu_init = leftover_init_list_priv_field(tu_text)
+        if tu_init:
+            tu_reasons.append("restore leftover init_list_field " + tu_init[0])
         tu_overlay_ptr = leftover_overlay_ptr_qword(tu_text)
         if tu_overlay_ptr:
             tu_reasons.append("restore leftover overlay_ptr " + tu_overlay_ptr[0])

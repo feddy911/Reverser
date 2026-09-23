@@ -1,0 +1,23 @@
+id: ghidra-msx64-main-stk-unique
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: main
+ghidra_cpp: |
+  int main(int n, char **args)
+  {
+    int in_stk_n40;
+    if (in_stk_n40 < 1) {
+      (void)args;
+    }
+    return in_stk_n40;
+  }
+contains:
+  - "n < 1"
+  - "return n"
+  - "(void)args"
+not_contains:
+  - "in_stk_"
+  - "argc"
+  - "mpz"
+compile: true
+notes: "main binds in_stk only to the unique unused formal of a compatible type. The name is the formal already printed. Do not invent argc. Mix n/args. Not a sample name. Not mpz_ptr."

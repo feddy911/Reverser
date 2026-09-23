@@ -1,0 +1,18 @@
+id: critic-ghidra-glued-ctrl-brace
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  int wrap(int n)
+  {
+    if (n) {(void)n;
+    }
+    return n;
+  }
+contains:
+  - "==ghidra:glued_brace:if=="
+not_contains:
+  - "==0=="
+  - "mpz"
+compile: false
+notes: "Statement glued onto { after if is identity leftover. Mix wrap. Sanitizer splits to a new line. Do not invent a statement. Not mpz_ptr."

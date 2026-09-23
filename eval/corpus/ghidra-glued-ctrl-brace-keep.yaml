@@ -1,0 +1,12 @@
+id: ghidra-glued-ctrl-brace-keep
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: keep
+ghidra_cpp: |
+  void keep(int n) { (void)n; }
+contains:
+  - "void keep(int n) { (void)n; }"
+not_contains:
+  - "mpz"
+compile: true
+notes: "A function body on one line is not the if/for smash. Leave it. Mix keep. Do not invent a statement. Not mpz_ptr."

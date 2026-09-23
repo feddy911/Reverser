@@ -1,0 +1,22 @@
+id: critic-ghidra-init-list-priv-field
+profile: gcc_pe_x64
+recipe: critic
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(void)
+  {
+    std::initializer_list<int> bag;
+    int xs[4];
+    bag._M_array = xs;
+    bag._M_len = 4;
+    (void)bag;
+    (void)xs;
+  }
+contains:
+  - "==ghidra:init_list_field:bag=="
+not_contains:
+  - "==0=="
+  - "begin"
+  - "mpz"
+compile: false
+notes: "initializer_list._M_array / _M_len is identity leftover. Mix wrap/bag. Do not invent begin/end. Do not drop the store. Not mpz_ptr."
