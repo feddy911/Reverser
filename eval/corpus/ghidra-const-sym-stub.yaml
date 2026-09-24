@@ -1,0 +1,19 @@
+id: ghidra-const-sym-stub
+profile: gcc_pe_x64
+recipe: assemble
+guessed_name: wrap
+gcc_fingerprint: "'C_[0-9]+_[0-9]+' was not declared"
+gcc_probe:
+  - "'C_5_0' was not declared in this scope"
+ghidra_cpp: |
+  void wrap(void)
+  {
+    (void)&C_5_0;
+  }
+contains:
+  - "static undefined C_5_0"
+  - "(void)&C_5_0"
+not_contains:
+  - "mpz"
+compile: true
+notes: "Ghidra const-pool label C_<n>_<n> is a data symbol, not a VA. Same static undefined stub as DAT_. Mix wrap. Do not invent a pointee type. Not mpz_ptr."

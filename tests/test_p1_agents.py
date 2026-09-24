@@ -128,6 +128,13 @@ class TestCompilerAgent(unittest.TestCase):
         self.assertNotIn("ghidra-word-thunk", dat.known_ids)
         self.assertIn("dat-addr-as-byte-ptr", conv.known_ids)
         self.assertNotIn("ghidra-word-thunk", conv.known_ids)
+        const_sym = match_errors(
+            [{"message": "'C_5_0' was not declared in this scope"}],
+            cases,
+        )
+        self.assertIn("ghidra-const-sym-stub", const_sym.known_ids)
+        self.assertNotIn("thunk-dat-stubs", const_sym.known_ids)
+        self.assertFalse(const_sym.need_llm)
 
     def test_unknown_diagnostic_needs_llm_and_proposal(self):
         cases = load_corpus()

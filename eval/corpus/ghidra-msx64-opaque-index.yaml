@@ -1,0 +1,27 @@
+id: ghidra-msx64-opaque-index
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  struct Rec {
+    int n;
+  };
+  void wrap(Rec *p)
+  {
+    undefined8 *in_RCX;
+    if (in_RCX[2] == 0) {
+      (void)*in_RCX;
+    } else {
+      (void)((undefined *)in_RCX[2]);
+    }
+  }
+contains:
+  - "((undefined8 *)p)[2] == 0"
+  - "(undefined *)((undefined8 *)p)[2]"
+  - "(void)*p"
+not_contains:
+  - "in_RCX"
+  - "p[2]"
+  - "mpz"
+compile: true
+notes: "Ghidra indexes undefined8* that is also a typed formal. Keep the qword width on the formal. Do not turn the slot into the formal's object. Do not invent a field."

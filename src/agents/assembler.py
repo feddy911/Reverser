@@ -100,6 +100,8 @@ def _blank_non_code(blob: str) -> str:
 RE_THUNK_CALL = re.compile(r"\bthunk_FUN_([0-9a-fA-F]+)\s*\(")
 RE_THUNK_ID = re.compile(r"\bthunk_FUN_([0-9a-fA-F]+)\b")
 RE_DAT_ID = re.compile(r"\bDAT_([0-9a-fA-F]+)\b")
+# Ghidra const-pool label, not a VA. Same byte stub as DAT_. Not a sample type.
+RE_CONST_SYM = re.compile(r"\bC_(\d+_\d+)\b")
 # Strings, char lits, and comments are not callees (`"%d ("` is not `d(`).
 _RE_NON_CODE = re.compile(
     r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/',
@@ -431,13 +433,16 @@ def _ghidra_stubs(text: str) -> List[str]:
     """Declarations for leftover Ghidra thunks/DAT so the TU can parse."""
     thunks = sorted(set(RE_THUNK_ID.findall(text or "")))
     dats = sorted(set(RE_DAT_ID.findall(text or "")))
+    consts = sorted(set(RE_CONST_SYM.findall(text or "")))
     need_main = bool(re.search(r"\b__main\s*\(", text or ""))
-    if not thunks and not dats and not need_main:
+    if not thunks and not dats and not consts and not need_main:
         return []
     lines = ["// ---- ghidra thunk/data stubs ----"]
     for h in dats:
         # Ghidra takes &DAT_* as a byte/string pointer (undefined*).
         lines.append(f"static undefined DAT_{h};")
+    for h in consts:
+        lines.append(f"static undefined C_{h};")
     for h in thunks:
         lines.append(f"inline ghidra_word thunk_FUN_{h}(...) {{ return {{}}; }}")
     if need_main:
@@ -611,6 +616,8 @@ def _undeclared_callee_stubs(
         if is_runtime_noise(name):
             continue
         if name.startswith(("FUN_", "thunk_", "DAT_", "_")):
+            continue
+        if re.fullmatch(r"C_\d+_\d+", name):
             continue
         if start >= 2 and blob[start - 2:start] in {"->", "::"}:
             continue

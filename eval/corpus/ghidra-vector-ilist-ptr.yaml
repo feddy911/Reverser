@@ -1,0 +1,22 @@
+id: ghidra-vector-ilist-ptr
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(void)
+  {
+    std::initializer_list<int> bag;
+    std::allocator<int> alloc;
+    std::vector<int> lines;
+    std::vector<int>::vector(&lines, &bag, &alloc);
+  }
+contains:
+  - "new (&lines) std::vector<int>(bag, alloc)"
+not_contains:
+  - "&bag"
+  - "&alloc"
+  - "begin"
+  - "end"
+  - "mpz"
+compile: true
+notes: "Ghidra passes initializer_list* and allocator* into vector::vector. Pass the list by value and a real allocator by value. Do not invent begin/end. Do not rewrite _M_array or _M_len."

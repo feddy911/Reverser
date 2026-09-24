@@ -313,6 +313,29 @@ class TestAssemblerDomain(unittest.TestCase):
         self.assertIn("inline ghidra_word thunk_FUN_140021680(...)", text)
         self.assertIn("static undefined DAT_14002db14", text)
 
+    def test_const_sym_stub_matches_dat(self):
+        restored = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "wrap",
+            "ghidra_name": "wrap",
+            "cpp_code": "void wrap(void) {\n  (void)&C_5_0;\n}\n",
+        }]
+        text, n = assemble(restored, [], [])
+        self.assertEqual(n, 1)
+        self.assertIn("static undefined C_5_0", text)
+        self.assertIn("(void)&C_5_0", text)
+        self.assertNotIn("inline ghidra_word C_5_0", text)
+        plain = [{
+            "classification": "user_code",
+            "address": "0x1",
+            "guessed_name": "keep",
+            "ghidra_name": "keep",
+            "cpp_code": "void keep(int n) { (void)n; }\n",
+        }]
+        kept, _ = assemble(plain, [], [])
+        self.assertNotIn("C_5_0", kept)
+
     def test_named_import_thunk_folds_not_stubbed(self):
         restored = [{
             "classification": "user_code",

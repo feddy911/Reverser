@@ -487,6 +487,42 @@ def _elide_default_allocator_args(chunk: str) -> str:
     return blob
 
 
+def _decl_type_of(code: str, name: str) -> str:
+    m = re.search(
+        rf"(?:^|[;\n{{])\s*([A-Za-z_:][\w:<>\s,*]*)\b{re.escape(name)}\s*(?:=|;)",
+        code or "",
+    )
+    return m.group(1).strip() if m else ""
+
+
+def _addr_ident(expr: str) -> str | None:
+    m = re.fullmatch(r"&([A-Za-z_]\w*)", (expr or "").strip())
+    return m.group(1) if m else None
+
+
+def _vector_ilist_args(extra: list[str], src: str) -> list[str]:
+    """vector(&obj, &bag, &alloc) where bag is an initializer_list.
+
+    Pass the list by value. Drop a bare allocator_type: that typedef is not
+    the ctor's allocator, and the parameter is defaulted. A real
+    std::allocator stays, with the address stripped. Do not invent begin/end.
+    Do not rewrite _M_array / _M_len.
+    """
+    a0 = _addr_ident(extra[0])
+    a1 = _addr_ident(extra[1]) if len(extra) > 1 else None
+    if not a0 or not a1:
+        return extra
+    t0 = _decl_type_of(src, a0).replace(" ", "")
+    if "initializer_list" not in t0:
+        return extra
+    t1 = _decl_type_of(src, a1).replace(" ", "")
+    if t1 == "allocator_type":
+        return [a0]
+    if "allocator" in t1:
+        return [a0, a1]
+    return extra
+
+
 def _deref_if_ident(expr: str) -> str:
     """Ghidra often passes T* where the real API wants T / T const&."""
     t = (expr or "").strip()
@@ -516,6 +552,7 @@ def _rewrite_one_call(
     args: list[str],
     *,
     had_targs: bool = False,
+    src: str = "",
 ) -> str | None:
     last = _last_type_ident(typ)
     if not last:
@@ -632,11 +669,15 @@ def _rewrite_one_call(
             if had_targs:
                 if len(extra) >= 3:
                     extra = extra[:2]
+                elif len(extra) == 2:
+                    extra = _vector_ilist_args(extra, src)
             elif len(extra) >= 3:
                 extra[1] = _deref_if_ident(extra[1])
                 extra = extra[:2]
             elif len(extra) == 2 and re.fullmatch(r"\d+", extra[0].strip()):
                 extra[1] = _deref_if_ident(extra[1])
+            elif len(extra) == 2:
+                extra = _vector_ilist_args(extra, src)
             rest = ", ".join(extra)
         if rest:
             return f"new ({recv}) {typ}({rest})"
@@ -703,7 +744,12 @@ def rewrite_ghidra_member_calls(code: str) -> str:
             continue
         typ = s[t0:i].strip()
         rewritten = _rewrite_one_call(
-            typ, meth, dtor, _split_top_args(s[t + 1:close_p]), had_targs=had_targs
+            typ,
+            meth,
+            dtor,
+            _split_top_args(s[t + 1:close_p]),
+            had_targs=had_targs,
+            src=s,
         )
         if rewritten is None:
             i += 1
@@ -2719,6 +2765,32 @@ def _main_unique_ecx_repl(
     return repl
 
 
+def _opaque_index_ptr(decl_ty: str) -> str | None:
+    """Single-star opaque pointee as Ghidra printed it, else None.
+
+    ``undefined8 *`` indexed is a qword slot. A typed formal is a different
+    element. Do not invent a field name.
+    """
+    raw = re.sub(r"\s+", "", decl_ty or "")
+    if raw.count("*") != 1:
+        return None
+    base = raw.replace("*", "")
+    if base not in _OPAQUE_PTR_BASE:
+        return None
+    return base
+
+
+def _keep_opaque_index(body: str, alias: str, decl_ty: str, pname: str) -> str:
+    base = _opaque_index_ptr(decl_ty)
+    if base is None or not pname:
+        return body
+    return re.sub(
+        rf"\b{re.escape(alias)}\s*\[",
+        f"(({base} *){pname})[",
+        body,
+    )
+
+
 def _apply_in_reg_repl(
     blob: str, brace: int, end: int, body: str, repl: dict[str, str]
 ) -> str:
@@ -2772,6 +2844,13 @@ def _rewrite_one_msx64_fn(blob: str, ident: str, t0: int, close: int, end: int) 
                 decl_ty = _pty
             if not _abi_types_compatible(decl_ty, _pty):
                 continue
+            formal_base = _norm_abi_type(_pty).replace("*", "")
+            if (
+                _opaque_index_ptr(decl_ty) is not None
+                and formal_base not in _OPAQUE_PTR_BASE
+                and re.search(rf"\b{re.escape(alias)}\s*\[", body)
+            ):
+                body = _keep_opaque_index(body, alias, decl_ty, pname)
             repl[alias] = pname
     if start_slot and this_local and all(pn != "this" for _pt, pn in formals):
         for alias in _MS64_INT_REGS[1]:
@@ -2789,6 +2868,9 @@ def _rewrite_msx64_incoming(code: str) -> str:
     ``main`` stays unbound except a unique integer formal in slot 0
     (in_ECX / in_CX / integer in_RCX). Two ints stay leftover.
     Do not invent argc. Do not bind in_RDX on main.
+    A subscript on undefined8* / longlong* / void* keeps that width on the
+    formal: ``((undefined8 *)p)[n]``. The bare name still binds. Do not
+    invent a field.
     """
     blob = code or ""
     spans = list(_iter_function_defs(blob, skip_qualified=True))

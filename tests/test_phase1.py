@@ -997,7 +997,8 @@ std::vector<unsigned long long>::~vector((std::vector<unsigned long long>*)p);
             "  (void)*in_RCX;\n"
             "}\n"
         )
-        self.assertIn("p[2] == 0", opaque)
+        self.assertIn("((undefined8 *)p)[2] == 0", opaque)
+        self.assertNotIn("p[2]", opaque)
         self.assertIn("*p", opaque)
         self.assertNotIn("in_RCX", opaque)
         longthis = sanitize_ghidra_cpp(
@@ -2008,6 +2009,24 @@ int main(int argc, char **argv) { return 0; }
             "std::vector<int>::vector(p, first, last);\n"
         )
         self.assertNotIn("*(last)", range_ctor)
+        ilist = sanitize_ghidra_cpp(
+            "std::initializer_list<int> bag;\n"
+            "std::allocator<int> alloc;\n"
+            "std::vector<int> lines;\n"
+            "bag._M_len = 4;\n"
+            "std::vector<int>::vector(&lines, &bag, &alloc);\n"
+        )
+        self.assertIn("new (&lines) std::vector<int>(bag, alloc)", ilist)
+        self.assertIn("bag._M_len = 4", ilist)
+        self.assertNotIn("&bag", ilist)
+        self.assertNotIn("begin", ilist)
+        bare_alloc = sanitize_ghidra_cpp(
+            "std::initializer_list<int> bag;\n"
+            "allocator_type local_39;\n"
+            "std::vector<int>::vector(&lines, &bag, &local_39);\n"
+        )
+        self.assertIn("new (&lines) std::vector<int>(bag)", bare_alloc)
+        self.assertNotIn("local_39)", bare_alloc)
 
     def test_free_std_operator_lshift(self):
         from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
