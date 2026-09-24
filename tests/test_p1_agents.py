@@ -1932,6 +1932,19 @@ class TestCritic(unittest.TestCase):
         self.assertIn("ghidra-init-list-priv-field", decision.known_ids)
         self.assertEqual(decision.unknown, [])
         self.assertEqual(decision.skip_forever_reasons, [])
+        cast_msg = (
+            "cannot convert 'iterator' {aka 'ghidra_word*'} to "
+            "'std::initializer_list<int>::iterator' {aka 'const int*'} in assignment"
+        )
+        bare = match_errors([{"message": cast_msg}], cases=[])
+        self.assertTrue(bare.need_llm)
+        known = match_errors(
+            [{"message": m} for m in msgs] + [{"message": cast_msg}],
+            load_corpus(),
+        )
+        self.assertFalse(known.need_llm)
+        self.assertIn("ghidra-init-list-iter-cast", known.known_ids)
+        self.assertEqual(known.unknown, [])
 
     def test_leftover_facts_disagree_is_identity_fail(self):
         leftover = (

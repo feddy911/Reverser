@@ -155,6 +155,7 @@ class TestCorpusEval(unittest.TestCase):
             "ghidra-const-sym-stub",
             "ghidra-msx64-opaque-index",
             "ghidra-vector-ilist-ptr",
+            "ghidra-init-list-iter-cast",
             "ghidra-overlay-ptr-qword",
             "critic-ghidra-overlay-ptr-qword",
             "ghidra-msx64-main-ecx-unique",

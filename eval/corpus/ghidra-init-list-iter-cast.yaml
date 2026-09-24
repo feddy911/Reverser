@@ -1,0 +1,24 @@
+id: ghidra-init-list-iter-cast
+profile: gcc_pe_x64
+recipe: assemble
+guessed_name: wrap
+gcc_fingerprint: "cannot convert 'iterator' \\{aka 'ghidra_word\\*'\\} to '[^']*initializer_list<.+>::iterator'"
+gcc_probe:
+  - "cannot convert 'iterator' {aka 'ghidra_word*'} to 'std::initializer_list<int>::iterator' {aka 'const int*'} in assignment"
+ghidra_cpp: |
+  void wrap(void)
+  {
+    std::initializer_list<int> bag;
+    bag._M_array = (iterator)&C_5_0;
+    bag._M_len = 4;
+  }
+contains:
+  - "bag._M_array = (iterator)&C_5_0"
+  - "bag._M_len = 4"
+  - "static undefined C_5_0"
+not_contains:
+  - "begin"
+  - "end"
+  - "mpz"
+compile: false
+notes: "Ghidra assigns (iterator)&C_<n>_<n> into initializer_list._M_array. iterator is the word stub, so gcc cannot convert it. Keep the store. Do not invent the element type. Do not invent begin/end."
