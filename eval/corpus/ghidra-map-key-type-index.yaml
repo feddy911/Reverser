@@ -1,0 +1,22 @@
+id: ghidra-map-key-type-index
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(void *xs)
+  {
+    mapped_type *pm;
+    key_type *line;
+    pm = std::map<std::basic_string<char, std::char_traits<char>, std::allocator<char>>, int>::operator[]((std::map<std::basic_string<char, std::char_traits<char>, std::allocator<char>>, int> *)xs, line);
+    *pm = *pm + 1;
+  }
+contains:
+  - "int *pm"
+  - "*((std::string *)line)"
+  - "pm = &("
+not_contains:
+  - "mapped_type"
+  - "::operator[]"
+  - "mpz"
+compile: true
+notes: "Ghidra indexes a map with key_type* and stores operator[] in mapped_type*. Those are the map's own key and mapped types. Take the address of the reference. Do not invent a field."

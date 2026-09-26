@@ -1,0 +1,18 @@
+id: ghidra-vector-value-type-push
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  struct Rec { int n; };
+  void wrap(void *xs)
+  {
+    value_type *line;
+    std::vector<Rec>::push_back((std::vector<Rec> *)xs, line);
+  }
+contains:
+  - "->push_back(*((Rec *)line))"
+not_contains:
+  - "->push_back(*(line))"
+  - "mpz"
+compile: true
+notes: "Ghidra passes vector::value_type* to push_back. That typedef is the vector's element, already printed on the call. Do not invent a field."

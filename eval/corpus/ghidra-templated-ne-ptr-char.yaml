@@ -1,0 +1,20 @@
+id: ghidra-templated-ne-ptr-char
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  bool wrap(std::string *line, int *n)
+  {
+    return std::operator!=<char, std::char_traits<char>, std::allocator<char> >
+      (line, (char *)n);
+  }
+contains:
+  - "std::operator!="
+  - "*(line)"
+  - "(char *)n"
+not_contains:
+  - "(line) !="
+  - "*(n)"
+  - "mpz"
+compile: true
+notes: "Templated std::operator!= may break before the parenthesis. Keep the call. Deref a string pointer. Leave a char* cast as printed. Do not rewrite into infix."

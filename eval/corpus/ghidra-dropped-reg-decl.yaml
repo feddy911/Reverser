@@ -1,0 +1,20 @@
+id: ghidra-dropped-reg-decl
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  Rec::Rec(Rec *line)
+  {
+    new (in_stk_n40) std::string(*(in_stk_n32));
+    *(undefined4 *)(in_RCX + 0x40) = *(undefined4 *)(in_RDX + 0x40);
+  }
+contains:
+  - "longlong in_RCX;"
+  - "longlong in_RDX;"
+  - "std::string *in_stk_n40;"
+  - "std::string *in_stk_n32;"
+  - "(in_RCX + 0x40)"
+not_contains:
+  - "(line + 0x40)"
+  - "mpz"
+compile: true
+notes: "The model dropped longlong in_RCX and the string pointer homes the call still uses. Declare them. Do not bind them to a formal. Do not invent a field."

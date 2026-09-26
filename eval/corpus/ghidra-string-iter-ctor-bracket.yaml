@@ -1,0 +1,21 @@
+id: ghidra-string-iter-ctor-bracket
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  void wrap(std::string *bag)
+  {
+    __normal_iterator a;
+    __normal_iterator b;
+    std::allocator<char> *alloc;
+    std::string::basic_string<__normal_iterator(bag, a, b, alloc);
+  }
+contains:
+  - "new (bag) std::string(a, b)"
+not_contains:
+  - "__normal_iterator("
+  - "begin"
+  - "end"
+  - "mpz"
+compile: false
+notes: "A dropped > glues the argument list into basic_string<__normal_iterator. Close the template and keep the two iterator arguments. Do not invent begin/end. Do not bind a string pointer to a vector pointer."

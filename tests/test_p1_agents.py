@@ -1946,6 +1946,54 @@ class TestCritic(unittest.TestCase):
         self.assertIn("ghidra-init-list-iter-cast", known.known_ids)
         self.assertEqual(known.unknown, [])
 
+    def test_ptr_as_size_type_is_known_not_llm(self):
+        from src.agents.compiler import match_errors
+        from src.analysis.corpus import load_corpus
+
+        msg = (
+            "invalid conversion from 'std::string*' "
+            "{aka 'std::__cxx11::basic_string<char>*'} to "
+            "'std::__cxx11::basic_string<char>::size_type' "
+            "{aka 'long long unsigned int'} [-fpermissive]"
+        )
+        bare = match_errors([{"message": msg}], cases=[])
+        self.assertTrue(bare.need_llm)
+        known = match_errors([{"message": msg}], load_corpus())
+        self.assertFalse(known.need_llm)
+        self.assertIn("ghidra-ptr-as-size-type", known.known_ids)
+        self.assertEqual(known.unknown, [])
+
+    def test_string_ptr_not_vector_is_known_not_llm(self):
+        from src.agents.compiler import match_errors
+        from src.analysis.corpus import load_corpus
+
+        msg = (
+            "cannot convert 'std::string*' "
+            "{aka 'std::__cxx11::basic_string<char>*'} to "
+            "'std::vector<unsigned char>*'"
+        )
+        bare = match_errors([{"message": msg}], cases=[])
+        self.assertTrue(bare.need_llm)
+        known = match_errors([{"message": msg}], load_corpus())
+        self.assertFalse(known.need_llm)
+        self.assertIn("ghidra-string-ptr-not-vector", known.known_ids)
+        self.assertEqual(known.unknown, [])
+
+    def test_ostream_object_is_known_not_llm(self):
+        from src.agents.compiler import match_errors
+        from src.analysis.corpus import load_corpus
+
+        msg = (
+            "no match for 'operator<<' (operand types are 'std::ostream' "
+            "{aka 'std::basic_ostream<char>'} and 'const Rec')"
+        )
+        bare = match_errors([{"message": msg}], cases=[])
+        self.assertTrue(bare.need_llm)
+        known = match_errors([{"message": msg}], load_corpus())
+        self.assertFalse(known.need_llm)
+        self.assertIn("ghidra-ostream-object", known.known_ids)
+        self.assertEqual(known.unknown, [])
+
     def test_leftover_facts_disagree_is_identity_fail(self):
         leftover = (
             "void helper(longlong *out);\n"

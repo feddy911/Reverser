@@ -1,0 +1,23 @@
+id: ghidra-operator-lt-tmpl
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  struct Rec { std::string id; };
+  bool wrap(std::string *line, std::string *bag)
+  {
+    return std::operator<_<char, std::char_traits<char>, std::allocator<char>_>
+      (line, bag);
+  }
+  bool keep(Rec *a, Rec *b)
+  {
+    return std::operator<_<char,std::char_traits<char>,std::allocator<char>>(a->id, b->id);
+  }
+contains:
+  - "((*(line)) < (*(bag)))"
+  - "((a->id) < (b->id))"
+not_contains:
+  - "operator<_<"
+  - "mpz"
+compile: true
+notes: "Ghidra spells string operator< as operator<_<char,...>_>. Emit infix and deref pointer names. Do not invent a field. Not operator<<."

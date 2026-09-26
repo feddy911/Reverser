@@ -1,0 +1,21 @@
+id: ghidra-ostream-object
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+gcc_fingerprint: "no match for 'operator<<' \\(operand types are 'std::ostream' \\{aka '[^']*'\\} and '"
+gcc_probe:
+  - "no match for 'operator<<' (operand types are 'std::ostream' {aka 'std::basic_ostream<char>'} and 'Rec')"
+  - "no match for 'operator<<' (operand types are 'std::ostream' {aka 'std::basic_ostream<char>'} and 'const Rec')"
+ghidra_cpp: |
+  struct Rec { int n; };
+  void wrap(Rec bag)
+  {
+    std::cout << bag;
+  }
+contains:
+  - "std::cout << bag"
+not_contains:
+  - "bag.n"
+  - "mpz"
+compile: false
+notes: "An object is inserted into ostream and has no inserter. Keep the expression. Do not invent a field or an inserter."

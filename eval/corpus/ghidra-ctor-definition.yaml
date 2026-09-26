@@ -1,0 +1,19 @@
+id: ghidra-ctor-definition
+profile: gcc_pe_x64
+recipe: sanitize
+ghidra_cpp: |
+  void __thiscall Rec::Rec(Rec *this)
+  {
+    std::string *line;
+    std::string::string(line);
+    return;
+  }
+contains:
+  - "Rec::Rec()"
+  - "new (line) std::string()"
+not_contains:
+  - "void Rec"
+  - "voidnew"
+  - "mpz"
+compile: true
+notes: "Ghidra prints a constructor definition as void __thiscall Rec::Rec. That is the function, not a placement-new call. A bare string(pointer) statement is the default constructor. Do not invent a field."

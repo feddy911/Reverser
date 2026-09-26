@@ -1,0 +1,20 @@
+id: ghidra-ptr-as-size-type
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+gcc_fingerprint: "invalid conversion from '[^']*\\*' \\{aka '[^']*'\\} to '[^']*::size_type'"
+gcc_probe:
+  - "invalid conversion from 'std::string*' {aka 'std::__cxx11::basic_string<char>*'} to 'std::__cxx11::basic_string<char>::size_type' {aka 'long long unsigned int'} [-fpermissive]"
+ghidra_cpp: |
+  void wrap(std::string *line)
+  {
+    std::string bag;
+    (void)bag[line];
+  }
+contains:
+  - "bag[line]"
+not_contains:
+  - "(size_type)"
+  - "mpz"
+compile: false
+notes: "A pointer stands where operator[] wants size_type. Keep the index. Do not cast the pointer to an integer. Mix wrap/bag/line."

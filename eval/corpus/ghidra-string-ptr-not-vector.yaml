@@ -1,0 +1,20 @@
+id: ghidra-string-ptr-not-vector
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+gcc_fingerprint: "cannot convert 'std::string\\*' \\{aka '[^']*'\\} to 'std::vector<"
+gcc_probe:
+  - "cannot convert 'std::string*' {aka 'std::__cxx11::basic_string<char>*'} to 'std::vector<int>*'"
+ghidra_cpp: |
+  void take(std::vector<int> *bag);
+  void wrap(std::string *line)
+  {
+    take(line);
+  }
+contains:
+  - "take(line)"
+not_contains:
+  - "(std::vector<int> *)line"
+  - "mpz"
+compile: false
+notes: "A string pointer is passed where a vector pointer is required. Keep the call. Do not bind the two pointer types. Do not invent a cast."

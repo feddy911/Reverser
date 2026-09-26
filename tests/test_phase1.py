@@ -2294,10 +2294,83 @@ int main(int argc, char **argv) { return 0; }
         self.assertNotIn(";new (", got)
         self.assertNotIn("}new (", got)
         self.assertFalse(leftover_glued_placement_new(got))
+        ctor = sanitize_ghidra_cpp(
+            "void __thiscall Rec::Rec(Rec *this)\n"
+            "{\n"
+            "  std::string *line;\n"
+            "  std::string::string(line);\n"
+            "  return;\n"
+            "}\n"
+        )
+        self.assertIn("Rec::Rec()", ctor)
+        self.assertNotIn("Rec *this", ctor)
+        self.assertNotIn("void Rec", ctor)
+        self.assertNotIn("voidnew", ctor)
+        self.assertIn("new (line) std::string()", ctor)
+        self.assertEqual(sanitize_ghidra_cpp(ctor), ctor)
+        smashed_ctor = sanitize_ghidra_cpp(
+            "voidnew (Rec *this) Rec()\n"
+            "{\n"
+            "  std::string *line;\n"
+            "  std::string(line);\n"
+            "  return;\n"
+            "}\n"
+        )
+        self.assertIn("Rec::Rec()", smashed_ctor)
+        self.assertIn("new (line) std::string()", smashed_ctor)
+        self.assertNotIn("voidnew", smashed_ctor)
+        copy = sanitize_ghidra_cpp(
+            "voidnew (Rec *this) Rec(Rec *line)\n{\n  return;\n}\n"
+        )
+        self.assertIn("Rec::Rec(Rec *line)", copy)
+        from src.analysis.ghidra_cpp import extract_named_function
+
+        extracted = sanitize_ghidra_cpp(
+            extract_named_function(
+                "voidnew (Rec *this) Rec()\n"
+                "{\n"
+                "  std::string *line;\n"
+                "  std::string(line);\n"
+                "  return;\n"
+                "}\n",
+                "Rec",
+            )
+        )
+        self.assertIn("Rec::Rec()", extracted)
+        self.assertIn("new (line) std::string()", extracted)
+        emitted = sanitize_ghidra_cpp(
+            "voidnew (Rec *this) Rec()\n"
+            "{\n"
+            "  std::string *line;\n"
+            "  std::string(line);\n"
+            "  return;\n"
+            "}\n"
+        )
+        again = sanitize_ghidra_cpp(extract_named_function(emitted, "Rec"))
+        self.assertIn("Rec::Rec()", again)
         already = sanitize_ghidra_cpp(smashed)
         self.assertNotIn(";new (", already)
         self.assertNotIn("}new (", already)
         self.assertFalse(leftover_glued_placement_new(already))
+
+    def test_dropped_reg_and_string_home_are_declared(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        raw = (
+            "Rec::Rec(Rec *line)\n"
+            "{\n"
+            "  new (in_stk_n40) std::string(*(in_stk_n32));\n"
+            "  *(undefined4 *)(in_RCX + 0x40) = *(undefined4 *)(in_RDX + 0x40);\n"
+            "}\n"
+        )
+        got = sanitize_ghidra_cpp(raw)
+        self.assertIn("longlong in_RCX;", got)
+        self.assertIn("longlong in_RDX;", got)
+        self.assertIn("std::string *in_stk_n40;", got)
+        self.assertIn("std::string *in_stk_n32;", got)
+        self.assertIn("(in_RCX + 0x40)", got)
+        self.assertNotIn("(line + 0x40)", got)
+        self.assertEqual(sanitize_ghidra_cpp(got), got)
 
     def test_glued_ctrl_brace_is_split(self):
         from src.analysis.ghidra_cpp import (
@@ -2584,6 +2657,107 @@ class TestCompileVerify(unittest.TestCase):
         )
         pblob = "\n".join(proto)
         self.assertNotIn("inline ghidra_word make(", pblob)
+
+    def test_sibling_stub_does_not_shadow_struct(self):
+        from src.agents.assembler import type_stubs_for_snippet
+        from src.analysis.compile_verify import compile_snippet, find_cxx_compiler
+        from src.analysis.includes import make_preamble
+
+        body = (
+            "Rec * wrap(char *line) {\n"
+            "  Rec *bag;\n"
+            "  new (bag) Rec();\n"
+            "  (void)line;\n"
+            "  return bag;\n"
+            "}\n"
+        )
+        stubs = type_stubs_for_snippet(
+            body,
+            sibling_names=["Rec", "wrap"],
+            current_name="wrap",
+        )
+        blob = "\n".join(stubs)
+        self.assertIn("struct Rec", blob)
+        self.assertNotIn("inline ghidra_word Rec(", blob)
+        cxx = find_cxx_compiler()
+        if not cxx:
+            self.skipTest("no C++ compiler on PATH")
+        preamble = make_preamble("// per-fn", [], [])
+        with tempfile.TemporaryDirectory() as td:
+            rep = compile_snippet(
+                body,
+                preamble_lines=preamble,
+                work_dir=Path(td),
+                name="0x1",
+                compiler=cxx,
+                sibling_names=["Rec", "wrap"],
+                current_name="wrap",
+            )
+            self.assertTrue(rep.ok, rep.stderr)
+
+    def test_map_key_type_index_uses_map_key(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        raw = (
+            "void wrap(void *xs)\n"
+            "{\n"
+            "  mapped_type *pm;\n"
+            "  key_type *line;\n"
+            "  pm = std::map<std::string, int>::operator[]"
+            "((std::map<std::string, int> *)xs, line);\n"
+            "  *pm = *pm + 1;\n"
+            "}\n"
+        )
+        got = sanitize_ghidra_cpp(raw)
+        self.assertIn("int *pm", got)
+        self.assertIn("*((std::string *)line)", got)
+        self.assertIn("pm = &(", got)
+        self.assertNotIn("mapped_type", got)
+        self.assertNotIn("::operator[]", got)
+        again = sanitize_ghidra_cpp(got)
+        self.assertEqual(again, got)
+        cached = (
+            "void wrap(void *xs)\n"
+            "{\n"
+            "  mapped_type *pm;\n"
+            "  key_type *line;\n"
+            "  pm = (*((std::map<std::string, int> *)xs))[*(line)];\n"
+            "  *pm = *pm + 1;\n"
+            "}\n"
+        )
+        got2 = sanitize_ghidra_cpp(cached)
+        self.assertIn("int *pm", got2)
+        self.assertIn("*((std::string *)line)", got2)
+        self.assertNotIn("mapped_type", got2)
+
+    def test_vector_value_type_push_uses_element(self):
+        from src.analysis.ghidra_cpp import sanitize_ghidra_cpp
+
+        raw = (
+            "struct Rec { int n; };\n"
+            "void wrap(void *xs)\n"
+            "{\n"
+            "  value_type *line;\n"
+            "  std::vector<Rec>::push_back((std::vector<Rec> *)xs, line);\n"
+            "}\n"
+        )
+        got = sanitize_ghidra_cpp(raw)
+        self.assertIn("->push_back(*((Rec *)line))", got)
+        self.assertNotIn("->push_back(*(line))", got)
+        self.assertEqual(sanitize_ghidra_cpp(got), got)
+        cached = (
+            "struct Rec { int n; };\n"
+            "void wrap(void *xs)\n"
+            "{\n"
+            "  value_type *line;\n"
+            "  ((std::vector<Rec> *)xs)->push_back(*(line));\n"
+            "}\n"
+        )
+        got2 = sanitize_ghidra_cpp(cached)
+        self.assertIn("->push_back(*((Rec *)line))", got2)
+        plain = sanitize_ghidra_cpp("std::vector<int>::push_back(xs, item);\n")
+        self.assertIn("->push_back(*(item))", plain)
+        self.assertNotIn("(int *)item", plain)
 
     def test_typedefs_for_source_emits_only_named_aliases(self):
         from src.domains.pack import typedefs_for_source

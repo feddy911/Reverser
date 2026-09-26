@@ -1,0 +1,18 @@
+id: ghidra-templated-eq-ptr
+profile: gcc_pe_x64
+recipe: sanitize
+guessed_name: wrap
+ghidra_cpp: |
+  bool wrap(std::string *line, std::string *bag)
+  {
+    return std::operator==<char, std::char_traits<char>, std::allocator<char> >(line, bag);
+  }
+contains:
+  - "std::operator=="
+  - "*(line)"
+  - "*(bag)"
+not_contains:
+  - "(line) == (bag)"
+  - "mpz"
+compile: true
+notes: "Templated std::operator== stays a call. Pointer arguments are passed as objects. Do not rewrite it into infix. Do not invent a cast."

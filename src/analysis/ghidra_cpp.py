@@ -289,6 +289,10 @@ def _type_start(s: str, colon_pos: int) -> int:
             while j > 0 and (s[j - 1].isalnum() or s[j - 1] == "_"):
                 j -= 1
             if j == i:
+                i = _skip_ws_back(s, i)
+                if i >= 2 and s[i - 2:i] == "::":
+                    i -= 2
+                    continue
                 return i
             i = j
         i = _skip_ws_back(s, i)
@@ -322,7 +326,7 @@ def _split_top_args(inner: str) -> list[str]:
             depth_p -= 1
         elif c == "<":
             depth_a += 1
-        elif c == ">":
+        elif c == ">" and not (i > 0 and inner[i - 1] == "-"):
             depth_a -= 1
         elif c == "," and depth_p == 0 and depth_a == 0:
             args.append(inner[start:i].strip())
@@ -646,7 +650,9 @@ def _rewrite_one_call(
         "",
         rest,
     )
-    if dtor or meth == last:
+    if dtor or meth == last or (
+        meth == "basic_string" and last in {"basic_string", "string"}
+    ):
         if dtor:
             return f"({recv})->~{last}()"
         if last in {"basic_string", "string"}:
@@ -687,6 +693,144 @@ def _rewrite_one_call(
             return f"({recv})->{meth}({rest})"
         return f"({recv})->{meth}()"
     return None
+
+
+def _close_iter_ctor_template(code: str) -> str:
+    """The model drops the `>` of basic_string<__normal_iterator>(...).
+
+    Put the bracket back so the call is a constructor, not a template
+    argument that swallows the argument list. Do not invent begin/end.
+    """
+    return re.sub(
+        r"\bbasic_string\s*<\s*__normal_iterator\s*\(",
+        "basic_string<__normal_iterator>(",
+        code or "",
+    )
+
+
+def _lt_arg(code: str, raw: str) -> str:
+    name = (raw or "").strip()
+    if re.fullmatch(r"[A-Za-z_]\w*", name) and re.search(
+        rf"\*\s*{re.escape(name)}\b", code
+    ):
+        return f"*({name})"
+    return name
+
+
+def _rewrite_ghidra_string_lt(code: str) -> str:
+    """Ghidra prints string less-than as ``std::operator<_<char,...>_>``.
+
+    That is not a C++ template-id. Emit infix. Deref a pointer name. Do not
+    invent a field. Do not turn ``operator<<`` into this.
+    """
+    s = code or ""
+    needle = "std::operator<_<"
+    if needle not in s:
+        return s
+    n = len(s)
+    out: list[str] = []
+    copied = 0
+    i = 0
+    while True:
+        k = s.find(needle, i)
+        if k < 0:
+            break
+        lt = k + len("std::operator<")
+        if lt >= n or s[lt:lt + 2] != "_<":
+            i = k + 2
+            continue
+        open_a = lt + 1
+        close_a = _match_forward(s, open_a, "<", ">")
+        if close_a < 0:
+            i = k + 2
+            continue
+        paren = close_a + 1
+        while paren < n and s[paren] in " \t\n\r":
+            paren += 1
+        if paren >= n or s[paren] != "(":
+            i = k + 2
+            continue
+        close_p = _match_forward(s, paren, "(", ")")
+        if close_p < 0:
+            i = k + 2
+            continue
+        args = _split_top_args(s[paren + 1:close_p])
+        if len(args) != 2:
+            i = k + 2
+            continue
+        lhs = _lt_arg(s, args[0])
+        rhs = _lt_arg(s, args[1])
+        out.append(s[copied:k])
+        out.append(f"(({lhs}) < ({rhs}))")
+        copied = close_p + 1
+        i = copied
+    out.append(s[copied:])
+    return "".join(out)
+
+
+def _deref_templated_std_eq(code: str) -> str:
+    """Keep templated std::operator== / != as a call.
+
+    Ghidra passes pointer names. The function wants the objects. Deref only
+    names that are already declared with a star. Do not rewrite the call
+    into infix. Do not invent a cast.
+    """
+    s = code or ""
+    if "std::operator" not in s:
+        return s
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        hit = -1
+        for key in ("std::operator==<", "std::operator!=<"):
+            j = s.find(key, i)
+            if j >= 0 and (hit < 0 or j < hit):
+                hit = j
+        if hit < 0:
+            out.append(s[i:])
+            break
+        out.append(s[i:hit])
+        gt = _match_forward(s, hit + s[hit:].find("<"), "<", ">")
+        if gt < 0:
+            out.append(s[hit])
+            i = hit + 1
+            continue
+        paren = gt + 1
+        while paren < n and s[paren] in " \t\n\r":
+            paren += 1
+        if paren >= n or s[paren] != "(":
+            out.append(s[hit])
+            i = hit + 1
+            continue
+        close_p = _match_forward(s, paren, "(", ")")
+        if close_p < 0:
+            out.append(s[hit])
+            i = hit + 1
+            continue
+        args = _split_top_args(s[paren + 1:close_p])
+        if len(args) != 2:
+            out.append(s[hit:close_p + 1])
+            i = close_p + 1
+            continue
+        new_args = []
+        changed = False
+        for raw in args:
+            name = raw.strip()
+            if (
+                re.fullmatch(r"[A-Za-z_]\w*", name)
+                and re.search(rf"\*\s*{re.escape(name)}\b", s)
+            ):
+                new_args.append(f"*({name})")
+                changed = True
+            else:
+                new_args.append(raw.strip())
+        if not changed:
+            out.append(s[hit:close_p + 1])
+        else:
+            out.append(s[hit:gt + 1] + "(" + ", ".join(new_args) + ")")
+        i = close_p + 1
+    return "".join(out)
 
 
 def rewrite_ghidra_member_calls(code: str) -> str:
@@ -743,6 +887,16 @@ def rewrite_ghidra_member_calls(code: str) -> str:
             i += 1
             continue
         typ = s[t0:i].strip()
+        after = close_p + 1
+        while after < n and s[after] in " \t\n\r":
+            after += 1
+        # A constructor definition is `Type::Type(...) {`, not a call.
+        # Placement new would glue `void` onto `new` and erase the function.
+        if after < n and s[after] == "{" and (
+            dtor or meth == _last_type_ident(typ)
+        ):
+            i += 1
+            continue
         rewritten = _rewrite_one_call(
             typ,
             meth,
@@ -816,6 +970,167 @@ def _rewrite_const_ref_arrow(code: str) -> str:
             rf"{ident} = (ghidra_ref *)&(\1);",
             t,
         )
+    return t
+
+
+_PLACEHOLDER_TARGS = frozenset({
+    "key_type", "mapped_type", "value_type", "value_type_conflict",
+    "ghidra_word", "const_reference", "reference",
+})
+
+
+def _map_key_mapped(expr: str) -> tuple[str, str] | None:
+    """First map<K, M> in an expression. K and M are the dump's own arguments."""
+    s = expr or ""
+    i = 0
+    while True:
+        k = s.find("map<", i)
+        if k < 0:
+            return None
+        if k > 0 and (s[k - 1].isalnum() or s[k - 1] == "_"):
+            i = k + 4
+            continue
+        open_a = k + 3
+        close = _match_forward(s, open_a, "<", ">")
+        if close < 0:
+            return None
+        args = [a.strip() for a in _split_top_args(s[open_a + 1 : close])]
+        if len(args) < 2:
+            i = close + 1
+            continue
+        key, mapped = args[0], args[1]
+        if (
+            not key
+            or not mapped
+            or _norm_targ(key) in _PLACEHOLDER_TARGS
+            or _norm_targ(mapped) in _PLACEHOLDER_TARGS
+        ):
+            return None
+        return key, mapped
+
+
+def _trailing_subscript(expr: str) -> tuple[str, str] | None:
+    s = (expr or "").strip()
+    if not s.endswith("]"):
+        return None
+    depth = 0
+    for i in range(len(s) - 1, -1, -1):
+        c = s[i]
+        if c == "]":
+            depth += 1
+        elif c == "[":
+            depth -= 1
+            if depth == 0:
+                return s[:i], s[i + 1 : -1].strip()
+    return None
+
+
+def _stmt_assign(code: str, name: str) -> tuple[int, int, str] | None:
+    """Span of `name = rhs` up to, not including, the semicolon."""
+    pat = re.compile(rf"\b{re.escape(name)}\s*=\s*")
+    for m in pat.finditer(code or ""):
+        start = m.end()
+        depth_p = depth_a = depth_b = 0
+        i = start
+        while i < len(code):
+            c = code[i]
+            if c == "(":
+                depth_p += 1
+            elif c == ")":
+                depth_p -= 1
+            elif c == "[":
+                depth_b += 1
+            elif c == "]":
+                depth_b -= 1
+            elif c == "<":
+                depth_a += 1
+            elif c == ">" and not (i > 0 and code[i - 1] == "-"):
+                depth_a -= 1
+            elif c == ";" and depth_p == depth_a == depth_b == 0:
+                return m.start(), i, code[start:i].strip()
+            i += 1
+    return None
+
+
+def _rewrite_mapped_type_subscript(code: str) -> str:
+    """Ghidra stores map::operator[] in a mapped_type * and indexes with key_type *.
+
+    Those names are the map's own key and mapped types, already printed on
+    the map. operator[] returns a reference, so the pointer is the address
+    of that element. Do not invent a field. Do not bind a string* to a vector*.
+    """
+    t = code or ""
+    names = re.findall(r"\bmapped_type\s*\*\s*([A-Za-z_]\w*)\s*;", t)
+    for name in reversed(names):
+        found = _stmt_assign(t, name)
+        if not found:
+            continue
+        a0, a1, rhs = found
+        parts = _trailing_subscript(rhs)
+        types = _map_key_mapped(rhs)
+        if not parts or not types:
+            continue
+        base, idx = parts
+        key, mapped = types
+        m_idx = re.fullmatch(r"\*\(\s*([A-Za-z_]\w*)\s*\)", idx)
+        if m_idx:
+            ident = m_idx.group(1)
+            decl = _decl_type_of(t, ident).replace(" ", "")
+            if decl in {"key_type*", "key_type"}:
+                idx = f"*(({key} *){ident})"
+        rhs_new = f"({base})[{idx}]"
+        if not rhs.strip().startswith("&"):
+            rhs_new = f"&({rhs_new})"
+        t = t[:a0] + f"{name} = {rhs_new}" + t[a1:]
+        t = re.sub(
+            rf"\bmapped_type\s*\*\s*{re.escape(name)}\s*;",
+            f"{mapped} *{name};",
+            t,
+            count=1,
+        )
+    return t
+
+
+def _vector_elem_before(code: str, pos: int) -> str | None:
+    """Element type of the vector written just before a push_back call."""
+    window_at = max(0, pos - 500)
+    window = code[window_at:pos]
+    k = window.rfind("vector<")
+    if k < 0:
+        return None
+    if k > 0 and (window[k - 1].isalnum() or window[k - 1] == "_"):
+        return None
+    open_a = window_at + k + 6
+    close = _match_forward(code, open_a, "<", ">")
+    if close < 0 or close > pos:
+        return None
+    args = [a.strip() for a in _split_top_args(code[open_a + 1 : close])]
+    if not args:
+        return None
+    elem = args[0]
+    if not elem or _norm_targ(elem) in _PLACEHOLDER_TARGS:
+        return None
+    return elem
+
+
+def _rewrite_value_type_push(code: str) -> str:
+    """vector::push_back of a value_type * is the vector's element, not ghidra_word.
+
+    The element type is already printed on that vector. Do not invent a field.
+    """
+    t = code or ""
+    pat = re.compile(r"->push_back\(\*\(\s*([A-Za-z_]\w*)\s*\)\)")
+    matches = list(pat.finditer(t))
+    for m in reversed(matches):
+        ident = m.group(1)
+        decl = _decl_type_of(t, ident).replace(" ", "")
+        if decl not in {"value_type*", "value_type"}:
+            continue
+        elem = _vector_elem_before(t, m.start())
+        if not elem:
+            continue
+        repl = f"->push_back(*(({elem} *){ident}))"
+        t = t[: m.start()] + repl + t[m.end() :]
     return t
 
 
@@ -896,6 +1211,27 @@ def _rewrite_nrvo_iter_as_string(code: str) -> str:
     return _RE_NRVO_STR_FROM_ITER.sub(repl, t)
 
 
+def _voidnew_ctor_start(code: str, name_at: int) -> int:
+    """Include a glued `voidnew (T *this)` that sits immediately before the name."""
+    head = code[:name_at]
+    k = head.rfind("voidnew")
+    if k < 0:
+        return name_at
+    if k > 0 and (code[k - 1].isalnum() or code[k - 1] == "_"):
+        return name_at
+    j = k + len("voidnew")
+    while j < name_at and code[j] in " \t":
+        j += 1
+    if j >= name_at or code[j] != "(":
+        return name_at
+    close = _match_forward(code, j, "(", ")")
+    if close < 0 or close >= name_at:
+        return name_at
+    if code[close + 1 : name_at].strip():
+        return name_at
+    return k
+
+
 def extract_named_function(code: str, name: str) -> str:
     """Keep the function named `name`, or the first definition renamed to `name`."""
     if not name or not code:
@@ -903,6 +1239,7 @@ def extract_named_function(code: str, name: str) -> str:
     named = named_function_span(code, name)
     if named:
         start, _close, end = named
+        start = _voidnew_ctor_start(code, start)
         return code[start:end + 1]
     span = _first_function_span(code)
     if not span:
@@ -3019,6 +3356,73 @@ def _rewrite_one_msx64_stack_homes(
     return blob[:brace] + new_body + blob[end + 1 :]
 
 
+_IN_REG_LONGLONG = ("in_RCX", "in_RDX", "in_R8", "in_R9")
+
+
+def _string_home_pointee(body: str, name: str) -> str | None:
+    """Stack home used as the string the call already constructs.
+
+    Placement `new (home) std::string` or `std::string(*(home))`. Do not
+    invent a field. Do not bind the home to a formal.
+    """
+    n = re.escape(name)
+    if re.search(rf"\bnew\s*\(\s*{n}\s*\)\s*(?:std::)?string\b", body or ""):
+        return "std::string"
+    if re.search(rf"(?:std::)?string\s*\(\s*\*\(\s*{n}\s*\)", body or ""):
+        return "std::string"
+    return None
+
+
+def _declare_homes_in_fn(
+    blob: str, ident: str, t0: int, close: int, end: int
+) -> str:
+    mname = re.search(rf"\b{re.escape(ident)}\s*\(", blob[t0 : close + 1])
+    if not mname:
+        return blob
+    open_p = t0 + mname.end() - 1
+    formals = {pname for _pty, pname in _parse_param_decls(blob[open_p + 1 : close])}
+    brace = _brace_after_params(blob, close)
+    if brace < 0:
+        return blob
+    body = blob[brace : end + 1]
+    lines: list[str] = []
+    for reg in _IN_REG_LONGLONG:
+        if reg in formals or not re.search(rf"\b{reg}\b", body):
+            continue
+        if _in_reg_decl_type(body, reg):
+            continue
+        lines.append(f"  longlong {reg};")
+    seen: set[str] = set()
+    for m in _RE_STACK_HOME_IDENT.finditer(body):
+        name = m.group(1)
+        if name in seen or name in formals:
+            continue
+        seen.add(name)
+        if _in_reg_decl_type(body, name):
+            continue
+        pointee = _string_home_pointee(body, name)
+        if not pointee:
+            continue
+        lines.append(f"  {pointee} *{name};")
+    if not lines:
+        return blob
+    return blob[: brace + 1] + "\n" + "\n".join(lines) + blob[brace + 1 :]
+
+
+def _declare_missing_ghidra_homes(code: str) -> str:
+    """The model dropped locals the call still uses.
+
+    ``in_RCX`` / ``in_RDX`` stay ``longlong``, as the dump prints them.
+    A stack home that builds a string is a pointer to that string. Do not
+    bind either to a formal. Do not invent a field.
+    """
+    blob = code or ""
+    spans = list(_iter_function_defs(blob, skip_qualified=False))
+    for ident, t0, close, end in reversed(spans):
+        blob = _declare_homes_in_fn(blob, ident, t0, close, end)
+    return blob
+
+
 def _rewrite_msx64_stack_homes(code: str) -> str:
     """Bind Ghidra in_stack homes to formals when the dump declared them."""
     blob = code or ""
@@ -4519,6 +4923,146 @@ def leftover_glued_placement_new(code: str) -> list[str]:
     return ["new"] if _RE_GLUED_PLACEMENT_NEW.search(code or "") else []
 
 
+def _repair_voidnew_ctor(code: str) -> str:
+    """`voidnew (Rec *this) Rec()` is a constructor definition, not placement new.
+
+    The call rewrite glued the Ghidra `void` return onto `new`. Put the
+    definition back. Do not invent a field.
+    """
+    s = code or ""
+    needle = "voidnew"
+    out: list[str] = []
+    i = 0
+    while True:
+        k = s.find(needle, i)
+        if k < 0:
+            break
+        if k > 0 and (s[k - 1].isalnum() or s[k - 1] == "_"):
+            i = k + len(needle)
+            continue
+        j = k + len(needle)
+        while j < len(s) and s[j] in " \t":
+            j += 1
+        if j >= len(s) or s[j] != "(":
+            i = k + len(needle)
+            continue
+        close1 = _match_forward(s, j, "(", ")")
+        if close1 < 0:
+            i = k + len(needle)
+            continue
+        recv = s[j + 1 : close1].strip()
+        p = close1 + 1
+        while p < len(s) and s[p] in " \t\n\r":
+            p += 1
+        m = re.match(r"([A-Za-z_]\w*)\s*\(", s[p:])
+        if not m:
+            i = k + len(needle)
+            continue
+        cls = m.group(1)
+        if not re.search(rf"\b{re.escape(cls)}\b", recv):
+            i = k + len(needle)
+            continue
+        open2 = p + m.end() - 1
+        close2 = _match_forward(s, open2, "(", ")")
+        if close2 < 0:
+            i = k + len(needle)
+            continue
+        extra = s[open2 + 1 : close2].strip()
+        params = recv if not extra else f"{recv}, {extra}"
+        dropped = _without_explicit_this(cls, params)
+        if dropped is not None:
+            params = dropped
+        out.append(s[i:k])
+        out.append(f"{cls}::{cls}({params})")
+        i = close2 + 1
+    out.append(s[i:])
+    return "".join(out)
+
+
+def _without_explicit_this(cls: str, params: str) -> str | None:
+    """Drop Ghidra's explicit `Rec *this` from a constructor parameter list.
+
+    The implicit C++ this is that pointer. Returns None when the first
+    parameter is not that pointer.
+    """
+    parts = [p.strip() for p in _split_top_args(params) if p.strip()]
+    if not parts:
+        return None
+    if not re.fullmatch(
+        rf"(?:const\s+)?{re.escape(cls)}\s*\*\s*this",
+        parts[0],
+    ):
+        return None
+    return ", ".join(parts[1:])
+
+
+def _drop_explicit_this_param(code: str) -> str:
+    s = code or ""
+    pat = re.compile(r"\b([A-Za-z_]\w*)::\1\s*\(")
+    out: list[str] = []
+    last = 0
+    for m in pat.finditer(s):
+        open_p = m.end() - 1
+        close = _match_forward(s, open_p, "(", ")")
+        if close < 0:
+            continue
+        nxt = close + 1
+        while nxt < len(s) and s[nxt] in " \t\n\r":
+            nxt += 1
+        if nxt >= len(s) or s[nxt] != "{":
+            continue
+        dropped = _without_explicit_this(m.group(1), s[open_p + 1 : close])
+        if dropped is None:
+            continue
+        out.append(s[last : open_p + 1])
+        out.append(dropped)
+        last = close
+    out.append(s[last:])
+    return "".join(out)
+
+
+def _strip_ctor_void(code: str) -> str:
+    """Ghidra prints a constructor as `void __thiscall Rec::Rec(...)`.
+
+    A constructor has no return type. Leave every other `void` function.
+    """
+    t = code or ""
+    t = re.sub(
+        r"\bvoid\s+(?:__thiscall\s+)?([A-Za-z_]\w*)::(~?)\1\b",
+        r"\1::\2\1",
+        t,
+    )
+    return re.sub(
+        r"\b__thiscall\s+([A-Za-z_]\w*)::(~?)\1\b",
+        r"\1::\2\1",
+        t,
+    )
+
+
+def _rewrite_bare_string_ctor_stmt(code: str) -> str:
+    """`std::string(bag);` after `std::string *bag` is the Ghidra this-call.
+
+    gcc reads the statement as a second declaration of `bag`. It is placement
+    new of the default constructor. Do not invent begin/end.
+    """
+    t = code or ""
+
+    def repl(m: re.Match[str]) -> str:
+        name = m.group(1)
+        decl = _decl_type_of(t, name).replace(" ", "")
+        if "*" not in decl:
+            return m.group(0)
+        if "string" not in decl and "basic_string" not in decl:
+            return m.group(0)
+        return f"new ({name}) std::string();"
+
+    return re.sub(
+        r"\b(?:std::)?string\s*\(\s*([A-Za-z_]\w*)\s*\)\s*;",
+        repl,
+        t,
+    )
+
+
 def _split_glued_placement_new(code: str) -> str:
     blob = code or ""
 
@@ -4816,13 +5360,21 @@ def sanitize_ghidra_cpp(
     t = _outside_strings(t, _types)
     t = _USING_STD.sub("", t)
     t = _strip_invalid_using(t)
+    t = _close_iter_ctor_template(t)
     t = rewrite_ghidra_member_calls(t)
+    t = _rewrite_ghidra_string_lt(t)
+    t = _deref_templated_std_eq(t)
     t = _split_glued_placement_new(t)
+    t = _repair_voidnew_ctor(t)
+    t = _strip_ctor_void(t)
+    t = _drop_explicit_this_param(t)
+    t = _rewrite_bare_string_ctor_stmt(t)
     t = _split_glued_ctrl_brace(t)
     t = _outside_strings(t, _strip_empty_allocator_dtors)
     t = _rewrite_msx64_incoming(t)
     t = _rewrite_msx64_concat_stack_ptr(t)
     t = _rewrite_msx64_stack_homes(t)
+    t = _declare_missing_ghidra_homes(t)
     t = _rewrite_msx64_extraout(t)
     t = _rewrite_const_iter_begin_assign(t)
     t = _rewrite_string_ref_deref(t)
@@ -4848,6 +5400,8 @@ def sanitize_ghidra_cpp(
     t = _outside_strings(t, _rewrite_bool_xor)
     t = _rewrite_ghidra_this_local(t)
     t = _outside_strings(t, _elide_default_allocator_args)
+    t = _rewrite_mapped_type_subscript(t)
+    t = _rewrite_value_type_push(t)
     t = _rewrite_local_array_elem_inits(t)
     t = _rewrite_local_array_loop_index(t)
     t = _rewrite_local_array_imm_stores(t, func_bytes or b"")

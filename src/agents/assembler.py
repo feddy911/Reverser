@@ -210,8 +210,35 @@ def _infer_structs(text: str, already: Set[str]) -> Dict[str, Set[str]]:
     return fields
 
 
-def _format_inferred_struct(name: str, fields: Set[str]) -> str:
+def _ctor_param_lists(text: str) -> Dict[str, List[str]]:
+    """Out-of-line `Rec::Rec(params) {` needs a matching declaration."""
+    found: Dict[str, List[str]] = {}
+    s = text or ""
+    for m in re.finditer(r"\b([A-Za-z_]\w*)::\1\s*\(", s):
+        open_p = m.end() - 1
+        close = _match_forward(s, open_p, "(", ")")
+        if close < 0:
+            continue
+        nxt = close + 1
+        while nxt < len(s) and s[nxt] in " \t\n\r":
+            nxt += 1
+        if nxt >= len(s) or s[nxt] != "{":
+            continue
+        params = s[open_p + 1 : close].strip()
+        bucket = found.setdefault(m.group(1), [])
+        if params not in bucket:
+            bucket.append(params)
+    return found
+
+
+def _format_inferred_struct(
+    name: str,
+    fields: Set[str],
+    ctors: Optional[Sequence[str]] = None,
+) -> str:
     lines = [f"struct {name} {{"]
+    for params in ctors or []:
+        lines.append(f"  {name}({params});")
     if fields:
         for f in sorted(fields):
             lines.append(f"  ghidra_word {f};")
@@ -335,6 +362,8 @@ def _is_ctor_shaped_free_fn(name: str, code: str) -> bool:
     """
     if not name or name == "main":
         return False
+    if re.search(rf"\b{re.escape(name)}::{re.escape(name)}\s*\(", code or ""):
+        return True
     proto = _prototype(name, code)
     if not proto:
         return False
@@ -477,20 +506,30 @@ def type_stubs_for_snippet(
     already = _preamble_type_names(preamble or "")
     already |= set(_RE_STRUCT_NAME.findall(blob))
     inferred = _infer_structs(blob, already)
+    ctors = _ctor_param_lists(blob)
+    for name in ctors:
+        if name not in already:
+            inferred.setdefault(name, set())
     lines: List[str] = []
     names = [n for n in sorted(inferred) if n not in already]
     if names:
         lines.append("// ---- inferred types (per-fn) ----")
         for name in names:
-            lines.append(_format_inferred_struct(name, inferred[name]))
+            lines.append(
+                _format_inferred_struct(name, inferred[name], ctors.get(name))
+            )
             lines.append("")
     lines.extend(_ghidra_stubs(blob))
-    lines.extend(_sibling_call_stubs(blob, sibling_names or [], current_name))
+    struct_names = already | set(inferred)
+    lines.extend(
+        _sibling_call_stubs(
+            blob, sibling_names or [], current_name, struct_names
+        )
+    )
     defined = {((current_name or "").strip())} | {
         (n or "").strip() for n in (sibling_names or [])
     }
     defined.discard("")
-    struct_names = already | set(inferred)
     lines.extend(_undeclared_callee_stubs(blob, defined, struct_names))
     glue = missing_typedefs(preamble or "", blob + "\n" + "\n".join(lines))
     if glue:
@@ -502,17 +541,23 @@ def _sibling_call_stubs(
     code: str,
     sibling_names: Sequence[str],
     current_name: str = "",
+    struct_names: Optional[Set[str]] = None,
 ) -> List[str]:
-    """Prototypes for other user functions this snippet calls (per-fn only)."""
+    """Prototypes for other user functions this snippet calls (per-fn only).
+
+    A constructor is a sibling whose name is the struct. A function stub
+    with that name hides the type, so `Rec *` no longer names a type.
+    """
     from src.analysis.platform import is_runtime_noise
 
     blob = code or ""
     cur = (current_name or "").strip()
+    types = struct_names or set()
     lines: List[str] = []
     seen: Set[str] = set()
     for raw in sibling_names:
         name = (raw or "").strip()
-        if not name or name == cur or name in seen:
+        if not name or name == cur or name in seen or name in types:
             continue
         if is_runtime_noise(name) or name.startswith(("FUN_", "thunk_", "_")):
             continue
